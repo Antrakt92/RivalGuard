@@ -27,6 +27,24 @@ local function font(parent, size, color, align)
     return text
 end
 
+local function paintText(widget, value)
+    if widget.paintedText == value then return end
+    widget:SetText(value)
+    widget.paintedText = value
+end
+
+local function paintShown(widget, shown)
+    if widget.paintedShown == shown then return end
+    widget:SetShown(shown)
+    widget.paintedShown = shown
+end
+
+local function paintEnabled(widget, enabled)
+    if widget.paintedEnabled == enabled then return end
+    widget:SetEnabled(enabled)
+    widget.paintedEnabled = enabled
+end
+
 local function fill(frame, color)
     local texture = frame:CreateTexture(nil, "BACKGROUND")
     texture:SetAllPoints()
@@ -78,6 +96,54 @@ local function classColor(token)
     local color = (RAID_CLASS_COLORS or {})[token]
     if color then return color.r, color.g, color.b end
     return unpack(C.text)
+end
+
+local function paintNearbyRow(row, data, index, profile)
+    row.contact = data and data.contact or nil
+    if not data then paintShown(row, false); return end
+
+    local display = profile.display
+    local textSize = display.textSize
+    local face = STANDARD_TEXT_FONT or "Fonts\\ARIALN.TTF"
+    if row.paintedSize ~= textSize then
+        local height = textSize + UI.layout.rowPadding
+        row:ClearAllPoints(); row:SetPoint("TOPLEFT", 8, -UI.layout.header - (index - 1) * height)
+        row:SetHeight(height)
+        row.detailText:ClearAllPoints(); row.detailText:SetPoint("TOPLEFT", 36, -textSize - 5)
+    end
+    if row.paintedSize ~= textSize or row.paintedFace ~= face then
+        row.nameText:SetFont(face, textSize, "")
+        row.detailText:SetFont(face, math.max(10, textSize - 2), "")
+        row.nameText.paintedText, row.detailText.paintedText = nil, nil
+        row.paintedSize, row.paintedFace = textSize, face
+    end
+    paintText(row.nameText, data.name)
+    local red, green, blue
+    if data.class and not display.highContrast then red, green, blue = classColor(data.class)
+    else red, green, blue = unpack(C.text) end
+    if red ~= row.nameRed or green ~= row.nameGreen or blue ~= row.nameBlue then
+        row.nameText:SetTextColor(red, green, blue)
+        row.nameRed, row.nameGreen, row.nameBlue = red, green, blue
+    end
+    local level = M.Number(data.contact.level)
+    local detail = level and (RG.Locale.Format("levelShort", profile.locale, level) .. " · " .. data.detail) or data.detail
+    paintText(row.detailText, detail)
+    if row.detailContrast ~= display.highContrast then
+        row.detailText:SetTextColor(unpack(display.highContrast and C.text or C.muted))
+        row.detailContrast = display.highContrast
+    end
+    local iconClass = data.class or ""
+    if row.iconClass ~= iconClass then
+        row.icon:SetTexture(data.class and ("Interface\\Icons\\ClassIcon_" .. data.class) or "Interface\\Icons\\INV_Misc_QuestionMark")
+        row.iconClass = iconClass
+    end
+    local alpha = data.visible and 1 or display.highContrast and 0.9 or 0.65
+    if row.paintedAlpha ~= alpha then row:SetAlpha(alpha); row.paintedAlpha = alpha end
+    local currentTarget = data.visible and data.contact.currentTarget == true
+    local currentFocus = data.visible and data.contact.currentFocus == true
+    paintText(row.mark, currentTarget and "▼" or currentFocus and "◆" or "!")
+    paintShown(row.mark, data.contact.watched == true or data.contact.listKind == "avoid" or currentTarget or currentFocus)
+    paintShown(row, true)
 end
 
 local function pathGet(profile, path)
@@ -136,7 +202,10 @@ function UI.New(app)
         local screenWidth = M.Number(UIParent:GetWidth(), 1920)
         local screenHeight = M.Number(UIParent:GetHeight(), 1080)
         local scale = math.min(requested or 1, math.max(0.1, (screenWidth - 24) / width), math.max(0.1, (screenHeight - 24) / height))
-        frame:SetScale(scale)
+        if frame.paintedScale ~= scale then
+            frame:SetScale(scale)
+            frame.paintedScale = scale
+        end
     end
 
     function self:RegisterNativeSettings()
@@ -384,7 +453,7 @@ function UI.New(app)
             tooltip(row, row.nameText:GetText(), self:T("rowHint") .. "\n" .. self:T("noTarget"))
         end)
         row:SetScript("OnLeave", hideTooltip)
-        row:Hide()
+        paintShown(row, false)
         self.rows[i] = row
     end
 
@@ -1024,7 +1093,10 @@ function UI.New(app)
             local maxRows = math.floor(RG.Util.Clamp(profile.display.maxRows, 3, 20, 8))
             local rowHeight = profile.display.textSize + UI.layout.rowPadding
             local mainHeight = UI.layout.header + math.max(3, math.min(maxRows, #rows)) * rowHeight + UI.layout.footer
-            main:SetHeight(mainHeight)
+            if self.nearbyHeight ~= mainHeight then
+                main:SetHeight(mainHeight)
+                self.nearbyHeight = mainHeight
+            end
             self:FitWindow(main, UI.layout.width, mainHeight, profile.display.scale)
             self.offset = math.max(0, math.min(self.offset, math.max(0, #rows - maxRows)))
             local visibleCount = 0
@@ -1032,34 +1104,15 @@ function UI.New(app)
             self.visibleCount = preview and app.engine:CountVisible() or visibleCount
             local status = self:T(preview and "demoLabel" or detection) .. " · " .. self:F("inViewCount", visibleCount)
             if not preview and detection ~= "disabled" and alertBlock then status = status .. " · " .. self:T("alertsQuiet") end
-            statusText:SetText(status)
-            self.pauseButton.label:SetText(self:T(paused and "resume" or "pause"))
-            self.muteButton.label:SetText(self:T(profile.alerts.sound and "mute" or "unmute"))
-            empty:SetShown(#rows == 0); emptyHelp:SetShown(#rows == 0)
+            paintText(statusText, status)
+            paintText(self.pauseButton.label, self:T(paused and "resume" or "pause"))
+            paintText(self.muteButton.label, self:T(profile.alerts.sound and "mute" or "unmute"))
+            paintShown(empty, #rows == 0); paintShown(emptyHelp, #rows == 0)
             for i, row in ipairs(self.rows) do
                 local data = i <= maxRows and rows[self.offset + i] or nil
-                row:SetShown(data ~= nil)
-                row.contact = data and data.contact or nil
-                if data then
-                    row:ClearAllPoints(); row:SetPoint("TOPLEFT", 8, -UI.layout.header - (i - 1) * rowHeight)
-                    row:SetHeight(rowHeight)
-                    row.nameText:SetFont(STANDARD_TEXT_FONT or "Fonts\\ARIALN.TTF", profile.display.textSize, "")
-                    row.detailText:SetFont(STANDARD_TEXT_FONT or "Fonts\\ARIALN.TTF", math.max(10, profile.display.textSize - 2), "")
-                    row.detailText:ClearAllPoints(); row.detailText:SetPoint("TOPLEFT", 36, -profile.display.textSize - 5)
-                    row.nameText:SetText(data.name)
-                    if data.class and not profile.display.highContrast then row.nameText:SetTextColor(classColor(data.class)) else row.nameText:SetTextColor(unpack(C.text)) end
-                    local level = M.Number(data.contact.level)
-                    row.detailText:SetText(level and (self:F("levelShort", level) .. " · " .. data.detail) or data.detail)
-                    row.detailText:SetTextColor(unpack(profile.display.highContrast and C.text or C.muted))
-                    row.icon:SetTexture(data.class and ("Interface\\Icons\\ClassIcon_" .. data.class) or "Interface\\Icons\\INV_Misc_QuestionMark")
-                    row:SetAlpha(data.visible and 1 or profile.display.highContrast and 0.9 or 0.65)
-                    local currentTarget = data.visible and data.contact.currentTarget == true
-                    local currentFocus = data.visible and data.contact.currentFocus == true
-                    row.mark:SetText(currentTarget and "▼" or currentFocus and "◆" or "!")
-                    row.mark:SetShown(data.contact.watched == true or data.contact.listKind == "avoid" or currentTarget or currentFocus)
-                end
+                paintNearbyRow(row, data, i, profile)
             end
-            more:SetText(#rows > maxRows and self:F("moreContacts", #rows - maxRows) or self:T("noTarget"))
+            paintText(more, #rows > maxRows and self:F("moreContacts", #rows - maxRows) or self:T("noTarget"))
             if #rows == 0 then
                 local titleKey, helpKey = "noEnemies", "noEnemiesHelp"
                 if not profile.enabled and not preview then titleKey, helpKey = "noDisabled", "noDisabledHelp"
@@ -1073,7 +1126,7 @@ function UI.New(app)
             if main:IsShown() then
                 for _, row in ipairs(self.rows) do
                     row.contact = nil
-                    row:Hide()
+                    paintShown(row, false)
                 end
             end
         end
@@ -1446,7 +1499,7 @@ function UI.New(app)
         end
         local name = M.Text(contact.name, self:T(contact.savedOnly and "nameUnavailable" or "unknownPlayer"))
         if profile.display.streamer then name = self:T("unknownPlayer") end
-        detail.title:SetText(name)
+        paintText(detail.title, name)
         local class = M.Text(contact.class, "")
         local lines = { RG.Defaults.classSet[class] and RG.Locale.Class(class, self:Profile().locale) or self:T("unknownClass") }
         local state = contact
@@ -1473,8 +1526,8 @@ function UI.New(app)
         end
         table.sort(sourceNames)
         lines[#lines + 1] = self:T("reason") .. ": " .. (#sourceNames > 0 and table.concat(sourceNames, ", ") or self:T("observed"))
-        detail.info:SetText(table.concat(lines, "\n"))
-        detail.notice:SetText(self:T(contact.preview and "demoWhy" or "noTarget"))
+        paintText(detail.info, table.concat(lines, "\n"))
+        paintText(detail.notice, self:T(contact.preview and "demoWhy" or "noTarget"))
         if profile.display.streamer then
             self.noteDraft = nil; detail.note:ClearFocus(); detail.note:SetText("")
         elseif not refreshOnly or not (detail.note.HasFocus and detail.note:HasFocus()) then
@@ -1482,35 +1535,39 @@ function UI.New(app)
             detail.note:SetText(pending or M.Text(entry and entry.note, "", 512))
         end
         local showNote = not preview and not profile.display.streamer
-        detail.noteTitle:SetShown(showNote)
-        detail.note:SetShown(showNote)
-        if detail.note.SetEnabled then detail.note:SetEnabled(identity ~= nil) end
-        detail.saveNote:SetShown(showNote)
-        detail.saveNote:SetEnabled(identity ~= nil)
-        detail.privateNote:SetShown(not preview and profile.display.streamer)
+        paintShown(detail.noteTitle, showNote)
+        paintShown(detail.note, showNote)
+        if detail.note.SetEnabled then paintEnabled(detail.note, identity ~= nil) end
+        paintShown(detail.saveNote, showNote)
+        paintEnabled(detail.saveNote, identity ~= nil)
+        paintShown(detail.privateNote, not preview and profile.display.streamer == true)
         local canRequestLocate = type(app.HighlightContact) == "function" and not preview
             and not contact.savedOnly and not self.selectedFromJournal
-        detail.locate:SetShown(canRequestLocate)
-        detail.locate:SetEnabled(canRequestLocate)
+        paintShown(detail.locate, canRequestLocate)
+        paintEnabled(detail.locate, canRequestLocate)
         local locateFailed = canRequestLocate and self.locateFailed
-        detail.identityHelp:SetShown(not preview and (identity == nil or locateFailed == true))
+        paintShown(detail.identityHelp, not preview and (identity == nil or locateFailed == true))
         detail.identityHelp:SetText(self:T(locateFailed and "locateUnavailable" or contact.savedOnly and "legacyIdentity" or "identityUnknown"))
         for kind, buttonFrame in pairs(detail.listActions) do
-            buttonFrame:SetShown(not preview)
-            buttonFrame:SetEnabled(identity ~= nil and (not entry or entry.kind ~= kind))
-            buttonFrame.bg:SetColorTexture(unpack(entry and entry.kind == kind and { 0.10, 0.22, 0.28, 1 } or C.panel))
+            local listed = entry ~= nil and entry.kind == kind
+            paintShown(buttonFrame, not preview)
+            paintEnabled(buttonFrame, identity ~= nil and not listed)
+            if buttonFrame.paintedListed ~= listed then
+                buttonFrame.bg:SetColorTexture(unpack(listed and { 0.10, 0.22, 0.28, 1 } or C.panel))
+                buttonFrame.paintedListed = listed
+            end
         end
-        detail.removeMembership:SetShown(not preview)
-        detail.removeMembership:SetEnabled(identity ~= nil and entry ~= nil and entry.kind ~= "note")
-        detail.removeSaved:SetShown(contact.savedOnly == true and identity ~= nil and entry ~= nil)
+        paintShown(detail.removeMembership, not preview)
+        paintEnabled(detail.removeMembership, identity ~= nil and entry ~= nil and entry.kind ~= "note")
+        paintShown(detail.removeSaved, contact.savedOnly == true and identity ~= nil and entry ~= nil)
         local confirming = self.removeEntryIdentity == identity and (self.removeEntryAt or 0) >= self:Now()
         detail.removeSaved.label:SetText(self:T(confirming and "deleteRecordNow" or "deleteRecord"))
         local canSnooze = self:CanSnooze(contact)
         local remaining = math.max(0, M.Number(contact.snoozedUntil, 0) - self:Now())
-        detail.snooze:SetShown(canSnooze)
-        detail.snooze.label:SetText(self:T(remaining > 0 and "resumeContact" or "snoozeContact"))
+        paintShown(detail.snooze, canSnooze)
+        paintText(detail.snooze.label, self:T(remaining > 0 and "resumeContact" or "snoozeContact"))
         self:FitWindow(detail, 470, detail:GetHeight(), 1)
-        detail:Show()
+        if not detail:IsShown() then detail:Show() end
     end
 
     function self:CanSnooze(contact)

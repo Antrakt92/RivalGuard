@@ -203,6 +203,34 @@ H.Test("UI row recycling clears absent contacts and keeps Unicode names", functi
     H.False(ui.rows[1]:IsShown()); H.Nil(ui.rows[1].contact)
 end)
 
+H.Test("Nearby layout cache follows viewport and font changes across hidden rows", function()
+    local state, _, app, ui = setup()
+    local display = app.db:GetProfile().display
+    display.scale = 1.5
+    app.engine:Observe({ token = "nameplate1", guid = "First", name = "First rival", class = "ROGUE", hostile = true, isPlayer = true })
+    ui:Refresh()
+    local row = ui.rows[1]
+    H.Equal(ui.frame:GetScale(), 1.5)
+    H.Equal(row.nameText.font[2], 13)
+
+    display.showList, display.textSize = false, 18
+    app.engine:Clear()
+    ui:Refresh()
+    H.False(row:IsShown())
+    H.Nil(row.contact)
+    state.api.UIParent:SetSize(480, 360)
+    display.showList = true
+    app.engine:Observe({ token = "nameplate1", guid = "Second", name = "Новый противник", class = "HUNTER", hostile = true, isPlayer = true })
+    ui:Refresh()
+    H.True(ui.frame:GetScale() < 1.5)
+    H.True(row:IsShown())
+    H.Equal(row.contact.identity, "guid:Second")
+    H.Equal(row.nameText:GetText(), "Новый противник")
+    H.Equal(row.nameText.font[2], 18)
+    H.Equal(row.detailText.font[2], 16)
+    H.Equal(row:GetHeight(), 18 + 20)
+end)
+
 H.Test("Why describes a new sighting and clears configured outputs on rejection", function()
     local _, RG, app, ui = setup()
     ui.selected = { id = "sample" }

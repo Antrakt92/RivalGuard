@@ -976,6 +976,117 @@ H.Test("stationary nameplate polling reads all opponents without repainting unch
     H.True(ui.badges.active.nameplate1.icon:IsVisible())
 end)
 
+H.Test("stationary Nearby and Details avoid repeat painting while changed contact data still renders", function()
+    local state, _, app = setup()
+    local ui = app.ui
+    for index = 1, 8 do
+        local token = "nameplate" .. index
+        state:Unit(token, { guid = "Player-RenderDiff-" .. index, name = "Fixture Rival " .. index,
+            class = "ROGUE", hostile = true, isPlayer = true })
+        state:Fire("NAME_PLATE_UNIT_ADDED", token)
+    end
+    local function rowFor(index)
+        local identity = "guid:Player-RenderDiff-" .. index
+        for _, row in ipairs(ui.rows) do
+            if row.contact and row.contact.identity == identity then return row end
+        end
+        error("missing Nearby row for " .. index)
+    end
+    state:Advance(1.25)
+    app.sensors:Poll()
+    ui:Refresh()
+    H.Equal(ui.renderedCount, 8)
+    rowFor(1):Click()
+    ui:Refresh()
+    local detail = ui.detailsFrame
+    H.True(detail:IsShown())
+    local lastSeen = rowFor(1).contact.lastSeen
+    local writes = {}
+    local function track(region, methods)
+        for _, method in ipairs(methods) do
+            local invoke = assert(region[method])
+            region[method] = function(self, ...)
+                writes[method] = (writes[method] or 0) + 1
+                return invoke(self, ...)
+            end
+        end
+    end
+    track(ui.frame, { "SetHeight", "SetScale" })
+    track(ui.statusText, { "SetText" })
+    track(detail, { "SetHeight", "SetScale" })
+    for _, region in ipairs({ detail.title, detail.info, detail.notice, detail.snooze.label }) do
+        track(region, { "SetText" })
+    end
+    for index = 1, 8 do
+        local row = ui.rows[index]
+        track(row, { "ClearAllPoints", "SetPoint", "SetHeight", "SetAlpha", "SetShown" })
+        track(row.nameText, { "SetFont", "SetText", "SetTextColor" })
+        track(row.detailText, { "SetFont", "ClearAllPoints", "SetPoint", "SetText", "SetTextColor" })
+        track(row.icon, { "SetTexture" })
+        track(row.mark, { "SetText", "SetShown" })
+    end
+    state.clock.Advance(0.5)
+    app.sensors:Poll()
+    ui:Refresh()
+    H.True(rowFor(1).contact.lastSeen > lastSeen)
+    H.Equal(ui.selected.lastSeen, rowFor(1).contact.lastSeen)
+    local changed, total = {}, 0
+    for method, count in pairs(writes) do
+        changed[#changed + 1] = method .. "=" .. count
+        total = total + count
+    end
+    table.sort(changed)
+
+    state.units.nameplate1 = nil
+    state:Fire("NAME_PLATE_UNIT_REMOVED", "nameplate1")
+    ui:Refresh()
+    local age = rowFor(1).detailText:GetText()
+    state.clock.Advance(3)
+    ui:Refresh()
+    local lastSeenText = ui:F("lastSeen", ui:F("seconds", 3))
+    H.True(age ~= rowFor(1).detailText:GetText())
+    H.True(rowFor(1).detailText:GetText():find(lastSeenText, 1, true) ~= nil)
+    H.True(detail.info:GetText():find(lastSeenText, 1, true) ~= nil)
+
+    rowFor(2):Click()
+    state:Unit("player", { guid = "Player-RenderDiffLocal" })
+    state:Unit("nameplate2target", state.units.player)
+    state:Fire("UNIT_TARGET", "nameplate2")
+    ui:Refresh()
+    H.True(rowFor(2).detailText:GetText():find(ui:T("targeting"), 1, true) ~= nil)
+    H.True(detail.info:GetText():find(ui:T("targeting"), 1, true) ~= nil)
+
+    app.db:GetProfile().display.streamer = true
+    app:OnSettingsChanged()
+    H.Nil(rowFor(2).nameText:GetText():find("Fixture Rival 2", 1, true))
+    H.Equal(detail.title:GetText(), ui:T("unknownPlayer"))
+    H.Equal(detail.snooze.label:GetText(), ui:T("snoozeContact"))
+    detail.snooze:Click()
+    H.Equal(detail.snooze.label:GetText(), ui:T("resumeContact"))
+    detail.snooze:Click()
+    H.Equal(detail.snooze.label:GetText(), ui:T("snoozeContact"))
+    H.True(app:Snooze(rowFor(2).contact, 5))
+    ui:Refresh()
+    H.Equal(detail.snooze.label:GetText(), ui:T("resumeContact"))
+    state.clock.Advance(6)
+    ui:Refresh()
+    H.Equal(detail.snooze.label:GetText(), ui:T("snoozeContact"))
+
+    state.api.UnitDistanceSquared = function(token)
+        if token == "nameplate3" then return 400, true end
+    end
+    state:Fire("UNIT_FLAGS", "nameplate3")
+    ui:Refresh()
+    rowFor(3):Click()
+    H.True(detail.info:GetText():find(ui:T("rangeEvidenceExact"), 1, true) ~= nil)
+    state.clock.Advance(3)
+    ui:Refresh()
+    H.Nil(detail.info:GetText():find(ui:T("rangeEvidenceExact"), 1, true))
+    H.True(rowFor(3).detailText:GetText():find(ui:T("rangeUnknown"), 1, true) ~= nil)
+    H.True(detail.info:GetText():find(ui:T("rangeEvidenceUnknown"), 1, true) ~= nil, detail.info:GetText())
+    H.Equal(total, 0, "Stationary Nearby/Details writes: " .. table.concat(changed, ", "))
+end)
+
 H.Test("nameplate highlight works on an already anchored badge in combat and expires", function()
     local state, app, ui = locatorFixture()
     local badge = assert(ui.badges.active.nameplate1)
