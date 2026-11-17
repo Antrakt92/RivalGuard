@@ -223,6 +223,7 @@ function UI.New(app)
         self.alertProfile, self.alertConfig = profile, config
         if self.activeBanner then self:PaintBanner(self.activeBanner) end
         self:Refresh()
+        if self.explanationFrame and self.explanationFrame:IsShown() then self:ShowExplanation() end
     end
 
     function self:AlertConfig(profile)
@@ -978,12 +979,15 @@ function UI.New(app)
         end
         local now = self:Now()
         local preview = self.previewUntil and self.previewUntil > now
-        if not preview then self.previewContacts, self.previewUntil = nil, nil end
+        if self.previewUntil and not preview then
+            self.previewContacts, self.previewUntil = nil, nil
+            self:ClosePreviewDetails()
+        end
         local nearbyShown = profile.display.showList or preview == true
         local detailsShown = self.detailsFrame and self.detailsFrame:IsShown() and self.selected
-        local snapshot
-        if preview then snapshot = self.previewContacts
-        elseif nearbyShown or detailsShown then snapshot = app.engine:Snapshot() end
+        local liveDetailsShown = detailsShown and not self.selected.preview
+        local liveSnapshot
+        if nearbyShown and not preview or liveDetailsShown then liveSnapshot = app.engine:Snapshot() end
         local untilTime = M.Number(app.engine.pausedUntil)
         local paused = untilTime ~= nil and untilTime > now
         local needsStatus = self.statusAt == nil or now - self.statusAt >= 1
@@ -1001,6 +1005,7 @@ function UI.New(app)
         local supportShown = self.statusPage == "support"
         local alertBlock = (nearbyShown and not preview or supportShown) and self:AlertBlock()
         if nearbyShown then
+            local snapshot = preview and self.previewContacts or liveSnapshot
             local rows = M.Rows(snapshot, profile, now, preview and self.previewAliases or self.aliases)
             self.renderedCount = #rows
             local maxRows = math.floor(RG.Util.Clamp(profile.display.maxRows, 3, 20, 8))
@@ -1011,7 +1016,7 @@ function UI.New(app)
             self.offset = math.max(0, math.min(self.offset, math.max(0, #rows - maxRows)))
             local visibleCount = 0
             for _, row in ipairs(rows) do if row.visible and row.contact.behindCamera ~= true then visibleCount = visibleCount + 1 end end
-            self.visibleCount = preview and 0 or visibleCount
+            self.visibleCount = preview and app.engine:CountVisible() or visibleCount
             local status = self:T(preview and "demoLabel" or detection) .. " · " .. self:F("inViewCount", visibleCount)
             if not preview and detection ~= "disabled" and alertBlock then status = status .. " · " .. self:T("alertsQuiet") end
             statusText:SetText(status)
@@ -1084,15 +1089,15 @@ function UI.New(app)
             self.dataPage = nil
         end
         if self.dialogs then self.dialogs:Refresh() end
-        if detailsShown then
+        if liveDetailsShown then
             local current
-            for _, contact in ipairs(snapshot) do
+            for _, contact in ipairs(liveSnapshot) do
                 if contact.id == self.selected.id or self.selected.identity and contact.identity == self.selected.identity then current = contact break end
             end
             if current and not self.selected.savedOnly then self.selected = current end
             self.selectedOutside = current == nil
-            self:ShowDetails(true)
         end
+        if detailsShown then self:ShowDetails(true) end
     end
 
     function self:OpenSettings(page)
@@ -1229,12 +1234,15 @@ function UI.New(app)
     end
 
     function self:Preview(contacts, decision)
+        self:ClosePreviewDetails()
         self.previewContacts = RG.Util.Copy(contacts or {
             { id = "preview-rogue", name = self:T("demoRogue"), class = "ROGUE", visible = true, lastSeen = self:Now(), rangeMin = 10, rangeMax = 20 },
             { id = "preview-hunter", name = self:T("demoHunter"), class = "HUNTER", visible = true, lastSeen = self:Now(), rangeMin = 20, rangeMax = 40 },
             { id = "preview-mage", name = self:T("demoMage"), class = "MAGE", visible = false, lastSeen = self:Now() - 12 },
         })
-        for _, contact in ipairs(self.previewContacts) do contact.identity, contact.preview = nil, true end
+        for _, contact in ipairs(self.previewContacts) do
+            contact.identity, contact.preview, contact.sources = nil, true, { preview = true }
+        end
         self.previewAliases = {}
         self.previewUntil = self:Now() + 15
         decision = decision or { kind = "stealth", contact = self.previewContacts[1] }
@@ -1242,12 +1250,22 @@ function UI.New(app)
         sample.preview = true
         self:Alert(sample)
         self:Refresh()
+        return self.previewUntil
     end
 
     function self:SetNameplate(unit, frame, contact) self.badges:Set(unit, frame, contact) end
     function self:RemoveNameplate(unit) self.badges:Remove(unit) end
 
+    function self:ClosePreviewDetails()
+        if self.selected and self.selected.preview then
+            self.selected, self.selectedOutside = nil, nil
+            if self.detailsFrame then self.detailsFrame:Hide() end
+            if self.explanationFrame then self.explanationFrame:Hide() end
+        end
+    end
+
     function self:Select(contact)
+        if self.explanationFrame then self.explanationFrame:Hide() end
         self.selected = contact
         self.noteDraft = nil
         self.removeEntryAt, self.removeEntryIdentity = nil, nil
@@ -1269,7 +1287,7 @@ function UI.New(app)
             close:SetPoint("TOPRIGHT", -12, -10)
             detail.info = font(detail, 13, C.text)
             detail.info:SetPoint("TOPLEFT", 18, -57); detail.info:SetWidth(432)
-            detail.notice = label(detail, "noTarget", 11, C.muted)
+            detail.notice = font(detail, 11, C.muted)
             detail.notice:SetPoint("TOPLEFT", 18, -185); detail.notice:SetWidth(432)
             local function selectedList()
                 local contact = self.selected
@@ -1321,7 +1339,10 @@ function UI.New(app)
             detail.note:SetScript("OnEscapePressed", function(box)
                 self.noteDraft = nil; box:ClearFocus(); self:ShowDetails()
             end)
-            detail:SetScript("OnHide", function() self.noteDraft = nil; detail.note:ClearFocus() end)
+            detail:SetScript("OnHide", function()
+                self.noteDraft = nil; detail.note:ClearFocus()
+                if self.explanationFrame then self.explanationFrame:Hide() end
+            end)
             local save = localButton(detail, "saveNote", 160, function()
                 local contact = selectedList()
                 if not contact or self:Profile().display.streamer then return end
@@ -1393,6 +1414,7 @@ function UI.New(app)
         lines[#lines + 1] = rangeDetail and stateText == range and rangeDetail or stateText
         if rangeDetail and stateText ~= range then lines[#lines + 1] = rangeDetail end
         if entry then lines[#lines + 1] = self:F("currentList", self:T(LIST_KIND_KEYS[entry.kind] or "unlisted")) end
+        if contact.preview and contact.watched then lines[#lines + 1] = self:T("demoWatched") end
         if not self.selectedOutside and contact.currentTarget == true then lines[#lines + 1] = self:T("yourTarget") end
         if not self.selectedOutside and contact.currentFocus == true then lines[#lines + 1] = self:T("yourFocus") end
         local sourceNames = {}
@@ -1404,6 +1426,7 @@ function UI.New(app)
         table.sort(sourceNames)
         lines[#lines + 1] = self:T("reason") .. ": " .. (#sourceNames > 0 and table.concat(sourceNames, ", ") or self:T("observed"))
         detail.info:SetText(table.concat(lines, "\n"))
+        detail.notice:SetText(self:T(contact.preview and "demoWhy" or "noTarget"))
         if profile.display.streamer then
             self.noteDraft = nil; detail.note:ClearFocus(); detail.note:SetText("")
         elseif not refreshOnly or not (detail.note.HasFocus and detail.note:HasFocus()) then
@@ -1450,22 +1473,25 @@ function UI.New(app)
             titleText:SetPoint("TOPLEFT", 18, -18); titleText:SetWidth(325)
             local close = localButton(frame, "close", 84, function() frame:Hide() end)
             close:SetPoint("TOPRIGHT", -12, -10)
-            local event = label(frame, "explanationSighting", 13, C.accent)
-            event:SetPoint("TOPLEFT", 18, -57); event:SetWidth(420)
+            frame.event = font(frame, 13, C.accent)
+            frame.event:SetPoint("TOPLEFT", 18, -57); frame.event:SetWidth(420)
             frame.reason = font(frame, 14, C.text)
             frame.reason:SetPoint("TOPLEFT", 18, -89); frame.reason:SetWidth(420)
             frame.rangeEvidence = font(frame, 13, C.muted)
             frame.rangeEvidence:SetPoint("TOPLEFT", 18, -150); frame.rangeEvidence:SetWidth(420)
             frame.outputs = font(frame, 13, C.accent)
             frame.outputs:SetPoint("TOPLEFT", 18, -178); frame.outputs:SetWidth(420)
-            local help = label(frame, "explanationHelp", 12, C.muted)
-            help:SetPoint("BOTTOMLEFT", 18, 24); help:SetWidth(420)
+            frame.help = font(frame, 12, C.muted)
+            frame.help:SetPoint("BOTTOMLEFT", 18, 24); frame.help:SetWidth(420)
             if UISpecialFrames then UISpecialFrames[#UISpecialFrames + 1] = "RivalGuardExplanation" end
         end
         local result = app.Explain and self.selected and app:Explain(self.selected) or nil
         local frame = self.explanationFrame
         result = type(result) == "table" and result or {}
         local locale = self:Profile().locale
+        local preview = result.preview == true or self.selected and self.selected.preview == true
+        frame.event:SetText(self:T(preview and "demoSighting" or "explanationSighting"))
+        frame.help:SetText(self:T(preview and "demoExplanationHelp" or "explanationHelp"))
         frame.reason:SetText(RG.Locale.Reason(result.reason or "unavailable", locale))
         local rangeEvidence = result.reason ~= "range_conflict" and result.reason ~= "not_observed" and M.RangeProvenance(result.rangeEvidence, locale)
         frame.rangeEvidence:SetText(rangeEvidence or "")
@@ -1518,8 +1544,12 @@ function UI.New(app)
     self.ticker = ticker
     ticker:SetScript("OnUpdate", function(_, elapsed)
         self.updateAcc = (self.updateAcc or 0) + elapsed
-        if self.activeBanner or #self.bannerQueue > 0 then self:AdvanceBanner(self:Now()) end
-        if self.updateAcc >= 1 then self.updateAcc = 0; self:Refresh() end
+        local bannersActive = self.activeBanner or #self.bannerQueue > 0
+        local now = (bannersActive or self.previewUntil) and self:Now()
+        if bannersActive then self:AdvanceBanner(now) end
+        if self.updateAcc >= 1 or self.previewUntil and now >= self.previewUntil then
+            self.updateAcc = 0; self:Refresh()
+        end
     end)
     ticker:RegisterEvent("PLAYER_LOGOUT")
     ticker:SetScript("OnEvent", function()

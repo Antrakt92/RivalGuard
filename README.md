@@ -18,7 +18,8 @@ It cannot detect fully hidden players or provide a guaranteed all-direction rada
 Build the development ZIP with the command below and extract its `RivalGuard`
 folder into `Interface/AddOns` for your client. Open `/rg settings` or look for
 RivalGuard under **Options → AddOns**. Try `/rg demo` for a preview that leaves
-your journal and lists untouched.
+your journal and lists untouched. Open **Why?** on a sample row to see how your
+current profile would handle that new sighting in the open world.
 
 - **Nearby:** view current sightings and distinguish them from recently seen
   players. Click a row for evidence, personal notes or a temporary alert pause.

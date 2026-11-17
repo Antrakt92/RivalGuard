@@ -443,6 +443,75 @@ H.Test("demo uses UI-only fixtures and leaves saved history and lists untouched"
     H.Equal(#state.sounds, 0)
 end)
 
+H.Test("demo rows check the current profile with trusted synthetic inputs", function()
+    local state, RG, app = setup()
+    local profile = app.db:GetProfile()
+    profile.alerts.classes = { HUNTER = true }
+    profile.display.classes = { WARRIOR = true }
+    profile.range.enabled, profile.range.yards, profile.range.policy, profile.range.unknown = true, 20, "confirmed", false
+    app:ProfileChanged()
+    app.engine:Pause(60)
+    state.resting = true
+    state:Fire("PLAYER_UPDATE_RESTING")
+    local saved = assert(RG.Codec.Encode(app.db.root))
+    app:Demo()
+    local results, samples = {}, {}
+    for _, row in ipairs(app.ui.rows) do
+        if row:IsShown() and row.contact then
+            row:Click()
+            app.ui:ShowExplanation()
+            local contact = app.ui.selected
+            results[contact.class] = app:Explain(contact)
+            samples[contact.class] = contact
+        end
+    end
+    H.Equal(RG.Util.Count(samples), 3)
+    H.False(results.ROGUE.allowed)
+    H.Equal(results.ROGUE.reason, "class_filtered")
+    H.False(results.HUNTER.allowed)
+    H.Equal(results.HUNTER.reason, "range_unconfirmed")
+    H.True(results.MAGE.allowed)
+    H.Equal(results.MAGE.reason, "watch_list")
+    H.True(results.MAGE.preview)
+    H.True(results.MAGE.sound)
+    local altered = RG.Util.Copy(samples.ROGUE)
+    altered.class, altered.watched = "HUNTER", true
+    H.Equal(app:Explain(altered).reason, "class_filtered")
+    profile.range.yards = 30
+    app:ProfileChanged()
+    H.True(app:Explain(samples.HUNTER).allowed)
+    profile.range.yards = 20
+    app:ProfileChanged()
+    H.Equal(app:Explain(samples.HUNTER).reason, "range_unconfirmed")
+    H.Equal(assert(RG.Codec.Encode(app.db.root)), saved)
+    H.Equal(#app.engine.pending, 0)
+    H.Equal(#app.engine.history, 0)
+    H.Equal(app.engine.counters.alerts, 0)
+    H.Equal(#state.sounds, 0)
+
+    state:Advance(16)
+    H.Equal(app:Explain(samples.MAGE).reason, "not_observed")
+    H.False(app.ui.detailsFrame:IsShown())
+    H.False(app.ui.explanationFrame:IsShown())
+    app:Demo()
+    H.Equal(app:Explain(samples.MAGE).reason, "not_observed")
+end)
+
+H.Test("opening the demo does not replace live details with synthetic contacts", function()
+    local state, _, app = setup()
+    state:Unit("target", { guid = "Player-BeforePreview", name = "Real rival", class = "ROGUE", hostile = true, isPlayer = true })
+    state:Fire("PLAYER_TARGET_CHANGED")
+    local live = app.engine:Snapshot()[1]
+    app.ui:Select(live)
+    H.True(app.ui.detailsFrame.snooze:IsShown())
+    app:Demo()
+    H.Equal(app.ui.selected.id, live.id)
+    H.False(app.ui.selectedOutside)
+    H.True(app.ui.detailsFrame.snooze:IsShown())
+    H.Equal(app.ui.visibleCount, 1)
+    H.Nil(app:Explain(live).preview)
+end)
+
 H.Test("future saved schema survives initialization settings actions and logout", function()
     local raw = { schemaVersion = 999, activeProfile = "Future", important = { keep = "untouched" } }
     local state, _, app = setup(raw)

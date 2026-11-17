@@ -105,6 +105,21 @@ end
 function App:SupportedClasses() return self.client:SupportedClasses() end
 
 function App:Explain(contact)
+    if contact.preview == true then
+        local result = { allowed = false, preview = true }
+        local sample = self.demoContacts and self.demoContacts[contact.id]
+        if not sample or not self.demoUntil or self.engine:Now() >= self.demoUntil then
+            result.reason = "not_observed"
+            return result
+        end
+        local entry = sample.watched and { kind = "watch" } or nil
+        local decision, reason = RG.Rules.Evaluate(self.db:GetProfile(), sample, "sighting", { kind = "world" }, entry)
+        if not decision then result.reason = reason; return result end
+        if not decision.sound and not decision.banner then result.reason = "wave_only"; return result end
+        result.allowed, result.reason = true, decision.reason
+        result.sound, result.banner = decision.sound, decision.banner
+        return result
+    end
     return self.engine:ExplainView(contact.id, "sighting")
 end
 
@@ -190,15 +205,31 @@ end
 function App:Demo()
     local now = self.engine:Now()
     local locale = self.db:GetProfile().locale
-    local function title(key) return RG.Locale.Get(key, locale) end
+    self.demoSerial = (self.demoSerial or 0) + 1
+    local prefix = "demo-" .. self.demoSerial .. "-"
+    local function sample(class, label, low, high)
+        return {
+            id = prefix .. class, name = RG.Locale.Get(label, locale), class = class, level = 60,
+            visible = true, firstSeen = now, lastSeen = now, hostile = true, isPlayer = true,
+            rangeMin = low, rangeMax = high, sources = { preview = true },
+        }
+    end
     local contacts = {
-        { id = "demo1", name = title("demoRogue"), class = "ROGUE", level = 60, visible = true, firstSeen = now, lastSeen = now, hostile = true, isPlayer = true, rangeMin = 8, rangeMax = 20, sources = { preview = true } },
-        { id = "demo2", name = title("demoHunter"), class = "HUNTER", level = 60, visible = true, firstSeen = now, lastSeen = now, hostile = true, isPlayer = true, rangeMin = 20, rangeMax = 30, targeting = true, sources = { preview = true } },
-        { id = "demo3", name = title("demoWatch"), class = "MAGE", level = 60, visible = false, firstSeen = now - 60, lastSeen = now - 12, watched = true, sources = { preview = true } },
+        sample("ROGUE", "demoRogue", 8, 20),
+        sample("HUNTER", "demoHunter", 20, 30),
+        sample("MAGE", "demoMage", 10, 18),
     }
+    contacts[2].targeting, contacts[3].watched = true, true
     local decision = { kind = "sighting", contact = contacts[1], banner = true, sound = false, preview = true, reason = "preview" }
-    if self.ui and self.ui.Preview then self.ui:Preview(contacts, decision)
-    elseif self.ui then self.ui:Alert(decision) end
+    self.demoContacts, self.demoUntil = nil, nil
+    if self.ui and self.ui.Preview then
+        local registry = {}
+        for _, contact in ipairs(contacts) do registry[contact.id] = contact end
+        self.demoContacts = registry
+        self.demoUntil = self.ui:Preview(contacts, decision)
+    elseif self.ui then
+        self.ui:Alert(decision)
+    end
 end
 
 function App:Command(text)

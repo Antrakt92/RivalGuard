@@ -180,7 +180,7 @@ function M.Rows(snapshot, profile, now, aliases)
     for _, contact in ipairs(snapshot or {}) do
         local class = M.Text(contact.class, "")
         local known = RG.Defaults.classSet[class] == true
-        if (known and M.ClassEnabled(display.classes, class)) or (not known and display.showUnknown) then
+        if clean(contact.preview) == true or (known and M.ClassEnabled(display.classes, class)) or (not known and display.showUnknown) then
             local name = M.Text(contact.name, RG.Locale.Get("unknownPlayer", profile.locale))
             if display.streamer then
                 local id = M.Text(contact.id, "anonymous")

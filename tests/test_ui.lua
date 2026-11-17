@@ -238,6 +238,45 @@ H.Test("preview is isolated from live contacts journal and watchlists", function
     H.Equal(#app.engine:Snapshot(), 0)
 end)
 
+H.Test("sample Why stays separate from live details and expires with the preview", function()
+    local state, RG, app, ui = setup()
+    local profile = app.db:GetProfile()
+    profile.display.classes = { MAGE = true }
+    profile.display.showUnknown = false
+    local live = app.engine:Observe({ token = "target", guid = "Player-Live", name = "Live Enemy", class = "MAGE", hostile = true, isPlayer = true, source = "target" })
+    ui:Select(live)
+    function app:Explain(contact)
+        if not contact.preview then return { allowed = true, reason = "event_matched", banner = true } end
+        return profile.alerts.banner and { preview = true, allowed = true, reason = "watch_list", banner = true }
+            or { preview = true, allowed = false, reason = "outputs_disabled" }
+    end
+    ui:ShowExplanation()
+    local sample = { id = "sample", name = "Sample Rogue", class = "ROGUE", visible = true, watched = true, rangeMax = 20 }
+    H.Equal(ui:Preview({ sample }), ui:Now() + 15)
+    H.False(ui.selectedOutside)
+    H.Equal(ui.selected.id, live.id)
+    H.True(ui.explanationFrame:IsShown())
+    H.Equal(ui.rows[1].contact.id, sample.id)
+    H.Nil(sample.preview)
+    ui.rows[1]:Click()
+    H.False(ui.explanationFrame:IsShown())
+    H.True(ui.detailsFrame.info:GetText():find(ui:T("demoWatched"), 1, true) ~= nil)
+    H.Equal(ui.detailsFrame.notice:GetText(), ui:T("demoWhy"))
+    ui:ShowExplanation()
+    H.Equal(ui.explanationFrame.event:GetText(), ui:T("demoSighting"))
+    H.Equal(ui.explanationFrame.outputs:GetText(), ui:T("explanationBannerOnly"))
+    profile.alerts.banner = false
+    ui:SettingsChanged()
+    H.Equal(ui.explanationFrame.reason:GetText(), RG.Locale.Reason("outputs_disabled", profile.locale))
+    H.Equal(ui.explanationFrame.outputs:GetText(), "")
+    state:Advance(16)
+    ui:Refresh()
+    H.False(ui.detailsFrame:IsShown()); H.False(ui.explanationFrame:IsShown())
+    H.Nil(ui.selected)
+    H.Equal(#app.db:GetJournal(), 0)
+    H.Nil(next(app.db:GetList()))
+end)
+
 H.Test("normal alerts honor per-decision banner suppression", function()
     local _, _, _, ui = setup()
     ui:Alert({ kind = "sighting", banner = false, sound = true, contact = { name = "Enemy", class = "ROGUE" } })
