@@ -351,6 +351,11 @@ function UI.New(app)
         if identity then return app.db:GetList()[identity], identity end
     end
 
+    local function journalListEntry(identity)
+        if app.ResolveJournalListEntry then return app:ResolveJournalListEntry(identity) end
+        return app.db:GetList()[identity]
+    end
+
     local function setList(contact, kind, note)
         if app.SetList then return app:SetList(contact, kind, note) end
         local identity = M.EditableIdentity(contact)
@@ -1074,7 +1079,7 @@ function UI.New(app)
             if query ~= "" then
                 matches = function(name, note) return M.Matches(query, name, note) end
             end
-            entries, count, self.journalOffset, hasJournalEntries = app.db:GetJournalPage(self.journalOffset, pageSize, matches)
+            entries, count, self.journalOffset, hasJournalEntries = app.db:GetJournalPage(self.journalOffset, pageSize, matches, journalListEntry)
         end
         self.journalRecent.bg:SetColorTexture(unpack(not personal and { 0.10, 0.22, 0.28, 1 } or C.panel))
         self.journalPersonal.bg:SetColorTexture(unpack(personal and { 0.10, 0.22, 0.28, 1 } or C.panel))
@@ -1101,7 +1106,7 @@ function UI.New(app)
                 if not entry.savedOnly then
                     local recorded = M.Number(entry.lastSeen)
                     entry.lastSeen = epoch and epoch > 0 and recorded and recorded > 0 and now - math.max(0, epoch - recorded) or nil
-                    local record = list[entry.identity]
+                    local record = journalListEntry(entry.identity)
                     if record then entry.note, entry.listKind = record.note, record.kind end
                 end
             end

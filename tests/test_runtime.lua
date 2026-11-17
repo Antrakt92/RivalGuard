@@ -2140,6 +2140,110 @@ H.Test("a collision invalidates a draft for a name alias without hiding explicit
     H.Equal(app.db:GetList()[selected.identity].note, "First GUID only")
 end)
 
+local function recentListAliasFixture(exactEntry)
+    local nameKey, guidKey = "name:Enemy-FixtureRealm", "guid:Player-RecentAlias"
+    local lists = { [nameKey] = { kind = "watch", name = "Enemy-FixtureRealm", note = "Legacy lookout note", class = "ROGUE" } }
+    if exactEntry then lists[guidKey] = { kind = "watch", name = "Enemy-FixtureRealm", note = "Exact entry note", class = "ROGUE" } end
+    local state, _, app = setup({ schemaVersion = 1, onboardingSeen = true, lists = lists })
+    state:Unit("nameplate1", { guid = "Player-RecentAlias", name = "Enemy", realm = "FixtureRealm",
+        class = "ROGUE", hostile = true, isPlayer = true })
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    H.Equal(app.db:GetJournal()[1].identity, guidKey)
+    app.ui:OpenSettings("journal")
+    return state, app, nameKey, guidKey
+end
+
+local function journalRowFor(ui, identity)
+    for _, row in ipairs(ui.journalRows) do
+        if row:IsShown() and row.contact and row.contact.identity == identity then return row end
+    end
+end
+
+H.Test("Recent uses the verified live list alias for display, editing, and search", function()
+    local _, app, nameKey, guidKey = recentListAliasFixture()
+    local ui = app.ui
+    H.Equal(app.engine:Snapshot()[1].identity, guidKey)
+    H.Equal(app.engine:Snapshot()[1].listKind, "watch")
+    local row = assert(journalRowFor(ui, guidKey))
+    row:Click()
+    local detail = ui.detailsFrame
+    detail.listActions.avoid:Click()
+    local list = app.db:GetList()
+    H.Nil(list[guidKey], "reclassifying the Recent card creates a duplicate GUID record")
+    H.Equal(list[nameKey].kind, "avoid")
+    H.Equal(list[nameKey].note, "Legacy lookout note")
+    H.Equal(detail.note:GetText(), "Legacy lookout note")
+    H.Equal(app.engine:Snapshot()[1].listKind, "avoid")
+
+    ui.journalSearch:SetText(" lookout NOTE ")
+    row = assert(journalRowFor(ui, guidKey), "Recent search missed the effective personal-list note")
+    H.Equal(row.contact.listKind, "avoid")
+    H.Equal(row.contact.note, "Legacy lookout note")
+    ui.rows[1]:Click()
+    H.False(ui.selectedFromJournal)
+    H.Equal(detail.note:GetText(), "Legacy lookout note")
+end)
+
+H.Test("an offline Recent record does not infer a name alias from historical display text", function()
+    local state, app, nameKey, guidKey = recentListAliasFixture()
+    state.units.nameplate1 = nil
+    state:Fire("NAME_PLATE_UNIT_REMOVED", "nameplate1")
+    local ui = app.ui
+    ui.journalRecent:Click()
+    assert(journalRowFor(ui, guidKey)):Click()
+    local entry, key = app:ResolveList(ui.selected)
+    H.Nil(entry); H.Equal(key, guidKey)
+    H.Equal(ui.detailsFrame.note:GetText(), "")
+    ui.journalSearch:SetText("Legacy lookout note")
+    H.Nil(journalRowFor(ui, guidKey))
+    H.Equal(app.db:GetList()[nameKey].kind, "watch")
+end)
+
+H.Test("Recent prefers an exact GUID record and Personal edits the explicitly selected saved alias", function()
+    local _, app, nameKey, guidKey = recentListAliasFixture(true)
+    local ui = app.ui
+    ui.journalSearch:SetText("Legacy lookout note")
+    H.Nil(journalRowFor(ui, guidKey))
+    ui.journalSearch:SetText("Exact entry note")
+    assert(journalRowFor(ui, guidKey)):Click()
+    H.Equal(ui.detailsFrame.note:GetText(), "Exact entry note")
+    ui.detailsFrame.listActions.avoid:Click()
+    H.Equal(app.db:GetList()[guidKey].kind, "avoid")
+    H.Equal(app.db:GetList()[guidKey].note, "Exact entry note")
+    H.Equal(app.db:GetList()[nameKey].kind, "watch")
+
+    ui.journalPersonal:Click()
+    ui.journalSearch:SetText("Legacy lookout note")
+    assert(journalRowFor(ui, nameKey)):Click()
+    H.True(ui.selected.savedOnly)
+    H.Equal(ui.detailsFrame.note:GetText(), "Legacy lookout note")
+    ui.detailsFrame.listActions.ignore:Click()
+    H.Equal(app.db:GetList()[nameKey].kind, "ignore")
+    H.Equal(app.db:GetList()[nameKey].note, "Legacy lookout note")
+    H.Equal(app.db:GetList()[guidKey].kind, "avoid")
+end)
+
+H.Test("ambiguous active GUIDs never borrow their shared name note in Recent", function()
+    local state, app, nameKey, guidKey = recentListAliasFixture()
+    local secondKey = "guid:Player-RecentCollision"
+    assert(app.db:Record({ identity = secondKey, name = "Enemy-FixtureRealm", class = "ROGUE" }, state.api.time()))
+    state:Unit("nameplate2", { guid = "Player-RecentCollision", name = "Enemy", realm = "FixtureRealm",
+        class = "ROGUE", hostile = true, isPlayer = true })
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+    H.Equal(#app.engine:Snapshot(), 2)
+    local ui = app.ui
+    ui.journalRecent:Click()
+    for _, identity in ipairs({ guidKey, secondKey }) do
+        assert(journalRowFor(ui, identity)):Click()
+        local entry, key = app:ResolveList(ui.selected)
+        H.Nil(entry); H.Equal(key, identity)
+        H.Equal(ui.detailsFrame.note:GetText(), "")
+    end
+    ui.journalSearch:SetText("Legacy lookout note")
+    H.Nil(journalRowFor(ui, guidKey)); H.Nil(journalRowFor(ui, secondKey))
+    H.Equal(app.db:GetList()[nameKey].note, "Legacy lookout note")
+end)
+
 H.Test("threat journal records a confirmed threat that develops after the first sighting exactly once", function()
     local state, _, app = setup()
     app.db:GetProfile().retention.journalMode = "threats"

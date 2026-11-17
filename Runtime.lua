@@ -229,12 +229,26 @@ function App:OnWorldChanged()
     if self.ui and self.ui.ClearBanners then self.ui:ClearBanners() end
 end
 
+function App:ResolveJournalListEntry(identity)
+    local id = self.engine.identities[identity]
+    local current = id and self.engine.contacts[id]
+    -- Recent records can use a name-based list entry only through current
+    -- evidence for this exact identity. A historical display name is not proof.
+    if current and current.identity == identity and next(current.tokens) ~= nil then
+        local entry, key = self.engine:ListEntry(current)
+        return entry, key or identity
+    end
+    return self.db:GetList()[identity], identity
+end
+
 function App:ResolveList(contact)
     local identity = RG.UIModel.EditableIdentity(contact)
     if not identity then return nil end
-    if contact.savedOnly or (contact.sources and contact.sources.journal) or not contact.id then
+    if contact.savedOnly then
         return self.db:GetList()[identity], identity
     end
+    if contact.sources and contact.sources.journal then return self:ResolveJournalListEntry(identity) end
+    if not contact.id then return self.db:GetList()[identity], identity end
     local current = self.engine.contacts[contact.id]
     if not current or not current.identity then return nil end
     if current.identity ~= identity and (current.ambiguousIdentity or current.nameIdentity ~= identity) then return nil end
