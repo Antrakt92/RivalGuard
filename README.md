@@ -33,7 +33,9 @@ current profile would handle that new sighting in the open world.
   a sound for each event, control repeat timing and add optional rules for
   particular classes, situations, lists or estimated distances.
   A rule can use a distinct sound, such as different cues for Hunters and
-  Rogues. Open **Advanced rules** at the top of Alerts and right-click a class
+  Rogues. Choose **First sightings and returns** to use one rule for both
+  encounters and keep stealth and targeting on their own rules.
+  Open **Advanced rules** at the top of Alerts and right-click a class
   icon in a new rule. Open the sound list to try each choice and see whether
   WoW accepted the request on the configured channel.
   New rules require a known class by default. Turn off **Require known class**

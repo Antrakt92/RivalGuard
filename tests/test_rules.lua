@@ -4,6 +4,26 @@ local function setup()
     return RG, RG.Defaults.NewProfile(), { id = "fixture", name = "Enemy", class = "ROGUE", hostile = true, isPlayer = true }
 end
 
+H.Test("combined arrivals preserve established event kinds and separate threats", function()
+    local RG, profile, rival = setup()
+    local context = { kind = "world" }
+    profile.rules = { { name = "Arrivals", enabled = true, priority = 65, event = "sighting", includeReturning = true,
+        classes = { ROGUE = true }, action = "alert", cooldown = 10, sound = true, banner = true } }
+    for _, event in ipairs({ "sighting", "returning", "identified" }) do
+        local decision = assert(RG.Rules.Evaluate(profile, rival, event, context))
+        H.Equal(decision.ruleName, "Arrivals")
+        if event == "identified" then H.Equal(decision.dedupKey, "identified")
+        else H.Equal(decision.kind, event); H.Equal(decision.dedupKey, event) end
+        local watched = assert(RG.Rules.Evaluate(profile, rival, event, context, { kind = "watch" }))
+        H.Equal(watched.kind, "watch"); H.Equal(watched.ruleName, "Arrivals")
+        H.Equal(watched.soundCue, profile.alerts.sounds.watch)
+    end
+    for _, event in ipairs({ "stealth", "targeting" }) do
+        local decision = assert(RG.Rules.Evaluate(profile, rival, event, context))
+        H.Nil(decision.ruleName); H.Equal(decision.soundCue, profile.alerts.sounds[event])
+    end
+end)
+
 H.Test("default rules alert in world and remain quiet in excluded contexts", function()
     local RG, p, contact = setup()
     H.Equal(RG.Rules.Evaluate(p, contact, "sighting", { kind = "world" }).kind, "sighting")

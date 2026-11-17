@@ -116,6 +116,10 @@ elseif view == "personal" then
     if page == "filters" then app.ui.journalFilterChoices.avoid:Click() end
 elseif view == "rules" then
     app.ui:OpenRules()
+    if page == "rule-arrivals" or page == "check-draft-arrivals" then
+        app.ui.rulesDialog.event:Click()
+        app.ui.rulesDialog.event:Click()
+    end
     if page == "sound-picker" or page == "sound-feedback" then
         app.ui.rulesDialog.soundCue:Click()
         if page == "sound-feedback" then
@@ -123,7 +127,7 @@ elseif view == "rules" then
             app.ui.soundPicker.rows[3].listen:Click()
         end
     end
-    if page == "check-draft" or page == "check-draft-range" then
+    if page == "check-draft" or page == "check-draft-range" or page == "check-draft-arrivals" then
         local dialog = app.ui.rulesDialog
         for _, chip in ipairs(dialog.classes) do
             if chip.class == "ROGUE" then chip.frame:Click("RightButton"); break end
@@ -133,6 +137,7 @@ elseif view == "rules" then
         if page == "check-draft-range" then dialog.conditions:Click(); dialog.range:SetValue(25) end
         dialog.checkDraft:Click()
         if page == "check-draft-range" then app.ui.ruleCheckDialog.distanceButtons.threshold:Click() end
+        if page == "check-draft-arrivals" then app.ui.ruleCheckDialog.eventButtons.returning:Click() end
     end
 elseif view == "conditions" then app.ui:OpenRules(); app.ui.rulesDialog.conditions:Click()
 elseif view == "appearance" then app.ui:OpenSettings("appearance")

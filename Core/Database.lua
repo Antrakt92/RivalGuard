@@ -40,9 +40,10 @@ local function ruleArray(value, strict)
         if type(index) ~= "number" or index % 1 ~= 0 or index < 1 or index > 32 or type(rule) ~= "table" then return nil end
         if strict then
             local allowed = { name = true, enabled = true, priority = true, classes = true, event = true, action = true, sound = true, banner = true, cooldown = true,
-                context = true, list = true, range = true, rangePolicy = true, rangeUnknown = true, soundCue = true, knownClassOnly = true }
+                context = true, list = true, range = true, rangePolicy = true, rangeUnknown = true, soundCue = true, knownClassOnly = true,
+                includeReturning = true }
             for key in pairs(rule) do if not allowed[key] then return nil end end
-            for _, key in ipairs({ "enabled", "sound", "banner", "rangeUnknown", "knownClassOnly" }) do
+            for _, key in ipairs({ "enabled", "sound", "banner", "rangeUnknown", "knownClassOnly", "includeReturning" }) do
                 if rule[key] ~= nil and type(rule[key]) ~= "boolean" then return nil end
             end
             if rule.priority ~= nil and (not U.IsFinite(rule.priority) or rule.priority < 1 or rule.priority > 100 or rule.priority % 1 ~= 0) then return nil end
@@ -76,6 +77,10 @@ local function ruleArray(value, strict)
         }
         if not clean.name or not clean.classes then return nil end
         if not ({ sighting = true, returning = true, stealth = true, targeting = true, any = true })[clean.event] then return nil end
+        if rule.includeReturning == true then
+            if clean.event == "sighting" then clean.includeReturning = true
+            elseif strict then return nil end
+        end
         if clean.action ~= "alert" and clean.action ~= "suppress" then return nil end
         result[index] = clean
     end

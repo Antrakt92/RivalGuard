@@ -3,6 +3,25 @@ local function addon()
     return H.Addon({ "Core/Bootstrap.lua", "Core/Util.lua", "Core/Defaults.lua", "Core/Codec.lua", "Core/Database.lua" })
 end
 
+H.Test("arrival rule profiles keep an optional return flag through transfer and reload", function()
+    local RG = addon()
+    local db = RG.Database.New()
+    local rules = { { name = "Before", event = "returning" }, { name = "Both", event = "sighting", includeReturning = true } }
+    db:GetProfile().rules = rules
+    local encoded = assert(db:ExportProfile())
+    local imported = assert(db:ImportProfile("Imported arrivals", encoded))
+    H.Equal(imported.rules[1].event, "returning"); H.Nil(imported.rules[1].includeReturning)
+    H.True(imported.rules[2].includeReturning)
+    H.True(RG.Database.New(db.root):GetProfile("Imported arrivals").rules[2].includeReturning)
+    rules[2].event = "stealth"
+    H.Nil(db:ExportProfile())
+    local recovered = RG.Database.New(db.root):GetProfile().rules
+    H.Equal(#recovered, 2); H.Equal(recovered[2].event, "stealth"); H.Nil(recovered[2].includeReturning)
+    rules[2].event, rules[2].includeReturning = "sighting", "true"
+    H.Nil(db:ExportProfile())
+    H.Nil(RG.Database.New(db.root):GetProfile().rules[2].includeReturning)
+end)
+
 H.Test("renaming a custom profile works at capacity and preserves the active object", function()
     local RG = addon()
     local db = RG.Database.New()

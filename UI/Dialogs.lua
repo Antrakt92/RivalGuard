@@ -285,6 +285,9 @@ function D.Attach(ui, app, H)
             event = "sighting", action = "alert", sound = true, banner = true, cooldown = 30,
             context = "any", list = "any", range = 0, rangePolicy = "possible", rangeUnknown = false, knownClassOnly = true,
         })
+        if self.ruleDraft.event == "sighting" and self.ruleDraft.includeReturning then
+            self.ruleDraft.event, self.ruleDraft.includeReturning = "arrivals", nil
+        end
         self.ruleDraft.context = self.ruleDraft.context or "any"
         self.ruleDraft.list = self.ruleDraft.list or "any"
         self.ruleDraft.range = self.ruleDraft.range or 0
@@ -410,7 +413,7 @@ function D.Attach(ui, app, H)
         f:SetScript("OnHide", function() f.nameInput:ClearFocus() end)
         f.enabled = draftCheck(base, "ruleEnabled", "enabled", 250, -209)
         f.event = draftChoice(base, "ruleEvent", "event", {
-            { "sighting", "sighting" }, { "returning", "returning" }, { "stealth", "eventStealth" },
+            { "sighting", "sighting" }, { "returning", "returning" }, { "arrivals", "ruleEventArrivals" }, { "stealth", "eventStealth" },
             { "targeting", "eventTargeting" }, { "any", "anyEvent" },
         }, 253, -243, 495)
         local classesLabel = H.label(base, "ruleClasses", 12, H.C.muted)
@@ -575,6 +578,7 @@ function D.Attach(ui, app, H)
         local index = self.ruleIndex or (#profile.rules + 1)
         if index > 32 then return nil, nil, "ruleLimit" end
         local draft = RG.Util.Copy(self.ruleDraft)
+        if draft.event == "arrivals" then draft.event, draft.includeReturning = "sighting", true end
         if draft.soundCue == "inherit" then draft.soundCue = nil end
         draft.name = RG.Util.Text(self.rulesFrame.nameInput:GetText(), 80)
         if not draft.name then return nil, nil, "ruleNeedsName" end
@@ -631,6 +635,18 @@ function D.Attach(ui, app, H)
                 control:SetPoint("TOPLEFT", 18 + (i - 1) * 144, -89)
                 frame.distanceButtons[mode] = control
             end
+            frame.eventButtons = {}
+            for i, choice in ipairs({ { "sighting", "eventSighting" }, { "returning", "eventReturning" } }) do
+                local event = choice[1]
+                local control = H.localButton(frame, choice[2], 174, function()
+                    self:RefreshRuleCheck()
+                    if not self.checkedRule then return end
+                    self.checkedRule.event = event
+                    self:PaintRuleCheck(self.checkedRule.mode)
+                end)
+                control:SetPoint("BOTTOMLEFT", 18 + (i - 1) * 186, 54)
+                frame.eventButtons[event] = control
+            end
             local help = H.label(frame, "ruleCheckHelp", 12, H.C.muted)
             help:SetPoint("BOTTOMLEFT", 18, 23); help:SetWidth(564)
             frame.rows = {}
@@ -650,6 +666,8 @@ function D.Attach(ui, app, H)
         if rule.range > 0 then limit = math.min(rule.range, limit or rule.range) end
         self.checkedRule = { draft = self.ruleDraft, draftText = RG.Codec.Encode(self.ruleDraft), alertConfig = app.alertConfig,
             profile = profile, index = index, limit = limit }
+        frame:SetSize(600, rule.includeReturning and 486 or 450)
+        for _, control in pairs(frame.eventButtons) do control:SetShown(rule.includeReturning == true) end
         frame.distanceButtons.threshold:SetEnabled(limit ~= nil)
         self:PaintRuleCheck("near")
         showDialog(frame)
@@ -659,7 +677,8 @@ function D.Attach(ui, app, H)
         local frame, checked = ui.ruleCheckDialog, self.checkedRule
         local profile, index = checked.profile, checked.index
         local rule = profile.rules[index]
-        local event = rule.event == "any" and "sighting" or rule.event
+        local event = checked.event or (rule.event == "any" and "sighting" or rule.event)
+        checked.mode = mode
         local eventLabel = ({ sighting = "eventSighting", returning = "eventReturning", stealth = "eventStealth", targeting = "eventTargeting" })[event]
         local context = rule.context == "any" and "world" or rule.context
         local entry = rule.list == "listed" and { kind = "watch" } or nil
@@ -679,6 +698,9 @@ function D.Attach(ui, app, H)
         end
         for name, control in pairs(frame.distanceButtons) do
             control.bg:SetColorTexture(unpack(name == mode and { 0.10, 0.22, 0.28, 1 } or H.C.panel))
+        end
+        for name, control in pairs(frame.eventButtons) do
+            control.bg:SetColorTexture(unpack(name == event and { 0.10, 0.22, 0.28, 1 } or H.C.panel))
         end
         local first = exampleClass(rule.classes, nil, true) or exampleClass(rule.classes)
         local other = exampleClass(rule.classes, first, false) or exampleClass(rule.classes, first)

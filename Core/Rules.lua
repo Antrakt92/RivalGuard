@@ -67,6 +67,11 @@ function R.ContactBlock(contact)
     if contact.dead == true then return "dead" end
 end
 
+function R.RuleEventMatches(rule, event)
+    return rule.event == event or rule.event == "any"
+        or (rule.event == "sighting" and rule.includeReturning == true and event == "returning")
+end
+
 function R.Evaluate(profile, contact, event, context, listEntry, rangeFresh)
     local identified = event == "identified"
     if identified then event = "sighting" end
@@ -86,7 +91,7 @@ function R.Evaluate(profile, contact, event, context, listEntry, rangeFresh)
     if profile.alerts.muteOrdinary and (kind == "sighting" or kind == "returning") then return nil, "ordinary_muted" end
     local matched, matchedIndex
     for index, rule in ipairs(profile.rules) do
-        if rule.enabled and (rule.event == event or rule.event == "any")
+        if rule.enabled and R.RuleEventMatches(rule, event)
             and (not rule.context or rule.context == "any" or rule.context == ((context and context.kind) or "world"))
             and (not rule.list or rule.list == "any" or (rule.list == "listed" and watched) or (rule.list == "unlisted" and not watched))
             and R.ClassMatches(rule.classes, contact.class, profile.alerts.unknownClass and not rule.knownClassOnly) then

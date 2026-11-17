@@ -82,19 +82,20 @@ end
 
 local function ruleCanPlay(profile, context, ordinaryEvent)
     local alerts = profile.alerts
+    local matches = RG.Rules.RuleEventMatches
     for _, rule in ipairs(profile.rules) do
         if rule.enabled and rule.action == "alert" and rule.sound and rule.soundCue
             and (not rule.context or rule.context == "any" or rule.context == context) then
             local unlisted = rule.list ~= "listed" and not alerts.watchedOnly
             if ordinaryEvent then
-                if unlisted and (rule.event == ordinaryEvent or rule.event == "any") then return true end
+                if unlisted and matches(rule, ordinaryEvent) then return true end
             else
-                local sighting = rule.event == "sighting" or rule.event == "any"
+                local sighting = matches(rule, "sighting")
                 local listed = rule.list ~= "unlisted"
-                local returned = rule.event == "returning" or rule.event == "any"
+                local returned = matches(rule, "returning")
                 if (sighting or returned) and (listed or unlisted and not alerts.muteOrdinary) then return true end
-                if (listed or unlisted) and ((alerts.stealth and (rule.event == "stealth" or rule.event == "any"))
-                    or (alerts.targeting and (rule.event == "targeting" or rule.event == "any"))) then return true end
+                if (listed or unlisted) and ((alerts.stealth and matches(rule, "stealth"))
+                    or (alerts.targeting and matches(rule, "targeting"))) then return true end
             end
         end
     end
