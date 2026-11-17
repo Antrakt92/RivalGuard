@@ -4136,6 +4136,105 @@ local function changeFixtureZone(state, instance, zonePVP)
     state:Fire("ZONE_CHANGED_NEW_AREA")
 end
 
+H.Test("nameplate discovery uses current sanctuary state before the zone event", function()
+    local state, _, app = setup()
+    state.zonePVP = "sanctuary"
+    seeSoundRuleRival(state, 1)
+    H.Equal(#app.engine:Snapshot(), 1)
+    H.Equal(#app.db:GetJournal(), 0)
+    H.Equal(app:AlertBlock(), "sanctuary")
+    state:Advance(1.25)
+    H.Equal(#app.db:GetJournal(), 0)
+    H.Equal(#app.engine.history, 0)
+    H.Equal(#state.sounds, 0)
+end)
+
+H.Test("a direct target discovery observes the current resting state before the update event", function()
+    local state, _, app = setup()
+    state.resting = true
+    state:Unit("target", { guid = "Player-Resting-Direct", name = "Direct rival", class = "ROGUE",
+        hostile = true, isPlayer = true })
+    state:Fire("PLAYER_TARGET_CHANGED")
+    H.Equal(#app.engine:Snapshot(), 1)
+    H.Equal(#app.db:GetJournal(), 0)
+    H.Equal(app:AlertBlock(), "resting")
+    state:Advance(1.25)
+    H.Equal(#app.engine.history, 0)
+    H.Equal(#state.sounds, 0)
+end)
+
+H.Test("a verified Vanish uses the newly allowed resting context before its update event", function()
+    local state, _, app = setup()
+    local profile = app.db:GetProfile()
+    profile.alerts.muteOrdinary = true
+    profile.retention.journalMode = "threats"
+    app:OnSettingsChanged()
+    state.resting = true
+    state:Fire("PLAYER_UPDATE_RESTING")
+    seeSoundRuleRival(state, 1)
+    H.Equal(app:AlertBlock(), "resting")
+    H.Equal(#app.db:GetJournal(), 0)
+    state.resting = false
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-AfterResting", 1856)
+    H.Nil(app:AlertBlock())
+    H.Equal(app.db:GetJournal()[1].encounters, 1)
+    state:Advance(0.5)
+    H.Equal(#app.engine.history, 1)
+    H.Equal(app.engine.history[1].kind, "stealth")
+    H.Equal(app.ui.banner.title:GetText(), app.ui:F("stealthCast", app.ui:T("spellVanish")))
+    H.Equal(#state.sounds, 1)
+end)
+
+H.Test("UNIT_AURA after leaving sanctuary is eligible before the zone event", function()
+    local state, _, app = setup(nil, function(fixture)
+        fixture.api.C_Secrets = { ShouldAurasBeSecret = function() return false end }
+        fixture.api.C_UnitAuras = { GetAuraDataByIndex = function(token, index)
+            local owner = fixture.units[token]
+            if owner and owner.aura and index == 1 then return { spellId = owner.aura } end
+        end }
+    end)
+    local profile = app.db:GetProfile()
+    profile.alerts.muteOrdinary = true
+    profile.retention.journalMode = "threats"
+    app:OnSettingsChanged()
+    changeFixtureZone(state, nil, "sanctuary")
+    seeSoundRuleRival(state, 1)
+    H.Equal(#app.db:GetJournal(), 0)
+    state.zonePVP = nil
+    state.units.nameplate1.aura = 1784
+    state:Fire("UNIT_AURA", "nameplate1")
+    H.Nil(app:AlertBlock())
+    H.Equal(app.db:GetJournal()[1].encounters, 1)
+    state:Advance(0.5)
+    H.Equal(#app.engine.history, 1)
+    H.Equal(app.engine.history[1].kind, "stealth")
+    H.Equal(app.ui.banner.title:GetText(), app.ui:T("stealthAura"))
+    H.Equal(#state.sounds, 1)
+end)
+
+H.Test("UNIT_TARGET in sanctuary retires the targeting banner and prevents pending alert replay", function()
+    local state, app, add, target = automaticLocatorFixture(true)
+    local ui = app.ui
+    add(1, true)
+    state:Advance(0.5)
+    H.Equal(ui.activeBanner.kind, "targeting")
+    H.True(locatorVisible(ui, "nameplate1"))
+    add(2, false)
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate2", "Cast-BeforeSanctuary", 1856)
+    state.zonePVP = "sanctuary"
+    target(2, true)
+    H.Equal(app:AlertBlock(), "sanctuary")
+    H.Nil(ui.activeBanner)
+    H.False(locatorVisible(ui, "nameplate1"))
+    target(2, false)
+    state.zonePVP = nil
+    state:Fire("ZONE_CHANGED_NEW_AREA")
+    state:Advance(0.5)
+    H.Equal(#app.engine.history, 1)
+    H.Equal(#state.sounds, 1)
+    H.Nil(ui.activeBanner)
+end)
+
 for _, boundary in ipairs({ "sanctuary", "arena" }) do
     H.Test("a rapid " .. boundary .. " visit retires live targeting and discards a queued Vanish", function()
         local state, app, add = automaticLocatorFixture(true)

@@ -46,6 +46,33 @@ local function player(name, guid)
     return { name = name or "Alpha", guid = guid or "Player-A", class = "ROGUE" }
 end
 
+H.Test("event observations sample context once while polls share one snapshot", function()
+    local sensors, units, _, _, casts, _, _, api, _, _, engine = fixture()
+    local reads = 0
+    api.IsInInstance = function() reads = reads + 1; return false, "none" end
+    api.UnitIsPlayer = function(token) return units[token].isPlayer ~= false end
+    engine.TracksCast = function(_, id) return id == 1856 end
+    sensors:Start()
+    reads = 0
+    for i = 1, 6 do
+        local token = "nameplate" .. i
+        units[token] = player("Rival " .. i, "Player-Context-" .. i)
+        sensors:OnEvent("NAME_PLATE_UNIT_ADDED", token)
+        H.Equal(reads, i)
+    end
+    local npc = player("NPC", "Creature-Context")
+    npc.isPlayer = false
+    units.nameplate7 = npc
+    sensors:OnEvent("NAME_PLATE_UNIT_ADDED", "nameplate7")
+    sensors:OnEvent("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "untracked", 123)
+    sensors:OnEvent("UNIT_TARGET", "untracked")
+    H.Equal(reads, 6)
+    sensors:OnEvent("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "tracked", 1856)
+    H.Equal(reads, 7); H.Equal(#casts, 1)
+    sensors:Poll()
+    H.Equal(reads, 8)
+end)
+
 H.Test("sensors never correlate casts after removal or from mismatched current owners", function()
     local sensors, units, observed, _, casts = fixture()
     units.nameplate1 = player()

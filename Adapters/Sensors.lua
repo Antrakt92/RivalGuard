@@ -55,10 +55,15 @@ function Sensors:Observe(token, source, behindCamera, event)
     if not obs then self:Remove(token); return end
     if event == "UNIT_TARGET" then obs.targetEvent = true
     elseif event == "UNIT_FACTION" then obs.factionEvent = true end
-    self:Record(obs, behindCamera)
+    self:Record(obs, behindCamera, event)
 end
 
-function Sensors:Record(obs, behindCamera)
+function Sensors:Record(obs, behindCamera, event)
+    -- Unit events can arrive before the corresponding zone or resting event.
+    -- Polling and seeding already share a snapshot for the whole batch.
+    if event and obs.isPlayer ~= false and obs.hostile ~= false then
+        self:Call("SetContext", self.client:Context())
+    end
     local token = obs.token
     local state = self.active[token]
     local name = obs.nameComplete and obs.name or nil
@@ -195,12 +200,12 @@ function Sensors:OnEvent(event, token, castGUID, spellID)
         self:Call("SetContext", self.client:Context())
     elseif event == "NAME_PLATE_UNIT_ADDED" then
         token = self.client:IsToken(token)
-        if token then self:Remove(token); self:Observe(token, "nameplate") end
+        if token then self:Remove(token); self:Observe(token, "nameplate", nil, event) end
     elseif event == "NAME_PLATE_UNIT_REMOVED" then self:Remove(token)
-    elseif event == "PLAYER_TARGET_CHANGED" then self.targetChanged = true; self:Remove("target"); self:Observe("target", "target")
-    elseif event == "PLAYER_FOCUS_CHANGED" then self.focusChanged = true; self:Remove("focus"); self:Observe("focus", "focus")
-    elseif event == "UPDATE_MOUSEOVER_UNIT" then self:Remove("mouseover"); self:Observe("mouseover", "mouseover")
-    elseif event == "PLAYER_SOFT_ENEMY_CHANGED" then self:Remove("softenemy"); self:Observe("softenemy", "softenemy")
+    elseif event == "PLAYER_TARGET_CHANGED" then self.targetChanged = true; self:Remove("target"); self:Observe("target", "target", nil, event)
+    elseif event == "PLAYER_FOCUS_CHANGED" then self.focusChanged = true; self:Remove("focus"); self:Observe("focus", "focus", nil, event)
+    elseif event == "UPDATE_MOUSEOVER_UNIT" then self:Remove("mouseover"); self:Observe("mouseover", "mouseover", nil, event)
+    elseif event == "PLAYER_SOFT_ENEMY_CHANGED" then self:Remove("softenemy"); self:Observe("softenemy", "softenemy", nil, event)
     elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
         token = self.client:IsToken(token)
         spellID = self.client:Number(spellID)
@@ -210,7 +215,7 @@ function Sensors:OnEvent(event, token, castGUID, spellID)
             if engine and type(engine.TracksCast) == "function" and self:Call("TracksCast", spellID) ~= true then return end
             local obs = self.client:ReadUnit(token, "cast", state.awaitingEligibility)
             if obs and ((state.guid and obs.guid == state.guid) or (not state.guid and state.name and obs.nameComplete and obs.name == state.name)) then
-                self:Record(obs)
+                self:Record(obs, nil, event)
                 if obs.isPlayer ~= false and obs.hostile ~= false then self:Call("Cast", token, spellID) end
             end
         end
