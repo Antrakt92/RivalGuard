@@ -56,7 +56,9 @@ elseif view == "guide" then
 elseif view == "journal" then app.ui:OpenSettings("journal")
 elseif view == "diagnostics" then app.ui:ShowDiagnostics()
 elseif view == "personal" then app.ui:OpenSettings("journal"); app.ui.journalPersonal:Click()
-elseif view == "rules" then app.ui:OpenRules()
+elseif view == "rules" then
+    app.ui:OpenRules()
+    if page == "sound-picker" then app.ui.rulesDialog.soundCue:Click() end
 elseif view == "conditions" then app.ui:OpenRules(); app.ui.rulesDialog.conditions:Click()
 elseif view == "appearance" then app.ui:OpenSettings("appearance")
 elseif view == "import" then app.ui:OpenTransfer("import")

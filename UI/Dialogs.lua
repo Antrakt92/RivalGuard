@@ -18,6 +18,7 @@ function D.Attach(ui, app, H)
         title:SetPoint("TOPLEFT", 18, -17); title:SetWidth(width - 130)
         local close = H.localButton(frame, "close", 84, function() frame:Hide() end)
         close:SetPoint("TOPRIGHT", -12, -10)
+        frame.close = close
         if UISpecialFrames then UISpecialFrames[#UISpecialFrames + 1] = name end
         return frame
     end
@@ -25,6 +26,56 @@ function D.Attach(ui, app, H)
     local function showDialog(frame)
         ui:FitWindow(frame, frame:GetWidth(), frame:GetHeight(), 1)
         frame:Show()
+    end
+
+    function self:CurrentSoundPicker()
+        local picker = ui.soundPicker
+        local selection = self.soundSelection
+        if not selection or not picker:IsShown() or ui.destroyed then return end
+        if selection.source:IsVisible() and selection.current() ~= nil then return selection end
+        picker:Hide()
+    end
+
+    function self:OpenSoundPicker(source, options, current, choose)
+        local selected = current()
+        if selected == nil or not source:IsVisible() then return end
+        local picker = ui.soundPicker
+        if not picker then
+            picker = dialog("RivalGuardSoundPicker", "chooseSound", 392, 320)
+            picker:SetFrameStrata("FULLSCREEN_DIALOG")
+            picker.rows = {}
+            picker:SetScript("OnHide", function() self.soundSelection = nil end)
+            for i = 1, #RG.Defaults.soundOptions do
+                local row = {}
+                row.choice = H.button(picker, "", 232, function()
+                    local selection = self:CurrentSoundPicker()
+                    if not selection or not row.value then return end
+                    picker:Hide()
+                    selection.choose(row.value)
+                end)
+                row.choice:SetPoint("TOPLEFT", 18, -59 - (i - 1) * 40)
+                row.listen = H.localButton(picker, "previewSound", 111, function()
+                    if self:CurrentSoundPicker() and app.PreviewSound and row.value and row.value ~= "none" and row.value ~= "inherit" then
+                        app:PreviewSound(nil, row.value)
+                    end
+                end)
+                row.listen:SetPoint("LEFT", row.choice, "RIGHT", 12, 0)
+                picker.rows[i] = row
+            end
+            ui.soundPicker = picker
+        end
+        self.soundSelection = { source = source, current = current, choose = choose }
+        for index, row in ipairs(picker.rows) do
+            local option = options[index]
+            row.value = option and option[1]
+            row.choice:SetShown(option ~= nil); row.listen:SetShown(option ~= nil)
+            if option then
+                row.choice.label:SetText(t(option[2]))
+                row.choice.bg:SetColorTexture(unpack(row.value == selected and { 0.10, 0.22, 0.28, 1 } or H.C.panel))
+                row.listen:SetEnabled(row.value ~= "none" and row.value ~= "inherit")
+            end
+        end
+        showDialog(picker)
     end
 
     local function textInput(parent, width, maxBytes)
@@ -71,11 +122,25 @@ function D.Attach(ui, app, H)
         return check
     end
 
-    local function draftChoice(parent, key, field, options, x, y, width)
+    local function draftChoice(parent, key, field, options, x, y, width, soundPicker)
         local label = H.label(parent, key, 12, H.C.muted)
         label:SetPoint("TOPLEFT", x, y); label:SetWidth(width)
-        local b = H.button(parent, "", width, function()
-            if not self.ruleDraft then return end
+        local b
+        b = H.button(parent, "", width, function()
+            local draft = self.ruleDraft
+            if not draft then return end
+            if soundPicker then
+                self.rulesFrame.nameInput:ClearFocus()
+                self:OpenSoundPicker(b, options, function()
+                    if self.ruleDraft == draft and self.ruleProfile == ui:Profile() and draft.action == "alert" and draft.sound then
+                        return draft[field]
+                    end
+                end, function(value)
+                    draft[field] = value
+                    self:RefreshRules()
+                end)
+                return
+            end
             local found = 0
             for i, option in ipairs(options) do if option[1] == self.ruleDraft[field] then found = i break end end
             self.ruleDraft[field] = options[found % #options + 1][1]
@@ -206,7 +271,7 @@ function D.Attach(ui, app, H)
         for _, option in ipairs(RG.Defaults.soundOptions) do
             if option[1] ~= "none" then cues[#cues + 1] = option end
         end
-        f.soundCue = draftChoice(base, "ruleSoundCue", "soundCue", cues, 455, -395, 179)
+        f.soundCue = draftChoice(base, "ruleSoundCue", "soundCue", cues, 455, -395, 179, true)
         f.previewCue = H.localButton(base, "previewSound", 102, function()
             if app.PreviewSound and self.ruleDraft then app:PreviewSound(nil, self.ruleDraft.soundCue) end
         end)
@@ -419,6 +484,7 @@ function D.Attach(ui, app, H)
     end
 
     function self:Refresh()
+        self:CurrentSoundPicker()
         for _, frame in ipairs(dialogs) do
             if frame:IsShown() then ui:FitWindow(frame, frame:GetWidth(), frame:GetHeight(), 1) end
         end
@@ -496,6 +562,7 @@ function D.Attach(ui, app, H)
     end
 
     function ui:OpenRules() self.dialogs:OpenRules() end
+    function ui:OpenSoundPicker(...) self.dialogs:OpenSoundPicker(...) end
     function ui:OpenTransfer(mode) self.dialogs:OpenTransfer(mode) end
     function ui:ShowGuide(replay) return self.dialogs:ShowGuide(replay) end
     return self

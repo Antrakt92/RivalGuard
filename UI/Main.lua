@@ -682,11 +682,23 @@ function UI.New(app)
         return y - 65
     end
 
-    local function choice(page, key, path, options, y, width)
+    local function choice(page, key, path, options, y, width, soundPicker)
         local titleText = label(page, key, 13)
         titleText:SetPoint("TOPLEFT", 0, y); titleText:SetWidth(550)
-        local b = button(page, "", width or 400, function()
-            local current = pathGet(self:Profile(), path)
+        local b
+        b = button(page, "", width or 400, function()
+            local profile = self:Profile()
+            if soundPicker and self.OpenSoundPicker then
+                self:OpenSoundPicker(b, options, function()
+                    if self:Profile() == profile then return pathGet(profile, path) end
+                end, function(value)
+                    if pathGet(profile, path) == value then return end
+                    pathSet(profile, path, value)
+                    changed()
+                end)
+                return
+            end
+            local current = pathGet(profile, path)
             local index = 0
             for i, option in ipairs(options) do if option[1] == current then index = i break end end
             pathSet(self:Profile(), path, options[index % #options + 1][1])
@@ -779,7 +791,7 @@ function UI.New(app)
     for _, entry in ipairs({ { "sighting", "eventSighting" }, { "returning", "eventReturning" }, { "watch", "eventWatch" }, { "stealth", "eventStealth" }, { "targeting", "eventTargeting" }, { "wave", "eventWave" } }) do
         local kind = entry[1]
         local rowY = y
-        y = choice(alerts, entry[2], "alerts.sounds." .. kind, soundOptions, y, 380)
+        y = choice(alerts, entry[2], "alerts.sounds." .. kind, soundOptions, y, 380, true)
         local listen = localButton(alerts, "previewSound", 150, function() if app.PreviewSound then app:PreviewSound(kind) end end)
         listen:SetPoint("TOPLEFT", 395, rowY - 25)
     end

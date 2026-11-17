@@ -11,6 +11,33 @@ local function setup(raw, configure)
     return state, RG, RG.instance
 end
 
+local function settingButton(ui, path)
+    for _, control in ipairs(ui.controls) do
+        if control.path == path then return control.frame end
+    end
+    error("missing settings control " .. path)
+end
+
+local function openSoundPicker(ui, button)
+    button:Click()
+    local picker = assert(ui.soundPicker, "shared sound picker did not open")
+    H.True(picker:IsShown())
+    return picker
+end
+
+local function soundPickerRow(picker, value)
+    for _, row in ipairs(picker.rows) do
+        if row.value == value then return row end
+    end
+    error("missing sound option " .. value)
+end
+
+local function pickSound(ui, button, value)
+    local picker = openSoundPicker(ui, button)
+    soundPickerRow(picker, value).choice:Click()
+    H.False(picker:IsShown())
+end
+
 H.Test("runtime status reads both nameplate settings through the supported API without writes", function()
     local writes = 0
     local state, _, app = setup(nil, function(fixture)
@@ -249,6 +276,62 @@ for _, blocker in ipairs({ "global mute", "silent rule", "unidentified class" })
     end)
 end
 
+H.Test("the event sound picker exposes all cues and separates listening from choosing", function()
+    local state, app, profile = ruleSoundFixture()
+    local ui = app.ui
+    profile.alerts.sound = false
+    app:OnSettingsChanged()
+    ui:OpenSettings("alerts")
+    local control = settingButton(ui, "alerts.sounds.stealth")
+    local picker = openSoundPicker(ui, control)
+    H.Equal(#picker.rows, 6)
+    for _, value in ipairs({ "none", "ping", "warning", "ready", "whisper", "quest" }) do
+        local row = soundPickerRow(picker, value)
+        H.True(row.choice:IsShown())
+        if value ~= "none" then H.True(row.listen:IsShown()); H.True(row.listen.enabled) end
+    end
+    local silent = soundPickerRow(picker, "none")
+    H.True(not silent.listen:IsShown() or not silent.listen.enabled)
+    local quest = soundPickerRow(picker, "quest")
+    quest.listen:Click()
+    H.Equal(#state.sounds, 1)
+    H.Equal(state.sounds[1].id, RULE_SOUND_KITS.IG_QUEST_LIST_COMPLETE)
+    H.Equal(state.sounds[1].channel, "Dialog")
+    H.Equal(profile.alerts.sounds.stealth, "none")
+    H.False(profile.alerts.sound)
+    H.True(picker:IsShown())
+    picker.close:Click()
+    quest.choice:Click()
+    quest.listen:Click()
+    H.False(picker:IsShown())
+    H.Equal(profile.alerts.sounds.stealth, "none")
+    H.Equal(#state.sounds, 1)
+
+    pickSound(ui, control, "quest")
+    H.Equal(profile.alerts.sounds.stealth, "quest")
+    H.Equal(profile.alerts.sounds.sighting, "none")
+    H.Equal(#state.sounds, 1)
+    H.Equal(app.engine.counters.alerts, 0)
+end)
+
+H.Test("a picker opened for a previous profile cannot overwrite either profile", function()
+    local state, app, original = ruleSoundFixture()
+    local ui, db = app.ui, app.db
+    app:OnSettingsChanged()
+    local other = assert(db:CreateProfile("Other sounds"))
+    ui:OpenSettings("alerts")
+    local picker = openSoundPicker(ui, settingButton(ui, "alerts.sounds.sighting"))
+    local quest = soundPickerRow(picker, "quest")
+    assert(db:SetProfile("Other sounds"))
+    app:ProfileChanged()
+    quest.choice:Click()
+    quest.listen:Click()
+    H.False(picker:IsShown())
+    H.Equal(original.alerts.sounds.sighting, "none")
+    H.Equal(other.alerts.sounds.sighting, "ping")
+    H.Equal(#state.sounds, 0)
+end)
+
 H.Test("advanced rule cue preview is detached and saving makes the cue survive reload", function()
     local state, app, profile, soundKits = ruleSoundFixture()
     profile.alerts.sound, profile.alerts.banner = false, false
@@ -257,8 +340,7 @@ H.Test("advanced rule cue preview is detached and saving makes the cue survive r
     ui:OpenRules()
     local dialog = ui.rulesDialog
     H.False(dialog.previewCue.enabled)
-    dialog.soundCue:Click()
-    dialog.soundCue:Click()
+    pickSound(ui, dialog.soundCue, "warning")
     H.True(dialog.previewCue.enabled)
     dialog.previewCue:Click()
     H.Equal(#state.sounds, 1)
@@ -288,6 +370,47 @@ H.Test("advanced rule cue preview is detached and saving makes the cue survive r
     H.Equal(reloaded.engine.counters.alerts, 1)
     H.Equal(#fresh.sounds, 1)
     H.Equal(fresh.sounds[1].id, RULE_SOUND_KITS.RAID_WARNING)
+end)
+
+H.Test("the rule sound picker previews and selects on its own draft only", function()
+    local state, app, profile = ruleSoundFixture()
+    profile.alerts.sound = false
+    app:OnSettingsChanged()
+    local ui = app.ui
+    ui:OpenRules()
+    local dialog = ui.rulesDialog
+    local picker = openSoundPicker(ui, dialog.soundCue)
+    H.Equal(#picker.rows, 6)
+    local inherited = soundPickerRow(picker, "inherit")
+    H.True(inherited.choice:IsShown())
+    H.True(not inherited.listen:IsShown() or not inherited.listen.enabled)
+    local warning = soundPickerRow(picker, "warning")
+    warning.listen:Click()
+    H.Equal(#state.sounds, 1)
+    H.Equal(state.sounds[1].id, RULE_SOUND_KITS.RAID_WARNING)
+    H.Equal(ui.dialogs.ruleDraft.soundCue, "inherit")
+    H.Equal(#profile.rules, 0)
+    warning.choice:Click()
+    H.False(picker:IsShown())
+    H.Equal(ui.dialogs.ruleDraft.soundCue, "warning")
+    H.Equal(#profile.rules, 0)
+
+    picker = openSoundPicker(ui, dialog.soundCue)
+    soundPickerRow(picker, "inherit").choice:Click()
+    H.Equal(ui.dialogs.ruleDraft.soundCue, "inherit")
+    picker = openSoundPicker(ui, dialog.soundCue)
+    warning = soundPickerRow(picker, "warning")
+    local oldDraft = ui.dialogs.ruleDraft
+    for _, child in ipairs(dialog.children) do
+        if child.label and child.label:GetText() == ui:T("newRule") then child:Click(); break end
+    end
+    H.True(ui.dialogs.ruleDraft ~= oldDraft)
+    warning.choice:Click()
+    warning.listen:Click()
+    H.False(picker:IsShown())
+    H.Equal(ui.dialogs.ruleDraft.soundCue, "inherit")
+    H.Equal(#profile.rules, 0)
+    H.Equal(#state.sounds, 1)
 end)
 
 for _, locale in ipairs({ "enUS", "ruRU" }) do
@@ -337,7 +460,7 @@ for _, locale in ipairs({ "enUS", "ruRU" }) do
         H.Equal(state.RG.Util.Count(profile.alerts.classes), 1); H.True(profile.alerts.classes.MAGE)
         H.True(profile.alerts.unknownClass)
 
-        for _ = 1, 5 do dialog.soundCue:Click() end
+        pickSound(ui, dialog.soundCue, "quest")
         dialog.save:Click()
         local saved = profile.rules[1]
         H.Equal(saved.name, generated("ROGUE"))
@@ -1420,12 +1543,7 @@ for _, locale in ipairs({ "enUS", "ruRU" }) do
     H.Test("Alerts explains ordinary sighting eligibility for the selected profile in " .. locale, function()
         local state, RG, app = setup(nil, function(mock) mock.locale = locale end)
         local db, ui = app.db, app.ui
-        local function clickSetting(path)
-            for _, control in ipairs(ui.controls) do
-                if control.path == path then control.frame:Click(); return end
-            end
-            error("missing settings control " .. path)
-        end
+        local function clickSetting(path) settingButton(ui, path):Click() end
         local function status(profileName, reason)
             H.Equal(ui.currentPage, "alerts")
             H.Equal(app:AlertBlock(true), reason)
@@ -1482,14 +1600,14 @@ for _, locale in ipairs({ "enUS", "ruRU" }) do
         status("Matches", "outputs_disabled")
         clickSetting("alerts.sound")
         status("Matches", nil)
-        for _ = 1, 5 do clickSetting("alerts.sounds.sighting") end
+        pickSound(ui, settingButton(ui, "alerts.sounds.sighting"), "none")
         H.Equal(matchProfile.alerts.sounds.sighting, "none")
         status("Matches", nil)
-        for _ = 1, 3 do clickSetting("alerts.sounds.wave") end
+        pickSound(ui, settingButton(ui, "alerts.sounds.wave"), "none")
         H.Equal(matchProfile.alerts.sounds.wave, "none")
         status("Matches", "outputs_disabled")
         H.Nil(app:AlertBlock(), "other event sounds are still eligible")
-        clickSetting("alerts.sounds.sighting")
+        pickSound(ui, settingButton(ui, "alerts.sounds.sighting"), "ping")
         status("Matches", nil)
 
         state.api.RivalGuard_Binding("pause")
@@ -2905,8 +3023,11 @@ local function stealthFixture(readable, configure)
     return state, app, unit
 end
 
-local function queuedSettingsVanish()
-    local state, app = stealthFixture(false, function(profile) profile.alerts.muteOrdinary = true end)
+local function queuedSettingsVanish(configure)
+    local state, app = stealthFixture(false, function(profile)
+        profile.alerts.muteOrdinary = true
+        if configure then configure(profile) end
+    end)
     H.Equal(app.engine.counters.alerts, 0)
     H.Equal(#state.sounds, 0)
     H.False(app.ui.banner:IsShown())
@@ -3113,18 +3234,22 @@ end)
 
 for _, setting in ipairs({ "sound choice", "mute" }) do
     H.Test("queued Vanish survives a " .. setting .. " change and uses the new output", function()
-        local state, app = queuedSettingsVanish()
+        local state, app = queuedSettingsVanish(function(profile)
+            if setting == "sound choice" then
+                profile.alerts.sounds.stealth = "quest"
+                profile.alerts.banner = false
+            end
+        end)
         local ui = app.ui
         local requestedKit = 214748
         if setting == "sound choice" then
-            state.api.SOUNDKIT = { READY_CHECK = requestedKit }
+            local originalTime = app.engine.pending[1].at
+            state.api.SOUNDKIT = { RAID_WARNING = requestedKit }
+            state.clock.Advance(0.2)
             ui:OpenSettings("alerts")
-            local choice
-            for _, control in ipairs(ui.controls) do
-                if control.path == "alerts.sounds.stealth" then choice = control.frame break end
-            end
-            assert(choice):Click()
-            H.Equal(app.db:GetProfile().alerts.sounds.stealth, "ready")
+            pickSound(ui, settingButton(ui, "alerts.sounds.stealth"), "warning")
+            H.Equal(app.db:GetProfile().alerts.sounds.stealth, "warning")
+            H.Equal(app.engine.pending[1].at, originalTime)
         else
             state.api.RivalGuard_Binding("mute")
             H.False(app.db:GetProfile().alerts.sound)
@@ -3133,9 +3258,14 @@ for _, setting in ipairs({ "sound choice", "mute" }) do
         H.Equal(#state.sounds, 0)
         state:Advance(0.5)
         H.Equal(app.engine.counters.alerts, 1)
-        H.Equal(ui.banner.title:GetText(), ui:F("stealthCast", ui:T("spellVanish")))
+        H.Equal(app.engine.history[1].kind, "stealth")
         H.Equal(#state.sounds, setting == "mute" and 0 or 1)
-        if setting == "sound choice" then H.Equal(state.sounds[1].id, requestedKit) end
+        if setting == "sound choice" then
+            H.Equal(state.sounds[1].id, requestedKit)
+            H.False(ui.banner:IsShown())
+        else
+            H.Equal(ui.banner.title:GetText(), ui:F("stealthCast", ui:T("spellVanish")))
+        end
         state:Advance(1.5)
         H.Equal(app.engine.counters.alerts, 1)
         H.Equal(#state.sounds, setting == "mute" and 0 or 1)
