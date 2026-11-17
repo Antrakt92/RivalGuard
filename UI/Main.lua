@@ -678,7 +678,12 @@ function UI.New(app)
     local alerts = CreateFrame("Frame", nil, content); self.pages.alerts = alerts; alerts:SetAllPoints()
     y = section(alerts, "alerts", 0, "classesTip")
     y = classSelector(alerts, "alerts", y)
-    y = section(alerts, "alertRange", y - 8)
+    self.alertProfileStatus = font(alerts, 13, C.gold)
+    self.alertProfileStatus:SetPoint("TOPLEFT", 0, y - 4); self.alertProfileStatus:SetWidth(550)
+    if self.alertProfileStatus.SetMaxLines then self.alertProfileStatus:SetMaxLines(1) end
+    self.ordinaryAlertStatus = font(alerts, 12, C.text)
+    self.ordinaryAlertStatus:SetPoint("TOPLEFT", 0, y - 25); self.ordinaryAlertStatus:SetWidth(550)
+    y = section(alerts, "alertRange", y - 76)
     y = check(alerts, "rangeFilter", "range.enabled", y, "rangeFilterTip")
     local firstRangeControl = #self.controls + 1
     y = slider(alerts, "rangeYards", "range.yards", y - 6, 5, 100, 5)
@@ -1152,6 +1157,13 @@ function UI.New(app)
         if self.launcher then self.launcher:Refresh() end
         if settings:IsShown() then
             self:FitWindow(settings, UI.layout.settingsWidth, UI.layout.settingsHeight, 1)
+            if self.currentPage == "alerts" then
+                local name = app.db.GetActiveProfileName and app.db:GetActiveProfileName() or "Default"
+                local blocked = app.AlertBlock and app:AlertBlock(true)
+                paintText(self.alertProfileStatus, self:T("selectedProfile") .. ": " .. M.Text(name, "Default"))
+                paintText(self.ordinaryAlertStatus, blocked and self:F("ordinaryAlertStatus", RG.Locale.Reason(blocked, profile.locale))
+                    or self:T("ordinaryAlertReady"))
+            end
             if self.currentPage == "profiles" and (needsStatus or self.dataPage ~= "profiles") then self:RefreshProfiles() end
             if self.currentPage == "journal" and (needsStatus or self.dataPage ~= "journal") then self:RefreshJournal() end
             if supportShown then

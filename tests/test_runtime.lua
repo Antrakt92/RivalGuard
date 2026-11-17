@@ -1113,6 +1113,106 @@ H.Test("the copied diagnostics include sanitized context coverage and global ale
 end)
 
 for _, locale in ipairs({ "enUS", "ruRU" }) do
+    H.Test("Alerts explains ordinary sighting eligibility for the selected profile in " .. locale, function()
+        local state, RG, app = setup(nil, function(mock) mock.locale = locale end)
+        local db, ui = app.db, app.ui
+        local function clickSetting(path)
+            for _, control in ipairs(ui.controls) do
+                if control.path == path then control.frame:Click(); return end
+            end
+            error("missing settings control " .. path)
+        end
+        local function status(profileName, reason)
+            H.Equal(ui.currentPage, "alerts")
+            H.Equal(app:AlertBlock(true), reason)
+            H.Equal(ui.alertProfileStatus:GetText(), RG.Locale.Get("selectedProfile", locale) .. ": " .. profileName)
+            local result = reason and RG.Locale.Format("ordinaryAlertStatus", locale, RG.Locale.Reason(reason, locale))
+                or RG.Locale.Get("ordinaryAlertReady", locale)
+            H.Equal(ui.ordinaryAlertStatus:GetText(), result)
+        end
+
+        local original = db:GetProfile()
+        ui:OpenSettings("alerts")
+        ui.hunterRogueButton:Click()
+        H.True(original.alerts.classes.HUNTER); H.True(original.alerts.classes.ROGUE)
+        ui:OpenSettings("profiles")
+        for _ = 1, 3 do ui.presetButton:Click() end
+        ui.profileInput:SetText("Matches")
+        ui.profileInput.scripts.OnEnterPressed(ui.profileInput)
+        H.Equal(db:GetActiveProfileName(), "Default")
+        H.Equal(ui.profileRows[2].profileName, "Matches")
+        ui.profileRows[2].use:Click()
+        H.Equal(db:GetActiveProfileName(), "Matches")
+        local matchProfile = db:GetProfile()
+        H.Equal(matchProfile.preset, "battleground")
+
+        ui:OpenSettings("alerts")
+        ui.hunterRogueButton:Click()
+        status("Matches", "context_disabled")
+        ui:OpenSettings("overview")
+        clickSetting("context.world")
+        ui:OpenSettings("alerts")
+        status("Matches", "ordinary_muted")
+        H.Nil(app:AlertBlock(), "priority and personal-list alerts are still eligible")
+        local function seeHunter(token, name)
+            state:Unit(token, { guid = "Player-Status-" .. token, name = name, class = "HUNTER", hostile = true, isPlayer = true })
+            state:Fire("NAME_PLATE_UNIT_ADDED", token)
+            state:Advance(1.5)
+        end
+        seeHunter("nameplate1", "MutedHunter")
+        H.Equal(app.engine.counters.alerts, 0)
+        state.units.nameplate1 = nil
+        state:Fire("NAME_PLATE_UNIT_REMOVED", "nameplate1")
+        clickSetting("alerts.muteOrdinary")
+        status("Matches", nil)
+        seeHunter("nameplate2", "EligibleHunter")
+        H.Equal(app.engine.counters.alerts, 1)
+        H.Equal(app.engine.history[1].kind, "sighting")
+        H.Equal(ui.activeBanner.name, "EligibleHunter")
+
+        clickSetting("alerts.watchedOnly")
+        status("Matches", "watch_only")
+        clickSetting("alerts.watchedOnly")
+        clickSetting("alerts.banner")
+        clickSetting("alerts.sound")
+        status("Matches", "outputs_disabled")
+        clickSetting("alerts.sound")
+        status("Matches", nil)
+        for _ = 1, 5 do clickSetting("alerts.sounds.sighting") end
+        H.Equal(matchProfile.alerts.sounds.sighting, "none")
+        status("Matches", nil)
+        for _ = 1, 3 do clickSetting("alerts.sounds.wave") end
+        H.Equal(matchProfile.alerts.sounds.wave, "none")
+        status("Matches", "outputs_disabled")
+        H.Nil(app:AlertBlock(), "other event sounds are still eligible")
+        clickSetting("alerts.sounds.sighting")
+        status("Matches", nil)
+
+        state.api.RivalGuard_Binding("pause")
+        status("Matches", "paused")
+        state.api.RivalGuard_Binding("pause")
+        status("Matches", nil)
+
+        state.instance = "arena"
+        state:Fire("ZONE_CHANGED_NEW_AREA")
+        state:Advance(0.3)
+        status("Matches", "context_disabled")
+        state.instance = nil
+        state:Fire("ZONE_CHANGED_NEW_AREA")
+        state:Advance(0.3)
+        status("Matches", nil)
+
+        ui:OpenSettings("profiles")
+        H.Equal(ui.profileRows[1].profileName, "Default")
+        ui.profileRows[1].use:Click()
+        H.Equal(db:GetProfile(), original)
+        H.Equal(RG.Util.Count(original.alerts.classes), 2)
+        H.True(original.alerts.classes.HUNTER); H.True(original.alerts.classes.ROGUE)
+        H.False(original.alerts.muteOrdinary); H.True(original.alerts.banner)
+        ui:OpenSettings("alerts")
+        status("Default", nil)
+    end)
+
     H.Test("Hunters and Rogues quick selection applies to live alerts in " .. locale, function()
         local state, RG, app = setup()
         local profile, ui = app.db:GetProfile(), app.ui

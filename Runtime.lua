@@ -67,13 +67,19 @@ function App:PreviewSound(kind)
     return self.audio and self.audio:Play(kind or "sighting", true)
 end
 
-function App:AlertBlock()
+function App:AlertBlock(ordinaryOnly)
     local profile = self.db:GetProfile()
     local alerts = profile.alerts
     if not profile.enabled or not alerts.enabled then return "disabled" end
     if self.engine.pausedUntil and self.engine.pausedUntil > self.engine:Now() then return "paused" end
     local allowed, reason = RG.Rules.ContextMatches(profile.context, self.engine.context)
     if not allowed then return reason end
+    if ordinaryOnly then
+        if alerts.watchedOnly then return "watch_only" end
+        if alerts.muteOrdinary then return "ordinary_muted" end
+        if alerts.banner or (alerts.sound and (alerts.sounds.sighting ~= "none" or alerts.sounds.wave ~= "none")) then return nil end
+        return "outputs_disabled"
+    end
     if alerts.banner then return nil end
     if alerts.sound then
         for kind, sound in pairs(alerts.sounds) do

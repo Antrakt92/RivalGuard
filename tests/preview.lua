@@ -30,7 +30,17 @@ for index, class in ipairs(classes) do
 end
 app.ui:Refresh()
 if view == "settings" then
-    app.ui:OpenSettings(page == "targeting" and "alerts" or page)
+    if page == "alerts-context" or page == "alerts-muted" then
+        local name = RG.Locale.Get("battleground", locale)
+        local profile = assert(app.db:CreateProfile(name, "battleground"))
+        profile.context.world = page == "alerts-muted"
+        assert(app.db:SetProfile(name))
+        app:ProfileChanged()
+        app.ui:OpenSettings("alerts")
+        app.ui.hunterRogueButton:Click()
+    else
+        app.ui:OpenSettings(page == "targeting" and "alerts" or page)
+    end
     if page == "targeting" then
         for _, control in ipairs(app.ui.controls) do
             if control.path == "display.highlightTargeting" then
