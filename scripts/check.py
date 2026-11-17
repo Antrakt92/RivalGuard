@@ -24,7 +24,7 @@ def fingerprint() -> str:
     for path in sorted(ROOT.rglob("*")):
         if not path.is_file() or any(part in excluded for part in path.relative_to(ROOT).parts):
             continue
-        if path.suffix.lower() not in {".lua", ".py", ".toc"} | ASSET_TYPES and path.name not in {"LICENSE", "README.md", "CHANGELOG.md"}:
+        if path.suffix.lower() not in {".lua", ".py", ".toc", ".xml"} | ASSET_TYPES and path.name not in {"LICENSE", "README.md", "CHANGELOG.md"}:
             continue
         digest.update(path.relative_to(ROOT).as_posix().encode("utf-8"))
         digest.update(b"\0")

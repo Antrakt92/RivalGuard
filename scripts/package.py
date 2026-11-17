@@ -7,11 +7,17 @@ import hashlib
 from pathlib import Path, PurePosixPath
 import re
 import tempfile
+from xml.etree import ElementTree
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 
 ROOT = Path(__file__).resolve().parents[1]
 ADDON = "RivalGuard"
+BINDING_ACTIONS = {
+    "RIVALGUARD_TOGGLE_NEARBY": "nearby",
+    "RIVALGUARD_TOGGLE_PAUSE": "pause",
+    "RIVALGUARD_TOGGLE_MUTE": "mute",
+}
 ASSET_TYPES = {".tga", ".blp", ".png", ".jpg", ".jpeg", ".ogg", ".mp3", ".wav", ".ttf", ".otf"}
 RUNTIME_ROOTS = {"Core", "Runtime", "UI", "Locale", "Locales", "Data", "Adapters"}
 ICON_TYPES = {".tga", ".blp"}
@@ -118,6 +124,40 @@ def inspect_icon(value: str, files: dict[str, bytes], toc_name: str) -> None:
         raise ValueError(f"IconTexture missing or ambiguous in {toc_name}: {relative}")
 
 
+def binding_bodies(data: bytes) -> list[str]:
+    try:
+        text = data.decode("utf-8-sig")
+        if "<!DOCTYPE" in text:
+            raise ValueError("Bindings.xml cannot define a document type")
+        root = ElementTree.fromstring(text)
+    except (ElementTree.ParseError, UnicodeError) as error:
+        raise ValueError(f"Invalid Bindings.xml: {error}") from error
+    if root.tag != "Bindings" or root.attrib or (root.text or "").strip():
+        raise ValueError("Invalid Bindings.xml root")
+
+    names: set[str] = set()
+    bodies: list[str] = []
+    for binding in root:
+        name = binding.get("name", "")
+        command = BINDING_ACTIONS.get(name)
+        body = (binding.text or "").strip()
+        if (
+            binding.tag != "Binding"
+            or binding.attrib != {"name": name, "category": "BINDING_HEADER_RIVALGUARD"}
+            or not command
+            or name in names
+            or len(binding) != 0
+            or body != f'RivalGuard_Binding("{command}")'
+            or (binding.tail or "").strip()
+        ):
+            raise ValueError("Invalid or duplicate action in Bindings.xml")
+        names.add(name)
+        bodies.append(body)
+    if names != BINDING_ACTIONS.keys():
+        raise ValueError("Missing action in Bindings.xml")
+    return bodies
+
+
 def package_inputs(root: Path) -> tuple[str, dict[str, bytes]]:
     files: dict[str, bytes] = {}
     versions: set[str] = set()
@@ -137,8 +177,9 @@ def package_inputs(root: Path) -> tuple[str, dict[str, bytes]]:
             files[entry] = exact_source(root, entry).read_bytes()
     if len(versions) != 1:
         raise ValueError("Client manifests disagree on version")
-    for name in ("LICENSE", "README.md"):
+    for name in ("Bindings.xml", "LICENSE", "README.md"):
         files[name] = exact_source(root, name).read_bytes()
+    binding_bodies(files["Bindings.xml"])
     if (root / "CHANGELOG.md").exists() or linked(root / "CHANGELOG.md"):
         files["CHANGELOG.md"] = exact_source(root, "CHANGELOG.md").read_bytes()
     for folder_name in sorted(RUNTIME_ROOTS | {"Media"}):

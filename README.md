@@ -41,6 +41,8 @@ current profile would handle that new sighting in the open world.
 
 Click the minimap button to show or hide Nearby. Right-click it to open
 settings, or drag it around the minimap to move it.
+Open **Options → Keybindings → RivalGuard** to assign shortcuts for Nearby,
+pausing or resuming alerts, and muting or restoring alert sound.
 
 For a quick setup, click **Alerts → Hunters and Rogues**. This keeps the Nearby
 list unchanged, selects those two classes for ordinary alerts and turns off

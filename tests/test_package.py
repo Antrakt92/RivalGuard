@@ -12,6 +12,20 @@ from package import build, package_inputs, toc_entries  # noqa: E402
 from check_package import verify_archive  # noqa: E402
 
 
+BINDINGS_XML = """<Bindings>
+    <Binding name="RIVALGUARD_TOGGLE_NEARBY" category="BINDING_HEADER_RIVALGUARD">
+        RivalGuard_Binding("nearby")
+    </Binding>
+    <Binding name="RIVALGUARD_TOGGLE_PAUSE" category="BINDING_HEADER_RIVALGUARD">
+        RivalGuard_Binding("pause")
+    </Binding>
+    <Binding name="RIVALGUARD_TOGGLE_MUTE" category="BINDING_HEADER_RIVALGUARD">
+        RivalGuard_Binding("mute")
+    </Binding>
+</Bindings>
+"""
+
+
 class PackageTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(prefix="rivalguard-package-test-")
@@ -22,6 +36,8 @@ class PackageTests(unittest.TestCase):
         (self.root / "README.md").write_text("Fixture help\n", encoding="utf-8")
         (self.root / "Media").mkdir()
         (self.root / "Media/Icon.tga").write_bytes(b"image fixture")
+        self.bindings = self.root / "Bindings.xml"
+        self.bindings.write_text(BINDINGS_XML, encoding="utf-8")
         self.toc = self.root / "RivalGuard.toc"
         self.write_toc()
 
@@ -47,10 +63,40 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(first.read_bytes(), second.read_bytes())
         with ZipFile(first) as archive:
             self.assertEqual(archive.namelist(), [
-                "RivalGuard/Core/Bootstrap.lua", "RivalGuard/LICENSE",
+                "RivalGuard/Bindings.xml", "RivalGuard/Core/Bootstrap.lua", "RivalGuard/LICENSE",
                 "RivalGuard/Media/Icon.tga", "RivalGuard/README.md", "RivalGuard/RivalGuard.toc",
             ])
+            self.assertEqual(archive.read("RivalGuard/Bindings.xml"), self.bindings.read_bytes())
             self.assertEqual(archive.read("RivalGuard/Core/Bootstrap.lua"), (self.root / "Core/Bootstrap.lua").read_bytes())
+
+    def test_native_binding_file_has_exact_case_and_is_not_loaded_through_toc(self):
+        self.bindings.unlink()
+        with self.assertRaisesRegex(ValueError, "Missing package input.*Bindings.xml"):
+            package_inputs(self.root)
+        (self.root / "bindings.xml").write_text(BINDINGS_XML, encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "filename case mismatch.*Bindings.xml"):
+            package_inputs(self.root)
+        self.write_toc(entries="Bindings.xml\nCore/Bootstrap.lua")
+        with self.assertRaisesRegex(ValueError, "unsupported runtime path.*Bindings.xml"):
+            package_inputs(self.root)
+
+    def test_native_binding_file_rejects_extra_actions_defaults_and_scripting(self):
+        for text in (
+            BINDINGS_XML.replace("RIVALGUARD_TOGGLE_MUTE", "RIVALGUARD_TOGGLE_PAUSE"),
+            BINDINGS_XML.replace("RIVALGUARD_TOGGLE_MUTE", "ANOTHER_ACTION"),
+            BINDINGS_XML.replace("RIVALGUARD_TOGGLE_MUTE\"", "RIVALGUARD_TOGGLE_MUTE\" key=\"K\""),
+            BINDINGS_XML.replace("BINDING_HEADER_RIVALGUARD", "BINDING_HEADER_INTERFACE"),
+            BINDINGS_XML.replace('RivalGuard_Binding("mute")', 'RivalGuard_Binding("pause")'),
+            BINDINGS_XML.replace('RivalGuard_Binding("mute")', 'RivalGuard_Binding("mute"); OtherCall()'),
+            BINDINGS_XML.replace('RivalGuard_Binding("mute")', '<Script>RivalGuard_Binding("mute")</Script>'),
+            "<Bindings/>",
+            BINDINGS_XML.replace("</Bindings>", ""),
+            '<!DOCTYPE Bindings [<!ENTITY example "example">]>\n' + BINDINGS_XML,
+        ):
+            with self.subTest(text=text):
+                self.bindings.write_text(text, encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "Bindings.xml"):
+                    package_inputs(self.root)
 
     def test_traversal_absolute_and_nonruntime_entries_are_rejected(self):
         for entry in ("../outside.lua", "Core/../outside.lua", "/Core/Bootstrap.lua", "tests/private.lua", "C:/outside.lua", "Core/./Bootstrap.lua", "Core//Bootstrap.lua", "Core/NUL.lua"):
@@ -129,6 +175,7 @@ class PackageTests(unittest.TestCase):
         destination = self.root / "extracted"
         self.assertEqual(verify_archive(self.root, archive, destination), [("RivalGuard.toc", 120000), ("RivalGuard.toc", 16001)])
         self.assertEqual((destination / "RivalGuard/Core/Bootstrap.lua").read_bytes(), (self.root / "Core/Bootstrap.lua").read_bytes())
+        self.assertEqual((destination / "RivalGuard/Bindings.xml").read_bytes(), self.bindings.read_bytes())
 
     def test_archive_rejects_duplicate_foreign_type_or_modified_bytes_before_extracting(self):
         _, inputs = package_inputs(self.root)

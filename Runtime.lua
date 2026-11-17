@@ -372,6 +372,18 @@ end
 if type(CreateFrame) == "function" then
     local app = App.New(_G)
     RG.instance = app
+    BINDING_HEADER_RIVALGUARD = "RivalGuard"
+    BINDING_NAME_RIVALGUARD_TOGGLE_NEARBY = RG.Locale.Get("bindingNearby")
+    BINDING_NAME_RIVALGUARD_TOGGLE_PAUSE = RG.Locale.Get("bindingPause")
+    BINDING_NAME_RIVALGUARD_TOGGLE_MUTE = RG.Locale.Get("bindingMute")
+
+    function RivalGuard_Binding(action)
+        if not app.initialized then return end
+        if action == "nearby" then app.ui:Toggle()
+        elseif action == "pause" then app.ui:TogglePause()
+        elseif action == "mute" then app:ToggleMute() end
+    end
+
     local frame = CreateFrame("Frame")
     frame:RegisterEvent("ADDON_LOADED")
     frame:RegisterEvent("PLAYER_LOGOUT")

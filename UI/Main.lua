@@ -390,12 +390,13 @@ function UI.New(app)
 
     local more = font(main, 10, C.muted, "CENTER")
     more:SetPoint("BOTTOMLEFT", 10, 43); more:SetPoint("BOTTOMRIGHT", -10, 43); self.moreText = more
-    local pauseButton = button(main, self:T("pause"), 118, function()
+    function self:TogglePause()
         local untilTime = M.Number(app.engine.pausedUntil)
         local paused = untilTime and untilTime > self:Now()
         if paused then app.engine:Resume() else app.engine:Pause(600); self:ClearBanners() end
         self:Refresh()
-    end)
+    end
+    local pauseButton = button(main, self:T("pause"), 118, function() self:TogglePause() end)
     pauseButton:SetPoint("BOTTOMLEFT", 10, 9); self.pauseButton = pauseButton
     local muteButton = button(main, self:T("mute"), 111, function() app:ToggleMute(); self:SettingsChanged() end)
     muteButton:SetPoint("LEFT", pauseButton, "RIGHT", 5, 0); self.muteButton = muteButton

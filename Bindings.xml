@@ -1,0 +1,11 @@
+<Bindings>
+    <Binding name="RIVALGUARD_TOGGLE_NEARBY" category="BINDING_HEADER_RIVALGUARD">
+        RivalGuard_Binding("nearby")
+    </Binding>
+    <Binding name="RIVALGUARD_TOGGLE_PAUSE" category="BINDING_HEADER_RIVALGUARD">
+        RivalGuard_Binding("pause")
+    </Binding>
+    <Binding name="RIVALGUARD_TOGGLE_MUTE" category="BINDING_HEADER_RIVALGUARD">
+        RivalGuard_Binding("mute")
+    </Binding>
+</Bindings>

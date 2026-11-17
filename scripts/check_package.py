@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 from zipfile import BadZipFile, ZipFile
 
-from package import ADDON, ROOT, interfaces, package_inputs, toc_entries
+from package import ADDON, ROOT, binding_bodies, interfaces, package_inputs, toc_entries
 
 
 def verify_archive(root: Path, archive: Path, destination: Path) -> list[tuple[str, int]]:
@@ -50,9 +50,11 @@ def smoke(archive: Path, lua: str, root: Path = ROOT) -> None:
     with tempfile.TemporaryDirectory(prefix="rivalguard-archive-smoke-") as directory:
         destination = Path(directory)
         matrix = verify_archive(root, archive, destination)
+        package_root = destination / ADDON
+        bindings = binding_bodies((package_root / "Bindings.xml").read_bytes())
         for manifest, interface in matrix:
             subprocess.run(
-                [lua, str(root / "tests/package_smoke.lua"), str(destination / ADDON), str(root), manifest, str(interface)],
+                [lua, str(root / "tests/package_smoke.lua"), str(package_root), str(root), manifest, str(interface), *bindings],
                 cwd=destination, check=True,
             )
 

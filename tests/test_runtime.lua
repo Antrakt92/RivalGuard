@@ -35,6 +35,53 @@ H.Test("runtime status reads both nameplate settings through the supported API w
     H.Equal(writes, 0)
 end)
 
+for _, fixture in ipairs({
+    { "enUS", "Toggle Nearby window", "Pause or resume alerts", "Toggle alert sound" },
+    { "ruRU", "Показать или скрыть окно «Рядом»", "Приостановить или возобновить оповещения", "Включить или выключить звук оповещений" },
+}) do
+    H.Test("keyboard actions use game-language labels and local controls in " .. fixture[1], function()
+        local bindingWrites = 0
+        local function writeBinding() bindingWrites = bindingWrites + 1 end
+        local state, _, app = setup(nil, function(mock)
+            mock.locale = fixture[1]
+            mock.api.SetBinding, mock.api.SaveBindings, mock.api.SetOverrideBinding = writeBinding, writeBinding, writeBinding
+        end)
+        local bind = assert(state.api.RivalGuard_Binding)
+        H.Equal(state.api.BINDING_HEADER_RIVALGUARD, "RivalGuard")
+        H.Equal(state.api.BINDING_NAME_RIVALGUARD_TOGGLE_NEARBY, fixture[2])
+        H.Equal(state.api.BINDING_NAME_RIVALGUARD_TOGGLE_PAUSE, fixture[3])
+        H.Equal(state.api.BINDING_NAME_RIVALGUARD_TOGGLE_MUTE, fixture[4])
+
+        state.combat = true
+        state:Fire("PLAYER_REGEN_DISABLED")
+        H.True(app.ui.frame:IsShown())
+        bind("nearby"); H.False(app.ui.frame:IsShown())
+        bind("unknown"); H.False(app.ui.frame:IsShown())
+        bind("nearby"); H.True(app.ui.frame:IsShown())
+
+        app.ui:Alert({ kind = "sighting", contact = { id = "fixture", name = "Fixture" } })
+        H.True(app.ui.banner:IsShown())
+        bind("pause")
+        H.Equal(app.engine.pausedUntil, state.clock.Now() + 600)
+        H.False(app.ui.banner:IsShown())
+        H.True(app.sensors.running)
+        bind("pause"); H.Nil(app.engine.pausedUntil)
+        bind("mute"); H.False(app.db:GetProfile().alerts.sound)
+        bind("mute"); H.True(app.db:GetProfile().alerts.sound)
+        H.Equal(bindingWrites, 0)
+        H.Equal(#state.blocked, 0)
+    end)
+end
+
+H.Test("keyboard dispatch is harmless before the addon initializes", function()
+    local state = W.New()
+    local RG = state:LoadTOC()
+    local bind = assert(state.api.RivalGuard_Binding)
+    bind("nearby"); bind("pause"); bind("mute")
+    H.False(RG.instance.initialized)
+    H.Nil(RG.instance.db)
+end)
+
 H.Test("runtime alert blocks follow live context without changing detection status", function()
     local state, _, app = setup()
     local profile = app.db:GetProfile()
