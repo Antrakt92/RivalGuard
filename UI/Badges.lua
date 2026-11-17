@@ -11,16 +11,18 @@ end
 
 function B.New(getProfile)
     local self = { active = {}, pool = {}, count = 0 }
-    local function locked()
+    local function combatLockdown()
         if not InCombatLockdown then return false end
         local ok, combat = pcall(InCombatLockdown)
-        if not ok then return true end
+        if not ok then return nil end
         if issecretvalue then
             local cleanOK, secret = pcall(issecretvalue, combat)
-            if not cleanOK or secret then return true end
+            if not cleanOK or secret then return nil end
         end
         return combat == true
     end
+
+    local function locked() return combatLockdown() ~= false end
 
     local function available(frame)
         if not frame then return false end
@@ -128,7 +130,11 @@ function B.New(getProfile)
 
     function self:Highlight(unit, frame, id, now, automatic)
         local badge = self.active[unit]
-        if not badge or badge.parent ~= frame or not badge.contact or badge.contact.id ~= id or not available(frame) then return false end
+        if not available(frame) then return false end
+        if not badge or badge.parent ~= frame then
+            return false, combatLockdown() == true and "locateAfterCombat" or nil
+        end
+        if not badge.contact or badge.contact.id ~= id then return false end
         self:ClearHighlight()
         self.highlight = { unit = unit, frame = frame, badge = badge, id = id, expires = now + 3,
             checkAt = now, automatic = automatic == true }

@@ -5793,6 +5793,96 @@ H.Test("nameplate highlight works on an already anchored badge in combat and exp
     checkBannerPosition()
 end)
 
+H.Test("a verified but unanchored combat nameplate reports when to retry highlighting", function()
+    local state, app, ui = locatorFixture()
+    app.db:GetProfile().alerts.muteOrdinary = true
+    app:OnSettingsChanged()
+    ui.detailsFrame.locate:Click()
+    H.True(locatorVisible(ui, "nameplate1"))
+    local previous = ui.badges.highlight
+    state.combat = true
+    state:Fire("PLAYER_REGEN_DISABLED")
+    seeSoundRuleRival(state, 2)
+    local unit = state.units.nameplate2
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate2", "Cast-UnanchoredCombat", 1856)
+    state:Advance(0.3)
+    H.Nil(ui.badges.active.nameplate2)
+    local banner = assert(ui.activeBanner)
+    H.Equal(banner.kind, "stealth")
+    H.Equal(banner.identity, "guid:" .. unit.guid)
+    local bind = state.api.RivalGuard_Binding
+    local function latestNotice(key)
+        H.True(state.messages[#state.messages]:find(ui:T(key), 1, true) ~= nil)
+    end
+    H.False(bind("highlight"))
+    latestNotice("locateAfterCombat")
+    H.Equal(ui.badges.highlight, previous)
+    H.True(locatorVisible(ui, "nameplate1"))
+    H.False(locatorVisible(ui, "nameplate2"))
+
+    local contact = assert(app.engine:SelectedContact(banner.id, banner.identity))
+    local shown, failure = app:HighlightContact(contact, false, true)
+    H.False(shown)
+    H.Equal(failure, "locateAfterCombat")
+    local combatLockdown, secret = state.api.InCombatLockdown, H.Secret("unreadable combat lockdown")
+    state.api.InCombatLockdown = function() return secret end
+    H.False(bind("highlight"))
+    latestNotice("locateUnavailable")
+    H.Equal(ui.badges.highlight, previous)
+    state.api.InCombatLockdown = combatLockdown
+
+    state:Unit("nameplate2", { guid = "Player-CombatReplacement", name = "Replacement", class = "HUNTER",
+        hostile = true, isPlayer = true })
+    H.False(bind("highlight"))
+    latestNotice("locateUnavailable")
+    H.Equal(ui.badges.highlight, previous)
+
+    state:Unit("nameplate2", unit)
+    ui:Select(contact)
+    H.True(ui.detailsFrame.locate:IsShown())
+    ui.detailsFrame.locate:Click()
+    H.True(ui.detailsFrame:IsShown())
+    H.True(ui.detailsFrame.identityHelp:IsShown())
+    H.Equal(ui.detailsFrame.identityHelp:GetText(), ui:T("locateAfterCombat"))
+    H.False(locatorVisible(ui, "nameplate2"))
+    H.Equal(#state.blocked, 0)
+
+    state.combat = false
+    state:Fire("PLAYER_REGEN_ENABLED")
+    state:Advance(0.3)
+    H.True(bind("highlight"))
+    H.True(locatorVisible(ui, "nameplate2"))
+    H.Equal(ui.badges.highlight.id, contact.id)
+    H.False(locatorVisible(ui, "nameplate1"))
+    H.Equal(#state.blocked, 0)
+end)
+
+H.Test("combat highlighting tries an already anchored alias when another verified plate cannot attach", function()
+    local state, app, ui = locatorFixture()
+    local unit = { guid = "Player-AnchoredAlias", name = "Anchored rogue", class = "ROGUE",
+        hostile = true, isPlayer = true }
+    app.db:GetProfile().alerts.muteOrdinary = true
+    app:OnSettingsChanged()
+    state:Unit("nameplate3", unit)
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate3")
+    local anchored = assert(ui.badges.active.nameplate3)
+    state.combat = true
+    state:Fire("PLAYER_REGEN_DISABLED")
+    state:Unit("nameplate2", unit)
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate2", "Cast-WithAnchoredAlias", 1856)
+    state:Advance(0.3)
+    H.Equal(ui.activeBanner.identity, "guid:" .. unit.guid)
+    H.Nil(ui.badges.active.nameplate2)
+    local notices = #state.messages
+    H.True(state.api.RivalGuard_Binding("highlight"))
+    H.True(locatorVisible(ui, "nameplate3"))
+    H.Equal(ui.badges.active.nameplate3, anchored)
+    H.False(locatorVisible(ui, "nameplate2"))
+    H.Equal(#state.messages, notices)
+    H.Equal(#state.blocked, 0)
+end)
+
 H.Test("nameplate highlight validates the current GUID and never follows a recycled plate", function()
     local state, app, ui, owner = locatorFixture()
     app.db:GetProfile().display.showBadges = true

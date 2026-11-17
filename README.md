@@ -76,6 +76,8 @@ Open **Options → Keybindings → RivalGuard** to assign shortcuts for Nearby,
 pausing or resuming alerts, muting sound, and highlighting the opponent in the
 current alert. The highlight works with Nearby closed when a live individual
 banner is visible and RivalGuard can verify the opponent's nameplate.
+If an enemy's nameplate first appears during combat, its highlight may need to
+wait until combat ends.
 
 For a quick setup, choose **Hunters and Rogues** during the first-run tour or
 under **Alerts**. This keeps the Nearby

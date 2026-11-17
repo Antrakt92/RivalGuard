@@ -219,13 +219,18 @@ function App:HighlightContact(selection, automatic, fromAlert)
         or (selection.sources and selection.sources.journal) then return false end
     local contact = self.engine.contacts[selection.id]
     if not contact or not contact.guid or selection.identity ~= "guid:" .. contact.guid then return false end
+    local failure
     for _, token in ipairs(RG.Util.SortedKeys(contact.tokens)) do
         if token:match("^nameplate%d+$") then
             local frame = self:HighlightFrame(contact.id, token, automatic, fromAlert and selection.kind == "targeting")
-            if frame and badges:Highlight(token, frame, contact.id, now, automatic) then return true end
+            if frame then
+                local shown, reason = badges:Highlight(token, frame, contact.id, now, automatic)
+                if shown then return true end
+                failure = failure or reason
+            end
         end
     end
-    return false
+    return false, failure
 end
 
 function App:HighlightCurrentAlert()
@@ -238,8 +243,11 @@ function App:HighlightCurrentAlert()
         or (self.sensors and self.sensors.loading)
         or not RG.Rules.ContextMatches(profile.context, self.client:Context()) then
         message = "alertHighlightUnavailable"
-    elseif self:HighlightContact(selection, false, true) then return true
-    else message = "locateUnavailable" end
+    else
+        local shown, reason = self:HighlightContact(selection, false, true)
+        if shown then return true end
+        message = reason or "locateUnavailable"
+    end
     self:Notify(RG.Locale.Get(message, profile.locale))
     return false
 end

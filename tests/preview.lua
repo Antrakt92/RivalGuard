@@ -189,6 +189,17 @@ elseif view == "details" and page == "range-boundary" then
         class = "HUNTER", hostile = true, isPlayer = true, source = "nameplate", rangeMin = 20, rangeMax = 28,
         rangeMinExclusive = true, rangeEvidence = "combined" })
     app.ui:Select(contact)
+elseif view == "details" and page == "locate-combat" then
+    state.combat = true
+    state:Fire("PLAYER_REGEN_DISABLED")
+    local token = "nameplate80"
+    local name = locale == "ruRU" and "Разбойник у заставы" or "Rogue at the outpost"
+    state:Unit(token, { guid = "Player-LocateCombat", name = name, class = "ROGUE", hostile = true, isPlayer = true })
+    state:Fire("NAME_PLATE_UNIT_ADDED", token)
+    local id = assert(app.sensors.active[token].contactID)
+    app.ui:Select(assert(app.engine:SelectedContact(id, "guid:Player-LocateCombat")))
+    app.ui.detailsFrame.locate:Click()
+    assert(app.ui.locateError == "locateAfterCombat", "combat highlight advice unavailable")
 elseif view == "details" and page == "recent-note" then
     local token = "nameplate80"
     local name = locale == "ruRU" and "Разбойник у заставы" or "Rogue at the outpost"

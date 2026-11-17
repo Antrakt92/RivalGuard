@@ -1652,7 +1652,7 @@ function UI.New(app)
         if self.badges.highlight and not self.badges.highlight.automatic then self.badges:ClearHighlight() end
         self.selected = contact
         self.noteDraft = nil
-        self.locateFailed = nil
+        self.locateError = nil
         self.removeEntryAt, self.removeEntryIdentity = nil, nil
         self.selectedFromJournal = contact.sources and contact.sources.journal == true or false
         self.selectedOutside = self.selectedFromJournal
@@ -1674,7 +1674,7 @@ function UI.New(app)
         local epoch = app.engine.epoch and M.Number(app.engine.epoch())
         self.selected = journalCard(record, epoch, self:Now())
         self.selected.recentDraft = true
-        self.selectedFromJournal, self.selectedOutside, self.locateFailed = true, true, nil
+        self.selectedFromJournal, self.selectedOutside, self.locateError = true, true, nil
     end
 
     function self:ShowDetails(refreshOnly)
@@ -1729,8 +1729,9 @@ function UI.New(app)
             detail.removeMembership = remove
             detail.why = localButton(detail, "why", 150, function() self:ShowExplanation() end)
             detail.locate = localButton(detail, "locate", 109, function()
-                self.locateFailed = not app:HighlightContact(self.selected)
-                if self.locateFailed or self.noteDraft or detail.note:HasFocus() then self:ShowDetails(true)
+                local shown, reason = app:HighlightContact(self.selected)
+                self.locateError = not shown and (reason or "locateUnavailable") or nil
+                if self.locateError or self.noteDraft or detail.note:HasFocus() then self:ShowDetails(true)
                 else detail:Hide() end
             end)
             detail.locate:SetPoint("TOPLEFT", 345, -261)
@@ -1753,7 +1754,7 @@ function UI.New(app)
             end)
             detail:SetScript("OnHide", function()
                 self.noteDraft = nil; detail.note:ClearFocus()
-                self.locateFailed = nil
+                self.locateError = nil
                 if self.explanationFrame then self.explanationFrame:Hide() end
             end)
             local save = localButton(detail, "saveNote", 160, function()
@@ -1876,9 +1877,9 @@ function UI.New(app)
             and not contact.savedOnly and not self.selectedFromJournal
         paintShown(detail.locate, canRequestLocate)
         paintEnabled(detail.locate, canRequestLocate)
-        local locateFailed = canRequestLocate and self.locateFailed
-        paintShown(detail.identityHelp, not preview and (identity == nil or locateFailed == true))
-        detail.identityHelp:SetText(self:T(locateFailed and "locateUnavailable" or contact.savedOnly and "legacyIdentity" or "identityUnknown"))
+        local locateError = canRequestLocate and self.locateError or nil
+        paintShown(detail.identityHelp, not preview and (identity == nil or locateError ~= nil))
+        detail.identityHelp:SetText(self:T(locateError or (contact.savedOnly and "legacyIdentity" or "identityUnknown")))
         for kind, buttonFrame in pairs(detail.listActions) do
             local listed = entry ~= nil and entry.kind == kind
             paintShown(buttonFrame, not preview)
