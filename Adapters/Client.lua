@@ -25,13 +25,18 @@ function Client:Count(key)
     if self.diagnostics and self.diagnostics.Count then self.diagnostics:Count(key) end
 end
 
-function Client:Clean(value)
+function Client:Readable(value)
     local checker = self.api.issecretvalue
     if type(checker) == "function" then
         local ok, secret = pcall(checker, value)
-        if not ok or secret then self:Count("restricted_values"); return nil end
+        if not ok or secret then self:Count("restricted_values"); return false end
     end
-    return value
+    return true
+end
+
+function Client:Clean(value)
+    if self:Readable(value) then return value end
+    return nil
 end
 
 -- Validate each return independently: one restricted field must not discard clean metadata.
@@ -102,22 +107,18 @@ function Client:Names(token)
         return first, second
     end
     if regional then
-        -- Camelot NameUtil obtains the surname from UnitName[Unmodified], not
-        -- UnitFullName's server field. Do not treat a backend as a surname.
+        -- Camelot NameUtil splits the first UnitName result at the surname
+        -- separator. The second result identifies the server.
         local constants = api.Constants and api.Constants.CharacterNameSeparatorConsts
         local separator = constants and self:Clean(constants.CHARACTERNAME_SURNAME_SEPARATOR)
         if type(separator) ~= "string" or #separator < 1 or #separator > 8 or separator:find("[%z\1-\31\127|]") then separator = " " end
         local partial
         for _, key in ipairs({ "UnitNameUnmodified", "UnitName" }) do
-            local first, surname = parts(api[key])
+            local first = parts(api[key])
             if first then
                 local split = first:find(separator, 1, true)
                 if (split and split > 1 and split + #separator <= #first) or first:match("^%S+%s+%S") then
                     return first, nil, true
-                end
-                if surname and first ~= surname then
-                    local full = self:Text(first .. separator .. surname, 160)
-                    if full then return full, nil, true end
                 end
                 partial = partial or first
             end
@@ -181,13 +182,11 @@ function Client:Stealth(token)
     for index = 1, 40 do
         local ok, aura = pcall(ns.GetAuraDataByIndex, token, index, "HELPFUL")
         if not ok then self:Count("aura_errors"); return nil, false end
-        local cleanAura = self:Clean(aura)
-        if cleanAura == nil then
-            local emptyOK, empty = pcall(function() return aura == nil end)
-            if emptyOK and empty and allReadable then return false, true end
+        if not self:Readable(aura) then return nil, false end
+        if aura == nil then
+            if allReadable then return false, true end
             return nil, false
         end
-        aura = cleanAura
         if type(aura) ~= "table" then return nil, false end
         local id = self:Number(self:Safe(function() return aura.spellId end))
         if id and STEALTH[id] then return true, true end
@@ -216,15 +215,14 @@ function Client:ReadUnit(token, source)
     if level and (level <= 0 or level > 1000) then level = nil end
     local rangeOwner = guid and ("guid:" .. guid) or (nameComplete and ("name:" .. name))
     local rangeMin, rangeMax, rangeMinExclusive = self:Range(token, rangeOwner)
-    local manager = api.C_NamePlateManager
-    local behind
-    if type(manager) == "table" then behind = self:Boolean(self:Safe(manager.IsNamePlateUnitBehindCamera, token)) end
     local stealth, readable
     -- Aura scans are driven by acquisition and aura signals, including the first
     -- sighting if a client's direct-token event was unavailable.
     if source ~= "poll" and source ~= "unit" and source ~= "cast" then stealth, readable = self:Stealth(token) end
-    local currentTarget, currentFocus
+    local behind, currentTarget, currentFocus
     if token:match("^nameplate%d+$") then
+        local manager = api.C_NamePlateManager
+        if type(manager) == "table" then behind = self:Boolean(self:Safe(manager.IsNamePlateUnitBehindCamera, token)) end
         currentTarget = self:UnitMatch(token, "target")
         currentFocus = self:UnitMatch(token, "focus")
     end
@@ -248,7 +246,10 @@ function Client:Context()
     if instance == "pvp" then kind = "battleground"
     elseif instance == "arena" then kind = "arena"
     elseif instance and instance ~= "none" then kind = "instance" end
-    local zone = self:Text(self:Safe(api.GetZonePVPInfo), 30)
+    local pvp = api.C_PvP
+    local zoneReader = type(pvp) == "table" and pvp.GetZonePVPInfo
+    if type(zoneReader) ~= "function" then zoneReader = api.GetZonePVPInfo end
+    local zone = self:Text(self:Safe(zoneReader), 30)
     local sanctuary
     if zone then sanctuary = zone == "sanctuary" end
     return {

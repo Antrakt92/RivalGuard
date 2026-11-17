@@ -91,6 +91,25 @@ H.Test("sensors reject restricted tokens and spell identifiers", function()
     H.Equal(#casts, 0)
 end)
 
+H.Test("sensors filter untracked casts before reading units and reuse a single owner read", function()
+    local sensors, units, _, _, casts, _, errors = fixture()
+    units.nameplate1 = player()
+    sensors:Start(); sensors:OnEvent("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    local reads, readUnit = 0, sensors.client.ReadUnit
+    function sensors.client:ReadUnit(...)
+        reads = reads + 1
+        return readUnit(self, ...)
+    end
+    function sensors.app.engine:TracksCast(id) return id == 1856 end
+    sensors:OnEvent("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "ordinary", 100)
+    H.Equal(reads, 0); H.Equal(#casts, 0)
+    sensors:OnEvent("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "stealth", 1856)
+    H.Equal(reads, 1); H.Equal(#casts, 1)
+    sensors.app.engine.TracksCast = function() error("unexpected classifier failure") end
+    sensors:OnEvent("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "stealth", 1856)
+    H.Equal(reads, 1); H.Equal(#casts, 1); H.Equal(errors[#errors], "sensor_TracksCast")
+end)
+
 H.Test("sensors do not attribute casts using a partial name without a GUID", function()
     local sensors, units, _, _, casts = fixture()
     units.nameplate1 = { name = "Alpha", class = "ROGUE" }

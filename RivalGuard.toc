@@ -22,6 +22,7 @@ Adapters/Client.lua
 Adapters/Sensors.lua
 Locale/Strings.lua
 UI/Model.lua
+UI/Launcher.lua
 UI/Dialogs.lua
 UI/Badges.lua
 UI/Main.lua

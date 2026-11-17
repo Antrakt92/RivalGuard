@@ -36,7 +36,13 @@ function D.Attach(ui, app, H)
         self.ruleDraft = RG.Util.Copy(self.ruleOriginal or {
             name = t("ruleNewName"), enabled = true, priority = 50, classes = {},
             event = "sighting", action = "alert", sound = true, banner = true, cooldown = 30,
+            context = "any", list = "any", range = 0, rangePolicy = "possible", rangeUnknown = false,
         })
+        self.ruleDraft.context = self.ruleDraft.context or "any"
+        self.ruleDraft.list = self.ruleDraft.list or "any"
+        self.ruleDraft.range = self.ruleDraft.range or 0
+        self.ruleDraft.rangePolicy = self.ruleDraft.rangePolicy or "possible"
+        self.ruleDraft.rangeUnknown = self.ruleDraft.rangeUnknown == true
         if self.rulesFrame then
             self.loadingRule = true
             self.rulesFrame.nameInput:SetText(self.ruleDraft.name)
@@ -86,7 +92,8 @@ function D.Attach(ui, app, H)
         slider:SetScript("OnValueChanged", function(_, value)
             if self.loadingRule or not self.ruleDraft then return end
             self.ruleDraft[field] = math.floor(value / step + 0.5) * step
-            valueText:SetText(tostring(self.ruleDraft[field]))
+            if field == "range" then self:RefreshRules()
+            else valueText:SetText(tostring(self.ruleDraft[field])) end
         end)
         slider.ruleField, slider.valueText = field, valueText
         return slider
@@ -117,26 +124,35 @@ function D.Attach(ui, app, H)
         f.next:SetPoint("LEFT", f.previous, "RIGHT", 11, 0)
         f.empty = H.label(f, "emptyRules", 12, H.C.muted)
         f.empty:SetPoint("TOPLEFT", 18, -171); f.empty:SetWidth(200)
-        local nameLabel = H.label(f, "ruleName", 13)
-        nameLabel:SetPoint("TOPLEFT", 253, -125)
-        f.nameInput = textInput(f, 495, 80)
-        f.nameInput:SetPoint("TOPLEFT", 260, -150)
+        local base = CreateFrame("Frame", nil, f); base:SetAllPoints(f)
+        local predicates = CreateFrame("Frame", nil, f); predicates:SetAllPoints(f)
+        f.basicPanel, f.conditionPanel = base, predicates
+        f.basic = H.localButton(f, "basicRule", 167, function() self.ruleTab = "basic"; self:RefreshRules() end)
+        f.basic:SetPoint("TOPLEFT", 253, -108)
+        f.conditions = H.localButton(f, "ruleConditions", 167, function()
+            self.ruleTab = "conditions"; f.nameInput:ClearFocus(); self:RefreshRules()
+        end)
+        f.conditions:SetPoint("LEFT", f.basic, "RIGHT", 12, 0)
+        local nameLabel = H.label(base, "ruleName", 13)
+        nameLabel:SetPoint("TOPLEFT", 253, -151)
+        f.nameInput = textInput(base, 495, 80)
+        f.nameInput:SetPoint("TOPLEFT", 260, -174)
         f.nameInput:SetScript("OnTextChanged", function(box)
             if not self.loadingRule and self.ruleDraft then self.ruleDraft.name = box:GetText() end
         end)
         f:SetScript("OnHide", function() f.nameInput:ClearFocus() end)
-        f.enabled = draftCheck(f, "ruleEnabled", "enabled", 250, -187)
-        f.event = draftChoice(f, "ruleEvent", "event", {
+        f.enabled = draftCheck(base, "ruleEnabled", "enabled", 250, -209)
+        f.event = draftChoice(base, "ruleEvent", "event", {
             { "sighting", "sighting" }, { "returning", "returning" }, { "stealth", "eventStealth" },
             { "targeting", "eventTargeting" }, { "any", "anyEvent" },
-        }, 253, -226, 495)
-        local classesLabel = H.label(f, "ruleClasses", 12, H.C.muted)
-        classesLabel:SetPoint("TOPLEFT", 253, -291)
+        }, 253, -243, 495)
+        local classesLabel = H.label(base, "ruleClasses", 12, H.C.muted)
+        classesLabel:SetPoint("TOPLEFT", 253, -299)
         f.classes = {}
         for i, token in ipairs(RG.Defaults.classes) do
             local class = token
-            local b = CreateFrame("Button", nil, f)
-            b:SetSize(26, 26); b:SetPoint("TOPLEFT", 253 + (i - 1) * 35, -315)
+            local b = CreateFrame("Button", nil, base)
+            b:SetSize(26, 26); b:SetPoint("TOPLEFT", 253 + (i - 1) * 35, -322)
             H.fill(b, H.C.panel); b.edges = H.outline(b)
             b.icon = b:CreateTexture(nil, "ARTWORK"); b.icon:SetPoint("TOPLEFT", 2, -2); b.icon:SetPoint("BOTTOMRIGHT", -2, 2)
             b.icon:SetTexture("Interface\\Icons\\ClassIcon_" .. class)
@@ -147,16 +163,31 @@ function D.Attach(ui, app, H)
             b:SetScript("OnLeave", H.hideTooltip)
             f.classes[#f.classes + 1] = { class = class, frame = b }
         end
-        f.allClasses = H.localButton(f, "all", 160, function() self.ruleDraft.classes = {}; self:RefreshRules() end)
-        f.allClasses:SetPoint("TOPLEFT", 253, -352)
-        f.action = draftChoice(f, "ruleAction", "action", { { "alert", "ruleAlert" }, { "suppress", "ruleSuppress" } }, 253, -394, 495)
-        f.sound = draftCheck(f, "ruleSound", "sound", 250, -455)
-        f.banner = draftCheck(f, "ruleBanner", "banner", 470, -455)
+        f.allClasses = H.localButton(base, "all", 160, function() self.ruleDraft.classes = {}; self:RefreshRules() end)
+        f.allClasses:SetPoint("TOPLEFT", 253, -357)
+        f.action = draftChoice(base, "ruleAction", "action", { { "alert", "ruleAlert" }, { "suppress", "ruleSuppress" } }, 253, -395, 495)
+        f.sound = draftCheck(base, "ruleSound", "sound", 250, -453)
+        f.banner = draftCheck(base, "ruleBanner", "banner", 470, -453)
         -- Keep each checkbox's hit area in its own column.
         f.sound:SetHitRectInsets(0, -180, 0, 0)
         f.banner:SetHitRectInsets(0, -180, 0, 0)
-        f.cooldown = draftSlider(f, "ruleCooldown", "cooldown", 253, -501, 0, 600, 5)
-        f.priority = draftSlider(f, "rulePriority", "priority", 253, -561, 1, 100, 1)
+        f.cooldown = draftSlider(base, "ruleCooldown", "cooldown", 253, -498, 0, 600, 5)
+        f.priority = draftSlider(base, "rulePriority", "priority", 253, -557, 1, 100, 1)
+        local conditionHelp = H.label(predicates, "ruleConditionsHelp", 12, H.C.muted)
+        conditionHelp:SetPoint("TOPLEFT", 253, -156); conditionHelp:SetWidth(495)
+        f.context = draftChoice(predicates, "ruleContext", "context", {
+            { "any", "contextAny" }, { "world", "world" }, { "battleground", "battleground" }, { "arena", "arena" }, { "instance", "instance" },
+        }, 253, -230, 495)
+        f.list = draftChoice(predicates, "ruleListStatus", "list", {
+            { "any", "listAny" }, { "listed", "listListed" }, { "unlisted", "listUnlisted" },
+        }, 253, -296, 495)
+        f.range = draftSlider(predicates, "ruleRange", "range", 253, -365, 0, 100, 5)
+        local rangeHelp = H.label(predicates, "ruleRangeHelp", 11, H.C.muted)
+        rangeHelp:SetPoint("TOPLEFT", 253, -414); rangeHelp:SetWidth(495)
+        f.rangePolicy = draftChoice(predicates, "rangePolicy", "rangePolicy", {
+            { "possible", "possible" }, { "confirmed", "confirmed" },
+        }, 253, -472, 495)
+        f.rangeUnknown = draftCheck(predicates, "unknownRange", "rangeUnknown", 250, -542)
         f.save = H.localButton(f, "saveRule", 160, function() self:SaveRule() end)
         f.save:SetPoint("TOPLEFT", 253, -625)
         f.delete = H.localButton(f, "deleteRule", 185, function() self:DeleteRule() end)
@@ -184,21 +215,26 @@ function D.Attach(ui, app, H)
         end
         f.previous:SetEnabled(self.ruleOffset > 0); f.next:SetEnabled(self.ruleOffset + 10 < #rules)
         self.loadingRule = true
-        for _, field in ipairs({ "enabled", "sound", "banner" }) do f[field]:SetChecked(self.ruleDraft[field] == true) end
-        for _, key in ipairs({ "event", "action" }) do
+        local conditionTab = self.ruleTab == "conditions"
+        f.basicPanel:SetShown(not conditionTab); f.conditionPanel:SetShown(conditionTab)
+        f.basic.bg:SetColorTexture(unpack(not conditionTab and { 0.10, 0.22, 0.28, 1 } or H.C.panel))
+        f.conditions.bg:SetColorTexture(unpack(conditionTab and { 0.10, 0.22, 0.28, 1 } or H.C.panel))
+        for _, field in ipairs({ "enabled", "sound", "banner", "rangeUnknown" }) do f[field]:SetChecked(self.ruleDraft[field] == true) end
+        for _, key in ipairs({ "event", "action", "context", "list", "rangePolicy" }) do
             for _, option in ipairs(f[key].ruleOptions) do
                 if self.ruleDraft[f[key].ruleField] == option[1] then f[key].label:SetText(t(option[2]) .. "  ›") end
             end
         end
-        for _, key in ipairs({ "cooldown", "priority" }) do
-            f[key]:SetValue(self.ruleDraft[key]); f[key].valueText:SetText(tostring(self.ruleDraft[key]))
+        for _, key in ipairs({ "cooldown", "priority", "range" }) do
+            f[key]:SetValue(self.ruleDraft[key])
+            f[key].valueText:SetText(key == "range" and self.ruleDraft[key] == 0 and t("ruleRangeInherit") or tostring(self.ruleDraft[key]))
         end
         local visibleIndex = 0
         for _, chip in ipairs(f.classes) do
             local available = not ui.classAvailability or ui.classAvailability[chip.class] == true
             chip.frame:SetShown(available)
             if available then
-                chip.frame:ClearAllPoints(); chip.frame:SetPoint("TOPLEFT", 253 + visibleIndex * 35, -315)
+                chip.frame:ClearAllPoints(); chip.frame:SetPoint("TOPLEFT", 253 + visibleIndex * 35, -322)
                 visibleIndex = visibleIndex + 1
             end
             local selected = M.ClassEnabled(self.ruleDraft.classes, chip.class)
@@ -207,6 +243,7 @@ function D.Attach(ui, app, H)
         end
         local alert = self.ruleDraft.action == "alert"
         f.sound:SetEnabled(alert); f.banner:SetEnabled(alert)
+        f.rangePolicy:SetEnabled(self.ruleDraft.range > 0); f.rangeUnknown:SetEnabled(self.ruleDraft.range > 0)
         f.delete:SetEnabled(self.ruleIndex ~= nil)
         self.loadingRule = false
     end
@@ -242,6 +279,7 @@ function D.Attach(ui, app, H)
 
     function self:OpenRules()
         if not self.rulesFrame then self:BuildRules() end
+        self.ruleTab = "basic"
         self:RuleDraft(#ui:Profile().rules > 0 and 1 or nil)
         self.rulesFrame:Show()
     end

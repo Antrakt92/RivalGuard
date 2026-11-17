@@ -14,13 +14,44 @@ ROOT = Path(__file__).resolve().parents[1]
 ADDON = "RivalGuard"
 ASSET_TYPES = {".tga", ".blp", ".png", ".jpg", ".jpeg", ".ogg", ".mp3", ".wav", ".ttf", ".otf"}
 RUNTIME_ROOTS = {"Core", "Runtime", "UI", "Locale", "Locales", "Data", "Adapters"}
+ICON_TYPES = {".tga", ".blp"}
+DOS_DEVICES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+
+
+def portable_parts(path: str) -> list[str]:
+    parts = path.split("/")
+    for part in parts:
+        if (
+            not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", part)
+            or part.endswith(".")
+            or part.split(".", 1)[0].upper() in DOS_DEVICES
+        ):
+            raise ValueError(f"Unsafe or unsupported package path: {path}")
+    return parts
+
+
+def linked(path: Path) -> bool:
+    return path.is_symlink() or getattr(path, "is_junction", lambda: False)()
+
+
+def exact_source(root: Path, path: str) -> Path:
+    source = root
+    for part in portable_parts(path):
+        if part not in {entry.name for entry in source.iterdir()}:
+            raise ValueError(f"Missing package input or filename case mismatch: {path}")
+        source = source / part
+        if linked(source):
+            raise ValueError(f"Unsupported symlink or directory junction: {path}")
+    if not source.is_file():
+        raise ValueError(f"Package input is not a file: {path}")
+    return source
 
 
 def manifests(root: Path) -> list[Path]:
     result = sorted(root.glob(f"{ADDON}*.toc"))
     if not result or root / f"{ADDON}.toc" not in result:
         raise ValueError(f"Missing {ADDON}.toc")
-    return result
+    return [exact_source(root, toc.name) for toc in result]
 
 
 def toc_entries(toc: Path) -> tuple[dict[str, str], list[str]]:
@@ -37,12 +68,9 @@ def toc_entries(toc: Path) -> tuple[dict[str, str], list[str]]:
                 metadata[key] = value.strip()
         elif line and not line.startswith("#"):
             path = line.replace("\\", "/")
-            parts = PurePosixPath(path).parts
+            parts = portable_parts(path)
             if (
-                not re.fullmatch(r"[A-Za-z0-9_./-]+\.lua", path)
-                or ".." in parts
-                or path.startswith("/")
-                or not parts
+                not path.endswith(".lua")
                 or (parts[0] not in RUNTIME_ROOTS and path != "Runtime.lua")
             ):
                 raise ValueError(f"Unsafe or unsupported runtime path in {toc.name}: {line}")
@@ -54,47 +82,85 @@ def toc_entries(toc: Path) -> tuple[dict[str, str], list[str]]:
     return metadata, entries
 
 
+def interfaces(metadata: dict[str, str], toc_name: str) -> list[int]:
+    value = metadata.get("Interface", "")
+    if not re.fullmatch(r"[1-9][0-9]{0,6}(?:\s*,\s*[1-9][0-9]{0,6})*", value):
+        raise ValueError(f"Invalid Interface in {toc_name}")
+    result = [int(item) for item in value.split(",")]
+    if len(result) != len(set(result)):
+        raise ValueError(f"Duplicate Interface in {toc_name}")
+    return result
+
+
+def source_tree(root: Path, folder: Path):
+    for entry in sorted(folder.iterdir()):
+        if entry.name.startswith("."):
+            continue
+        if linked(entry):
+            raise ValueError(f"Unsupported symlink or directory junction: {entry.relative_to(root)}")
+        if entry.is_dir():
+            yield from source_tree(root, entry)
+        elif entry.is_file():
+            yield entry
+
+
+def inspect_icon(value: str, files: dict[str, bytes], toc_name: str) -> None:
+    prefix = f"Interface/AddOns/{ADDON}/"
+    path = value.replace("\\", "/")
+    if not path.startswith(prefix):
+        raise ValueError(f"Invalid IconTexture in {toc_name}")
+    relative = path[len(prefix):]
+    if portable_parts(relative)[0] != "Media":
+        raise ValueError(f"IconTexture must name a Media asset in {toc_name}")
+    suffix = PurePosixPath(relative).suffix
+    candidates = [relative] if suffix in ICON_TYPES else [relative + ext for ext in sorted(ICON_TYPES)] if not suffix else []
+    if sum(candidate in files for candidate in candidates) != 1:
+        raise ValueError(f"IconTexture missing or ambiguous in {toc_name}: {relative}")
+
+
 def package_inputs(root: Path) -> tuple[str, dict[str, bytes]]:
     files: dict[str, bytes] = {}
     versions: set[str] = set()
+    icons: dict[str, str] = {}
     for toc in manifests(root):
         metadata, entries = toc_entries(toc)
         version = metadata.get("Version", "")
         if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?", version):
             raise ValueError(f"Invalid Version in {toc.name}")
-        if not re.fullmatch(r"[0-9]+(?:\s*,\s*[0-9]+)*", metadata.get("Interface", "")):
-            raise ValueError(f"Invalid Interface in {toc.name}")
+        interfaces(metadata, toc.name)
         if metadata.get("SavedVariables") != "RivalGuardDB":
             raise ValueError(f"Unexpected SavedVariables in {toc.name}")
         versions.add(version)
+        icons[toc.name] = metadata.get("IconTexture", "")
         files[toc.name] = toc.read_bytes()
         for entry in entries:
-            source = root / entry
-            if not source.is_file() or source.is_symlink():
-                raise ValueError(f"Missing runtime module or unsupported symlink: {entry}")
-            if not source.resolve().is_relative_to(root.resolve()):
-                raise ValueError(f"Runtime module escapes repository: {entry}")
-            files[entry] = source.read_bytes()
+            files[entry] = exact_source(root, entry).read_bytes()
     if len(versions) != 1:
         raise ValueError("Client manifests disagree on version")
     for name in ("LICENSE", "README.md"):
-        if not (root / name).is_file():
-            raise ValueError(f"Missing {name}")
-        files[name] = (root / name).read_bytes()
-    if (root / "CHANGELOG.md").is_file():
-        files["CHANGELOG.md"] = (root / "CHANGELOG.md").read_bytes()
-    media = root / "Media"
-    if media.exists():
-        for source in sorted(media.rglob("*")):
-            relative = source.relative_to(root)
-            if any(part.startswith(".") for part in relative.parts):
-                continue
-            if source.is_file() and source.suffix.lower() in ASSET_TYPES:
-                if source.is_symlink() or not source.resolve().is_relative_to(root.resolve()):
-                    raise ValueError(f"Media path escapes repository: {relative}")
+        files[name] = exact_source(root, name).read_bytes()
+    if (root / "CHANGELOG.md").exists() or linked(root / "CHANGELOG.md"):
+        files["CHANGELOG.md"] = exact_source(root, "CHANGELOG.md").read_bytes()
+    for folder_name in sorted(RUNTIME_ROOTS | {"Media"}):
+        folder = root / folder_name
+        if linked(folder):
+            raise ValueError(f"Unsupported symlink or directory junction: {folder_name}")
+        if not folder.is_dir():
+            continue
+        for source in source_tree(root, folder):
+            relative = source.relative_to(root).as_posix()
+            if folder_name != "Media":
+                if source.suffix.lower() == ".lua" and relative not in files:
+                    raise ValueError(f"Runtime module missing from manifests: {relative}")
+            elif source.suffix.lower() in ASSET_TYPES:
+                portable_parts(relative)
                 if source.stat().st_size > 8 * 1024 * 1024:
                     raise ValueError(f"Oversized media asset: {relative}")
-                files[relative.as_posix()] = source.read_bytes()
+                files[relative] = source.read_bytes()
+    if (root / "Runtime.lua").exists() and "Runtime.lua" not in files:
+        raise ValueError("Runtime module missing from manifests: Runtime.lua")
+    for toc_name, icon in icons.items():
+        inspect_icon(icon, files, toc_name)
     folded = [name.casefold() for name in files]
     if len(folded) != len(set(folded)):
         raise ValueError("Package has case-insensitive path collisions")

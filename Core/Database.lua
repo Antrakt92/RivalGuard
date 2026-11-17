@@ -51,6 +51,9 @@ local function ruleArray(value, strict)
             if rule.context ~= nil and not RULE_CONTEXTS[rule.context] then return nil end
             if rule.list ~= nil and not RULE_LISTS[rule.list] then return nil end
             if rule.rangePolicy ~= nil and not RULE_POLICIES[rule.rangePolicy] then return nil end
+            if rule.classes ~= nil and type(rule.classes) ~= "table" then return nil end
+            if rule.event ~= nil and type(rule.event) ~= "string" then return nil end
+            if rule.action ~= nil and type(rule.action) ~= "string" then return nil end
         end
         local clean = {
             name = U.Text(rule.name, 80), enabled = rule.enabled ~= false,
@@ -113,6 +116,7 @@ function DB.ValidateProfile(value, strict)
     local checks = {
         { p.display, "maxRows", 3, 20 }, { p.display, "scale", 0.65, 2 }, { p.display, "textSize", 10, 24 },
         { p.display, "badgeSize", 16, 40 }, { p.display, "badgeOffset", 0, 30 },
+        { p.display, "minimapAngle", 0, 360 },
         { p.alerts, "cooldown", 0, 600 }, { p.alerts, "returnAfter", 5, 600 }, { p.alerts, "soundGap", 0.5, 10 },
         { p.alerts, "waveWindow", 0.1, 3 }, { p.alerts, "waveThreshold", 2, 20 },
         { p.range, "yards", 5, 100 }, { p.retention, "contactSeconds", 15, 1800 },
@@ -126,7 +130,7 @@ function DB.ValidateProfile(value, strict)
             check[1][check[2]] = math.max(check[3], math.min(check[4], value))
         end
     end
-    local integers = { { p.display, "maxRows" }, { p.display, "textSize" }, { p.alerts, "waveThreshold" }, { p.retention, "maxContacts" }, { p.retention, "journalDays" }, { p.retention, "maxJournal" }, { p.retention, "maxHistory" } }
+    local integers = { { p.display, "maxRows" }, { p.display, "textSize" }, { p.display, "minimapAngle" }, { p.alerts, "waveThreshold" }, { p.retention, "maxContacts" }, { p.retention, "journalDays" }, { p.retention, "maxJournal" }, { p.retention, "maxHistory" } }
     for _, entry in ipairs(integers) do
         if entry[1][entry[2]] % 1 ~= 0 then
             if strict then return nil, "invalid_integer" end
@@ -171,14 +175,18 @@ function DB.New(raw)
     self.root.onboardingSeen = raw.onboardingSeen == true
     local count = 1
     if type(raw.profiles) == "table" then
+        local function restore(name)
+            local clean = DB.ValidateProfile(raw.profiles[name], false)
+            if not clean then return end
+            if not self.root.profiles[name] then count = count + 1 end
+            self.root.profiles[name] = clean
+        end
+        if raw.profiles.Default ~= nil then restore("Default") end
+        local active = profileName(raw.activeProfile)
+        if active and active ~= "Default" and active == raw.activeProfile and raw.profiles[active] ~= nil then restore(active) end
         for name, value in pairs(raw.profiles) do
-            if profileName(name) == name and (self.root.profiles[name] or count < MAX_PROFILES) then
-                local clean = DB.ValidateProfile(value, false)
-                if clean then
-                    if not self.root.profiles[name] then count = count + 1 end
-                    self.root.profiles[name] = clean
-                end
-            end
+            if count >= MAX_PROFILES then break end
+            if type(value) == "table" and profileName(name) == name and not self.root.profiles[name] then restore(name) end
         end
     end
     if self.root.profiles[raw.activeProfile] then self.root.activeProfile = raw.activeProfile end

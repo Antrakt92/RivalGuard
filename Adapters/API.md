@@ -6,11 +6,14 @@ presence is different from readable data: each returned field is checked before
 it can influence tracking or alerts.
 
 Names, GUIDs, classes and spell identifiers may be unavailable or restricted.
-Anonymous observations remain separate by token generation. A token removal
-immediately ends its cast association; late events are never matched to recently
-removed players. Scoreboard matching is not used. A partial name can be shown
+Anonymous observations remain separate by token generation. The synchronous cast
+event supplies a unit token and cast GUID. The adapter checks the current readable
+owner of an active token and discards the association on removal. A cast GUID
+does not independently identify its caster across token lifetimes. Scoreboard
+matching is not used. A partial name can be shown
 without becoming a durable identity; a clean GUID remains usable independently.
-Forever's surname and Retail's realm are handled separately.
+Forever's first name result can contain the character's surname. The second
+result identifies the server. Retail's durable name includes its realm.
 
 Distance is exact only when `UnitDistanceSquared` provides a clean finite value
 and a successful `checkedDistance` result. Successful interaction checks provide
@@ -63,6 +66,8 @@ The initial API review used these immutable upstream source revisions:
 - [Unit comparison and target event declarations](https://github.com/Gethe/wow-ui-source/blob/bebcb6bf309cf41b41bd74f8ca651e6a105b2676/Interface/AddOns/Blizzard_APIDocumentationGenerated/UnitDocumentation.lua)
 - [Restriction event sequencing](https://github.com/Gethe/wow-ui-source/blob/297d7aaaa736f346b3e036f38ee088eaf7f8c07f/Interface/AddOns/Blizzard_APIDocumentationGenerated/RestrictedActionsDocumentation.lua)
 - [Forever shard events](https://github.com/Gethe/wow-ui-source/blob/bebcb6bf309cf41b41bd74f8ca651e6a105b2676/Interface/AddOns/Blizzard_APIDocumentationGenerated/SystemDocumentation.lua)
+- [Forever character names](https://github.com/Gethe/wow-ui-source/blob/bebcb6bf309cf41b41bd74f8ca651e6a105b2676/Interface/AddOns/Blizzard_FrameXMLUtil/NameUtil.lua)
+- [Zone PvP state](https://github.com/Gethe/wow-ui-source/blob/bebcb6bf309cf41b41bd74f8ca651e6a105b2676/Interface/AddOns/Blizzard_APIDocumentationGenerated/PvpInfoDocumentation.lua)
 
 Future client builds require renewed compatibility checks. Function declarations
 describe contracts but do not establish availability in every game context.

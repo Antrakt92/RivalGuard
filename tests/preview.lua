@@ -6,6 +6,13 @@ local W = assert(loadfile(root .. "/tests/support/wow.lua"))()
 local state = W.New(); state.locale = locale
 state.api.RivalGuardDB = { schemaVersion = 1, onboardingSeen = true }
 state.api.UIParent:SetSize(width / scale, height / scale); state.api.UIParent:SetScale(scale)
+if view == "launcher" or view == "appearance" then
+    local map = state.api.CreateFrame("Frame", "Minimap", state.api.UIParent)
+    map:SetSize(150, 150)
+    map:SetPoint("TOPRIGHT", state.api.UIParent, "TOPRIGHT", -22, -38)
+    local background = map:CreateTexture(nil, "BACKGROUND")
+    background:SetAllPoints(); background:SetColorTexture(0.12, 0.2, 0.27, 1)
+end
 local RG = state:LoadTOC()
 state:Fire("ADDON_LOADED", "RivalGuard")
 local app = RG.instance
@@ -27,11 +34,13 @@ elseif view == "guide" then app.ui:ShowGuide(true)
 elseif view == "journal" then app.ui:OpenSettings("journal")
 elseif view == "personal" then app.ui:OpenSettings("journal"); app.ui.journalPersonal:Click()
 elseif view == "rules" then app.ui:OpenRules()
+elseif view == "conditions" then app.ui:OpenRules(); app.ui.rulesDialog.conditions:Click()
+elseif view == "appearance" then app.ui:OpenSettings("appearance")
 elseif view == "import" then app.ui:OpenTransfer("import")
 elseif view == "export" then app.ui:OpenTransfer("export")
 elseif view == "details" then app.ui:Select(app.engine:Snapshot()[1])
 elseif view == "banner" then app.ui:PreviewAlert()
-elseif view ~= "main" then error("unknown preview view") end
+elseif view ~= "main" and view ~= "launcher" then error("unknown preview view") end
 
 local function json(value)
     if type(value) == "boolean" then return value and "true" or "false" end

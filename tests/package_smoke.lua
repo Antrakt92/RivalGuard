@@ -1,0 +1,25 @@
+local packageRoot, testsRoot, manifest, interface = arg[1], arg[2], arg[3], tonumber(arg[4])
+assert(packageRoot and testsRoot and manifest and interface and interface > 0, "invalid package smoke inputs")
+local H = assert(loadfile(testsRoot .. "/tests/support/harness.lua"))()
+RGTest = H
+H.root = packageRoot
+local W = assert(loadfile(testsRoot .. "/tests/support/wow.lua"))()
+local state = W.New()
+state.api.GetBuildInfo = function() return "fixture", "archive", "", interface end
+state.api.RivalGuardDB = { schemaVersion = 1, onboardingSeen = true }
+local RG = state:LoadTOC(manifest)
+state:Fire("ADDON_LOADED", "RivalGuard")
+local app = assert(RG.instance, "runtime did not start")
+assert(app.initialized, "packaged addon did not initialize")
+assert(app:Status().capabilities.interface == interface, "reported interface does not match simulated client")
+assert(type(state.api.SlashCmdList.RIVALGUARD) == "function", "packaged slash command unavailable")
+state:Unit("nameplate1", { guid = "Player-Archive", name = "Archive Rival", class = "ROGUE", hostile = true, isPlayer = true })
+state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+state:Advance(2)
+assert(#app.engine:Snapshot() == 1, "packaged sensor did not report the fixture")
+assert(app.engine:Snapshot()[1].identity == "guid:Player-Archive", "packaged identity did not survive")
+assert(app.ui.rows[1]:IsShown(), "packaged list did not render fixture")
+assert(app.diagnostics.counts.errors == nil or app.diagnostics.counts.errors == 0, "packaged addon recorded fixture errors")
+state:Fire("PLAYER_LOGOUT")
+assert(state.api.RivalGuardDB == app.db.root, "packaged addon did not preserve saved state")
+print(string.format("Packaged TOC %s / Interface %d loaded and observed one fixture", manifest, interface))

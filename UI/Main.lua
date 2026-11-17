@@ -105,6 +105,7 @@ function UI.New(app)
         self.destroyed = true
         if self.ticker then self.ticker:SetScript("OnUpdate", nil); self.ticker:UnregisterAllEvents() end
         if self.badges then self.badges:Destroy() end
+        if self.launcher then self.launcher:Destroy() end
         for name, frame in pairs(self.windows) do
             frame:Hide()
             if _G[name] == frame then _G[name] = nil end
@@ -267,6 +268,7 @@ function UI.New(app)
     empty:SetPoint("TOPLEFT", 15, -104); empty:SetWidth(318); empty:SetJustifyH("CENTER")
     local emptyHelp = label(main, "noEnemiesHelp", 11, C.muted)
     emptyHelp:SetPoint("TOPLEFT", 20, -130); emptyHelp:SetWidth(308); emptyHelp:SetJustifyH("CENTER")
+    emptyHelp:SetHeight(63)
     self.empty, self.emptyHelp = empty, emptyHelp
 
     for i = 1, 20 do
@@ -496,6 +498,16 @@ function UI.New(app)
     y = slider(appearance, "textSize", "display.textSize", y - 8, 11, 20, 1)
     y = slider(appearance, "scale", "display.scale", y, 0.75, 1.5, 0.05)
     y = slider(appearance, "maxRows", "display.maxRows", y, 3, 20, 1)
+    y = section(appearance, "minimapLauncher", y - 6)
+    y = check(appearance, "minimapLauncher", "display.minimap", y, "minimapLauncherTip")
+    local launcherReset = localButton(appearance, "launcherReset", 310, function()
+        local profile = self:Profile()
+        profile.display.minimapAngle = RG.Defaults.profile.display.minimapAngle
+        if self.launcher then self.launcher:Refresh() end
+    end)
+    launcherReset:SetPoint("TOPLEFT", 0, y)
+    self.launcherReset = launcherReset
+    y = y - 45
     local preview = localButton(appearance, "previewBanner", 200, function() self:PreviewAlert() end)
     preview:SetPoint("TOPLEFT", 0, y)
     local previewContacts = localButton(appearance, "previewList", 200, function() app:Demo() end)
@@ -671,6 +683,8 @@ function UI.New(app)
     end
 
     self.badges = RG.Badges.New(function() return self:Profile() end)
+    if RG.Launcher then self.launcher = RG.Launcher.New(self, tooltip, hideTooltip) end
+    self.launcherReset:SetEnabled(self.launcher ~= nil)
 
     function self:RefreshControls()
         self.refreshingControls = true
@@ -678,6 +692,7 @@ function UI.New(app)
         for _, control in ipairs(self.controls) do
             if control.kind == "check" then
                 control.frame:SetChecked(pathGet(self:Profile(), control.path) == true)
+                if control.path == "display.minimap" then control.frame:SetEnabled(self.launcher ~= nil) end
             elseif control.kind == "slider" then
                 local value = pathGet(self:Profile(), control.path)
                 control.frame:SetValue(value)
@@ -823,6 +838,7 @@ function UI.New(app)
         local paused = appStatus.state == "paused" or (untilTime and untilTime > now)
         local visibleCount = 0
         for _, row in ipairs(rows) do if row.visible then visibleCount = visibleCount + 1 end end
+        self.visibleCount = preview and 0 or visibleCount
         local status = preview and self:T("demoLabel") or not profile.enabled and self:T("disabled") or paused and self:T("paused") or self:T(appStatus.state == "limited" and "limited" or "active")
         statusText:SetText(status .. " · " .. self:F("inViewCount", visibleCount))
         self.pauseButton.label:SetText(self:T(paused and "resume" or "pause"))
@@ -853,7 +869,15 @@ function UI.New(app)
         end
         more:SetText(#rows > maxRows and self:F("moreContacts", #rows - maxRows) or self:T("noTarget"))
         if self.controlsDirty then self:RefreshControls(); self.controlsDirty = false end
+        if #rows == 0 then
+            local titleKey, helpKey = "noEnemies", "noEnemiesHelp"
+            if not profile.enabled and not preview then titleKey, helpKey = "noDisabled", "noDisabledHelp"
+            elseif #snapshot > 0 or M.Number(appStatus.contacts, 0) > 0 then titleKey, helpKey = "noFiltered", "noFilteredHelp"
+            elseif appStatus.nameplates == false and not preview then titleKey, helpKey = "noNameplates", "noNameplatesHelp" end
+            empty:SetText(self:T(titleKey)); emptyHelp:SetText(self:T(helpKey))
+        end
         self.badges:Refresh()
+        if self.launcher then self.launcher:Refresh() end
         if settings:IsShown() then
             self:FitWindow(settings, UI.layout.settingsWidth, UI.layout.settingsHeight, 1)
             if self.currentPage == "profiles" and (needsStatus or self.dataPage ~= "profiles") then self:RefreshProfiles() end

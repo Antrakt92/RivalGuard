@@ -72,6 +72,35 @@ H.Test("client distinguishes false from unknown in context and camera state", fu
     end
 end)
 
+H.Test("client reads sanctuary state from the supported PvP namespace", function()
+    local client, api, _, secret = fixture()
+    api.C_PvP = { GetZonePVPInfo = function() return "sanctuary", false end }
+    H.True(client:Context().sanctuary)
+    api.C_PvP.GetZonePVPInfo = function() return "contested", false end
+    H.False(client:Context().sanctuary)
+    api.C_PvP.GetZonePVPInfo = function() return secret, false end
+    H.Nil(client:Context().sanctuary)
+    api.C_PvP.GetZonePVPInfo = function() return nil end
+    H.Nil(client:Context().sanctuary)
+    api.C_PvP = nil
+    H.False(client:Context().sanctuary)
+end)
+
+H.Test("client requests behind-camera geometry only for nameplate tokens", function()
+    local client, api = fixture()
+    local calls = 0
+    api.C_NamePlateManager = { IsNamePlateUnitBehindCamera = function(token)
+        calls = calls + 1
+        assert(token == "nameplate1", "geometry requires a nameplate token")
+        return false
+    end }
+    H.Nil(client:ReadUnit("target", "poll").behindCamera)
+    H.Nil(client:ReadUnit("focus", "poll").behindCamera)
+    H.Equal(calls, 0)
+    H.False(client:ReadUnit("nameplate1", "poll").behindCamera)
+    H.Equal(calls, 1)
+end)
+
 H.Test("client range requires successful finite evidence and preserves uncertainty", function()
     local client, api, _, secret = fixture()
     api.UnitDistanceSquared = function() return 0, false end
@@ -95,7 +124,7 @@ end)
 H.Test("client names preserve regional surnames and reject placeholder identity", function()
     local client, api, unit = fixture()
     api.RegionalUniqueNamesEnabled = function() return true end
-    unit.name, unit.realm = "Альфа", "Фамилия"
+    unit.name, unit.realm = "Альфа Фамилия", "BackendRealm"
     api.UnitName = function() return unit.name, unit.realm end
     local obs = client:ReadUnit("target", "poll")
     H.Equal(obs.name, "Альфа Фамилия"); H.Nil(obs.realm); H.True(obs.nameComplete)
@@ -116,6 +145,10 @@ H.Test("client does not promote partial regional names or realm-like unknown suf
     local obs = client:ReadUnit("target", "poll")
     H.Equal(obs.name, "Alpha"); H.False(obs.nameComplete); H.Nil(obs.realm)
     H.Equal(obs.guid, "Player-A")
+    api.UnitNameUnmodified = function() return "Alpha", "BackendRealm" end
+    api.UnitName = api.UnitNameUnmodified
+    obs = client:ReadUnit("target", "poll")
+    H.Equal(obs.name, "Alpha"); H.False(obs.nameComplete); H.Nil(obs.realm)
 end)
 
 H.Test("client retail names require readable realm evidence for durable fallback identity", function()

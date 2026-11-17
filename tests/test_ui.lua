@@ -1,9 +1,10 @@
 local H = RGTest
 local W = assert(loadfile(H.root .. "/tests/support/wow.lua"))()
-local modules = { "Core/Bootstrap.lua", "Core/Util.lua", "Core/Defaults.lua", "Core/Codec.lua", "Core/Database.lua", "Core/Rules.lua", "Core/Engine.lua", "Core/Diagnostics.lua", "Locale/Strings.lua", "UI/Model.lua", "UI/Dialogs.lua", "UI/Badges.lua", "UI/Main.lua" }
+local modules = { "Core/Bootstrap.lua", "Core/Util.lua", "Core/Defaults.lua", "Core/Codec.lua", "Core/Database.lua", "Core/Rules.lua", "Core/Engine.lua", "Core/Diagnostics.lua", "Locale/Strings.lua", "UI/Model.lua", "UI/Dialogs.lua", "UI/Badges.lua", "UI/Launcher.lua", "UI/Main.lua" }
 
-local function setup(raw)
+local function setup(raw, configure)
     local state = W.New()
+    if configure then configure(state) end
     local RG = state:Load(modules)
     local app = { db = RG.Database.New(raw), changes = 0, demos = 0 }
     app.engine = RG.Engine.New({ clock = state.clock.Now, profile = app.db:GetProfile() })
@@ -23,6 +24,16 @@ local function setup(raw)
     local ui = RG.UI.New(app)
     app.ui = ui
     return state, RG, app, ui
+end
+
+local function minimap(state, forbidden)
+    local map = state.api.CreateFrame("Frame", "Minimap", state.api.UIParent)
+    map:SetSize(160, 120)
+    map.centerX, map.centerY = 900, 720
+    map:SetScale(1.2)
+    map.forbidden = forbidden
+    state.api.GetCursorPosition = function() return state.cursorX, state.cursorY end
+    return map
 end
 
 H.Test("actual UI initializes through strict frame methods and accessible controls", function()
@@ -409,4 +420,87 @@ H.Test("badge geometry waits for combat end and unsafe parent receives nothing",
     ui:SetNameplate("nameplate3", state.plates.nameplate3, contact)
     H.Nil(ui.badges.active.nameplate3)
     H.Equal(#state.blocked, 0)
+end)
+
+H.Test("advanced rule settings survive tab changes and constrain real decisions", function()
+    local _, RG, app, ui = setup()
+    ui:OpenRules()
+    local dialog = ui.rulesDialog
+    dialog.nameInput:SetText("Listed enemies close by")
+    dialog.priority:SetValue(78)
+    dialog.conditions:Click()
+    H.True(dialog.conditionPanel:IsShown()); H.False(dialog.basicPanel:IsShown())
+    dialog.context:Click()
+    dialog.list:Click()
+    dialog.range:SetValue(25)
+    dialog.rangePolicy:Click()
+    dialog.basic:Click()
+    H.Equal(dialog.nameInput:GetText(), "Listed enemies close by")
+    H.Equal(dialog.priority:GetValue(), 78)
+    H.Equal(#app.db:GetProfile().rules, 0)
+    dialog.save:Click()
+    local profile = app.db:GetProfile()
+    local rule = profile.rules[1]
+    H.Equal(rule.context, "world"); H.Equal(rule.list, "listed"); H.Equal(rule.range, 25)
+    H.Equal(rule.rangePolicy, "confirmed"); H.False(rule.rangeUnknown)
+    local contact = { id = "fixture", class = "ROGUE", hostile = true, isPlayer = true, rangeMin = 8, rangeMax = 25 }
+    local watch = { kind = "watch" }
+    local function decision(context, list)
+        return assert(RG.Rules.Evaluate(profile, contact, "sighting", { kind = context }, list))
+    end
+    H.Equal(decision("world", watch).ruleName, rule.name)
+    H.Nil(decision("world").ruleName)
+    H.Nil(decision("battleground", watch).ruleName)
+    contact.rangeMax = 35
+    H.Nil(decision("world", watch).ruleName)
+    local restored = assert(app.db:PreviewImport(assert(app.db:ExportProfile())))
+    H.Equal(restored.rules[1].rangePolicy, "confirmed")
+end)
+
+H.Test("minimap launcher toggles nearby from left click and opens settings from right click", function()
+    local state, _, app, ui = setup(nil, minimap)
+    local launcher = assert(ui.launcher)
+    H.Equal(launcher.frame:GetParent(), state.api.Minimap)
+    H.True(launcher.frame:IsShown()); H.True(ui.frame:IsShown())
+    launcher.frame:Click("LeftButton"); H.False(ui.frame:IsShown())
+    launcher.frame:Click("RightButton"); H.True(ui.settings:IsShown())
+    H.False(ui.frame:IsShown())
+    app.db:GetProfile().display.minimap = false
+    ui:Refresh(); H.False(launcher.frame:IsShown())
+end)
+
+H.Test("minimap drag commits angle on release and cancels during combat or profile switch", function()
+    local state, _, app, ui = setup(nil, minimap)
+    local launcher, map = assert(ui.launcher), state.api.Minimap
+    local frame, profile = launcher.frame, app.db:GetProfile()
+    local function position(dx, dy)
+        state.cursorX = (map.centerX + dx) * map:GetEffectiveScale()
+        state.cursorY = (map.centerY + dy) * map:GetEffectiveScale()
+    end
+    local initial = profile.display.minimapAngle
+    position(100, 0)
+    frame.scripts.OnDragStart(frame)
+    H.Equal(profile.display.minimapAngle, initial)
+    frame.scripts.OnDragStop(frame)
+    H.Equal(profile.display.minimapAngle, 0)
+    H.Nil(frame:GetScript("OnUpdate"))
+    position(0, 100); frame.scripts.OnDragStart(frame)
+    state.combat = true
+    ui:Refresh(); H.Nil(frame:GetScript("OnUpdate"))
+    frame.scripts.OnDragStop(frame)
+    H.Equal(profile.display.minimapAngle, 0)
+    state.combat = false
+    position(0, 100); frame.scripts.OnDragStart(frame)
+    assert(app.db:CreateProfile("Second")); assert(app.db:SetProfile("Second"))
+    ui:Refresh(); frame.scripts.OnDragStop(frame)
+    H.Equal(profile.display.minimapAngle, 0)
+    H.Equal(app.db:GetProfile().display.minimapAngle, initial)
+end)
+
+H.Test("forbidden minimap skips launcher and leaves settings usable", function()
+    local _, _, _, ui = setup(nil, function(state) minimap(state, true) end)
+    H.Nil(ui.launcher)
+    ui:OpenSettings("appearance")
+    H.True(ui.settings:IsShown())
+    H.False(ui.launcherReset.enabled)
 end)

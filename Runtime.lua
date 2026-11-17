@@ -53,7 +53,10 @@ end
 
 function App:Status()
     local profile = self.db:GetProfile()
-    local plates = self.client:Boolean(self.client:Safe(self.api.GetCVarBool, "nameplateShowEnemies"))
+    local cvars = self.api.C_CVar
+    local read = type(cvars) == "table" and cvars.GetCVarBool
+    if type(read) ~= "function" then read = self.api.GetCVarBool end
+    local plates = self.client:Boolean(self.client:Safe(read, "nameplateShowEnemies"))
     local state = "active"
     if not profile.enabled then state = "disabled"
     elseif self.engine.pausedUntil and self.engine.pausedUntil > self.engine:Now() then state = "paused"
@@ -67,6 +70,13 @@ function App:SupportedClasses() return self.client:SupportedClasses() end
 
 function App:Explain(contact)
     return self.engine:ExplainView(contact.id, "sighting")
+end
+
+function App:Snooze(contact, seconds)
+    if not contact or not contact.id then return nil, "not_observed" end
+    local ok, untilTime = self.engine:ToggleContactSnooze(contact.id, seconds)
+    if ok and self.ui and self.ui.SuppressContactBanners then self.ui:SuppressContactBanners(contact.id) end
+    return ok, untilTime
 end
 
 function App:ExportDiagnostics()
@@ -151,7 +161,7 @@ function App:Command(text)
     elseif command == "pause" then self.engine:Pause(RG.Util.Clamp(tonumber(argument), 1, 1440, 10) * 60)
     elseif command == "resume" then self.engine:Resume()
     elseif command == "mute" then self:ToggleMute()
-    elseif command == "clear" then self.engine:Clear()
+    elseif command == "clear" then self.engine:ClearRecent()
     elseif command == "report" or command == "status" then self.ui:OpenSettings("support")
     elseif command == "watch" or command == "ignore" then
         local obs = self.client:ReadUnit("target", "target")

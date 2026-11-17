@@ -125,6 +125,7 @@ function E:View(contact)
         dead = contact.dead,
         ambiguousIdentity = contact.ambiguousIdentity,
         currentTarget = contact.currentTarget, currentFocus = contact.currentFocus,
+        snoozedUntil = contact.snoozedUntil,
     }
 end
 
@@ -175,6 +176,7 @@ function E:ExplainView(id, event)
     local contact = self.contacts[id]
     if not contact then return { allowed = false, reason = "not_observed" } end
     if next(contact.tokens) == nil then return { allowed = false, reason = "not_observed" } end
+    if contact.snoozedUntil and contact.snoozedUntil > self:Now() then return { allowed = false, reason = "contact_snoozed" } end
     local decision, reason = self:Explain(contact, event)
     if not decision then return { allowed = false, reason = reason } end
     if self.pausedUntil and self:Now() < self.pausedUntil then return { allowed = false, reason = "paused" } end
@@ -196,6 +198,7 @@ end
 
 function E:Queue(contact, event)
     local now = self:Now()
+    if contact.snoozedUntil and contact.snoozedUntil > now then return false end
     local decision, reason = self:Explain(contact, event)
     contact.lastReason = reason or (decision and decision.reason)
     if not decision then self.counters.suppressed = self.counters.suppressed + 1 return false end
@@ -252,11 +255,34 @@ function E:Merge(target, other)
     target.arrivalQueued = target.arrivalQueued or other.arrivalQueued
     target.encounterRecorded = target.encounterRecorded or other.encounterRecorded
     target.notifiedClass = target.notifiedClass or other.notifiedClass
+    if other.snoozedUntil and (not target.snoozedUntil or other.snoozedUntil > target.snoozedUntil) then target.snoozedUntil = other.snoozedUntil end
     for _, field in ipairs({ "class", "level", "name", "realm", "guid", "identity", "nameIdentity", "rangeMin", "rangeMax", "targeting", "hostile", "isPlayer" }) do
         if target[field] == nil then target[field] = other[field] end
     end
     if other.stealth and not target.stealth then target.stealth, target.stealthAt = other.stealth, other.stealthAt end
-    for _, item in ipairs(self.pending) do if item.id == other.id then item.id = target.id end end
+    local mergedPending = {}
+    for _, item in ipairs(self.pending) do
+        if item.id == other.id then item.id = target.id end
+        if item.id == target.id then mergedPending[#mergedPending + 1] = item end
+    end
+    if #mergedPending > 1 then
+        table.sort(mergedPending, function(a, b)
+            if a.decision.priority == b.decision.priority then return a.sequence < b.sequence end
+            return a.decision.priority > b.decision.priority
+        end)
+        local kept, discard = {}, {}
+        for _, item in ipairs(mergedPending) do
+            for _, strongest in ipairs(kept) do
+                if math.abs(item.at - strongest.at) <= self.profile.alerts.waveWindow then discard[item] = true break end
+            end
+            if not discard[item] then kept[#kept + 1] = item end
+        end
+        for index = #self.pending, 1, -1 do
+            if discard[self.pending[index]] then table.remove(self.pending, index) end
+        end
+        target.arrivalQueued = false
+        for _, item in ipairs(kept) do if item.event == "sighting" then target.arrivalQueued = true break end end
+    end
     for kind in pairs({ sighting = true, returning = true, watch = true, targeting = true, stealth = true, identified = true }) do
         local old = self.cooldowns[other.id .. ":" .. kind]
         if old then self.cooldowns[target.id .. ":" .. kind] = math.max(old, self.cooldowns[target.id .. ":" .. kind] or -math.huge) end
@@ -361,8 +387,12 @@ function E:Remove(token)
     self:Changed()
 end
 
+function E:TracksCast(spellID)
+    return U.IsFinite(spellID) and SPELLS[spellID] ~= nil
+end
+
 function E:Cast(token, spellID)
-    if not U.IsFinite(spellID) or not SPELLS[spellID] then return false end
+    if not self:TracksCast(spellID) then return false end
     local binding = self.bindings[token]
     local contact = binding and self.contacts[binding.id]
     if not contact then return false end
@@ -403,7 +433,8 @@ function E:Tick()
     for _, item in ipairs(ready) do
         local contact = self.contacts[item.id]
         local decision = contact and self:Explain(contact, item.event)
-        if decision and not (self.pausedUntil and now < self.pausedUntil) then
+        if decision and not (self.pausedUntil and now < self.pausedUntil)
+            and not (contact.snoozedUntil and now < contact.snoozedUntil) then
             local key = contact.id .. ":" .. (decision.dedupKey or decision.kind)
             if not accepted[key] and (not self.cooldowns[key] or now - self.cooldowns[key] >= decision.cooldown) then
                 accepted[key] = true
@@ -480,6 +511,31 @@ function E:Pause(seconds)
 end
 
 function E:Resume() self.pausedUntil = nil self:Changed() end
+
+function E:ToggleContactSnooze(id, seconds)
+    local contact = self.contacts[id]
+    if not contact then return nil, "not_observed" end
+    local now = self:Now()
+    if contact.snoozedUntil and contact.snoozedUntil > now then contact.snoozedUntil = nil
+    else contact.snoozedUntil = now + U.Clamp(seconds, 1, 3600, 600) end
+    for index = #self.pending, 1, -1 do
+        if self.pending[index].id == id then table.remove(self.pending, index) end
+    end
+    contact.arrivalQueued = false
+    self:Changed()
+    return true, contact.snoozedUntil
+end
+
+function E:ClearRecent()
+    local discarded = {}
+    for id, contact in pairs(self.contacts) do
+        if next(contact.tokens) == nil then discarded[#discarded + 1] = id end
+    end
+    for _, id in ipairs(discarded) do self:Drop(id) end
+    self.history = {}
+    self:Changed()
+    return #discarded
+end
 
 function E:Clear()
     self.contacts, self.identities, self.bindings, self.pending, self.cooldowns = {}, {}, {}, {}, {}

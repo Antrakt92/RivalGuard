@@ -82,6 +82,8 @@ function W.New()
     function methods:GetHeight() return self.height > 0 and self.height or (self.parent and self.parent:GetHeight() or 1080) end
     function methods:SetScale(value) guard(self, "SetScale"); assert(finite(value) and value > 0, "invalid scale"); self.scale = value end
     function methods:GetScale() return self.scale end
+    function methods:GetEffectiveScale() return self.scale * (self.parent and self.parent:GetEffectiveScale() or 1) end
+    function methods:GetCenter() return self.centerX, self.centerY end
     function methods:SetAlpha(value) assert(finite(value) and value >= 0 and value <= 1, "invalid alpha"); self.alpha = value end
     function methods:GetAlpha() return self.alpha end
     function methods:Show()
@@ -152,6 +154,7 @@ function W.New()
     function methods:EnableMouse(value) self.mouse = value end
     function methods:EnableMouseWheel(value) self.mouseWheel = value end
     function methods:RegisterForDrag(...) self.dragButtons = { ... } end
+    function methods:RegisterForClicks(...) self.clickButtons = { ... } end
     function methods:SetUserPlaced(value) self.userPlaced = value end
     function methods:SetJustifyH(value) self.justifyH = value end
     function methods:SetJustifyV(value) self.justifyV = value end

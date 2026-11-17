@@ -10,6 +10,8 @@
 - Range filters distinguish confirmed, possible and unavailable distances.
 - First-run guide, searchable journal and a browser for personal lists.
 - Adjustable nameplate badge size and spacing, with target and focus markers.
+- Minimap launcher and optional context, list and range conditions for rules.
+- Package checks load both client interfaces in a simulated client after extraction.
 
 This is a development build. Native client behavior, combat compatibility,
 visual layout and in-game performance still require testing.

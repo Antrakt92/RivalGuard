@@ -15,6 +15,7 @@ import tempfile
 
 from package import ADDON, ROOT, build, package_inputs
 from package import ASSET_TYPES
+from check_package import smoke
 
 
 def fingerprint() -> str:
@@ -42,7 +43,7 @@ def tool(name: str, override: str | None) -> str:
     found = override or shutil.which(name)
     if not found:
         raise RuntimeError(f"Required tool missing: {name}; use its explicit command-line option")
-    return found
+    return str(Path(found).resolve()) if Path(found).is_file() else found
 
 
 def main() -> None:
@@ -87,11 +88,12 @@ def main() -> None:
                 second, repeated = build(ROOT, output / "second")
                 if digest != repeated or first.read_bytes() != second.read_bytes():
                     raise RuntimeError("Package is not reproducible")
+                smoke(first, lua)
                 print(f"Package {ADDON}-{version}: {len(files)} files; reproducible SHA256 {digest}")
         if fingerprint() != before:
             raise RuntimeError("Source changed during verification; rerun after writers settle")
         print(f"Checks passed: {len(source_files)} Lua files, {len(suites)} Lua suites")
-    except (RuntimeError, ValueError, OSError) as error:
+    except (RuntimeError, ValueError, OSError, subprocess.CalledProcessError) as error:
         parser.exit(1, f"Check failed: {error}\n")
 
 

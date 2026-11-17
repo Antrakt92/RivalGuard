@@ -234,3 +234,21 @@ H.Test("threat journal records confirmed cast and does not regenerate cleared en
     H.Equal(#app.db:GetJournal(), 1)
     H.Equal(app.db:GetJournal()[1].encounters, 1)
 end)
+
+H.Test("status uses clean C_CVar evidence and falls back only when the reader is absent", function()
+    local state, _, app = setup()
+    local legacyReads = 0
+    state.api.GetCVarBool = function() legacyReads = legacyReads + 1; return true end
+    state.api.C_CVar = { GetCVarBool = function(name) H.Equal(name, "nameplateShowEnemies"); return false end }
+    local status = app:Status()
+    H.False(status.nameplates); H.Equal(status.state, "limited"); H.Equal(legacyReads, 0)
+    state.api.C_CVar.GetCVarBool = function() return H.Secret("restricted CVar") end
+    status = app:Status()
+    H.Nil(status.nameplates); H.Equal(legacyReads, 0)
+    state.api.C_CVar.GetCVarBool = function() error("blocked CVar") end
+    status = app:Status()
+    H.Nil(status.nameplates); H.Equal(legacyReads, 0)
+    state.api.C_CVar.GetCVarBool = nil
+    status = app:Status()
+    H.True(status.nameplates); H.Equal(legacyReads, 1)
+end)

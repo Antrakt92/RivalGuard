@@ -101,6 +101,15 @@ L.enUS = {
     badgeOptions = "Nameplate badges", badgeTarget = "Mark your current target", badgeTargetTip = "Add a triangle next to an available enemy nameplate when you have that player targeted.",
     badgeFocus = "Mark your focus", badgeFocusTip = "Add a diamond next to an available enemy nameplate when that player is your focus.",
     badgeSize = "Class badge size", badgeOffset = "Space beside nameplate", yourTarget = "Your target", yourFocus = "Your focus",
+    basicRule = "Basic rule", ruleConditions = "Conditions", ruleConditionsHelp = "Conditions restrict when this rule matches. They cannot override disabled areas, the global range filter or your watch-only setting.",
+    ruleContext = "Where", ruleListStatus = "Personal list membership", ruleRange = "Additional range threshold (yards)",
+    ruleRangeHelp = "Set this to zero to use only the global range filter. An additional threshold can narrow alerts but cannot extend detection.",
+    ruleRangeInherit = "Use global setting", contextAny = "Any enabled area", listAny = "Any player", listListed = "On watch or threat list", listUnlisted = "Not on watch or threat list",
+    minimapLauncher = "Minimap launcher", minimapLauncherTip = "Show a shortcut beside the minimap. You can move it without changing game settings.",
+    launcherTip = "Left: toggle Nearby. Right: settings. Drag: move.", launcherReset = "Reset minimap position", launcherUnavailable = "The minimap launcher is unavailable. Open /rg settings instead.",
+    noFiltered = "No sightings match the list filters", noFilteredHelp = "Select more class icons or show unknown classes in Overview.",
+    noNameplates = "Enemy nameplates are off", noNameplatesHelp = "You can still get sightings from a target or mouseover. Enable enemy nameplates in the game's options for more coverage.",
+    noDisabled = "RivalGuard is disabled", noDisabledHelp = "Open Overview to enable detection. Your settings and saved lists remain.",
 }
 
 L.ruRU = {
@@ -203,6 +212,15 @@ L.ruRU = {
     badgeOptions = "Значки на неймплейтах", badgeTarget = "Отмечать вашу текущую цель", badgeTargetTip = "Добавлять треугольник возле доступного неймплейта противника, выбранного вашей целью.",
     badgeFocus = "Отмечать ваш фокус", badgeFocusTip = "Добавлять ромб возле доступного неймплейта противника в вашем фокусе.",
     badgeSize = "Размер значка класса", badgeOffset = "Отступ от неймплейта", yourTarget = "Ваша цель", yourFocus = "Ваш фокус",
+    basicRule = "Основное", ruleConditions = "Условия", ruleConditionsHelp = "Условия ограничивают применение правила. Они не отменяют ограничения зон, общий фильтр расстояния и режим оповещений только для личных списков.",
+    ruleContext = "Где", ruleListStatus = "Наличие в личном списке", ruleRange = "Дополнительный порог (ярды)",
+    ruleRangeHelp = "Ноль означает только общий фильтр расстояния. Дополнительный порог сужает оповещения, но не увеличивает дальность обнаружения.",
+    ruleRangeInherit = "Общая настройка", contextAny = "Любая включённая зона", listAny = "Любой игрок", listListed = "В списке наблюдения или угроз", listUnlisted = "Не в списке наблюдения или угроз",
+    minimapLauncher = "Кнопка у мини-карты", minimapLauncherTip = "Показать кнопку возле мини-карты. Её можно перемещать без изменения игровых настроек.",
+    launcherTip = "Левая кнопка: список. Правая: настройки. Перетаскивание: переместить.", launcherReset = "Сбросить положение кнопки", launcherUnavailable = "Кнопка у мини-карты недоступна. Откройте /rg settings.",
+    noFiltered = "Нет встреч, подходящих под фильтры", noFilteredHelp = "Выберите больше классов или включите неизвестные классы в обзоре.",
+    noNameplates = "Неймплейты противников выключены", noNameplatesHelp = "Цель и наведение всё ещё могут давать сведения. Для большего охвата включите неймплейты противников в настройках игры.",
+    noDisabled = "RivalGuard выключен", noDisabledHelp = "Включите обнаружение на странице обзора. Настройки и личные списки сохраняются.",
 }
 
 function L.Get(key, requested)

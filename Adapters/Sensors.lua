@@ -192,6 +192,8 @@ function Sensors:OnEvent(event, token, castGUID, spellID)
         spellID = self.client:Number(spellID)
         local state = token and self.active[token]
         if state and spellID and spellID > 0 and spellID == math.floor(spellID) then
+            local engine = self.app.engine
+            if engine and type(engine.TracksCast) == "function" and self:Call("TracksCast", spellID) ~= true then return end
             local obs = self.client:ReadUnit(token, "cast")
             if obs and ((state.guid and obs.guid == state.guid) or (not state.guid and state.name and obs.nameComplete and obs.name == state.name)) then
                 self:Record(obs)

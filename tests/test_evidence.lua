@@ -72,3 +72,47 @@ H.Test("partial names remain displayable without becoming a durable identity", f
     local named = engine:Observe({ token = "target", name = "Shared Surname", nameComplete = true, hostile = true, isPlayer = true })
     H.Equal(named.id, contact.id); H.Equal(named.identity, "name:Shared Surname")
 end)
+
+H.Test("clear recent drops departed sightings without rearming currently observed players", function()
+    local RG = H.Addon({ "Core/Bootstrap.lua", "Core/Util.lua", "Core/Defaults.lua", "Core/Rules.lua", "Core/Engine.lua" })
+    local clock, count = H.Clock(), 0
+    local engine = RG.Engine.New({ clock = clock.Now, onAlert = function() count = count + 1 end })
+    local active = { token = "target", guid = "A", name = "Active", class = "ROGUE", hostile = true, isPlayer = true }
+    engine:Observe(active)
+    engine:Observe({ token = "focus", guid = "B", name = "Departed", class = "HUNTER", hostile = true, isPlayer = true })
+    clock.Advance(1); engine:Tick()
+    H.Equal(count, 2)
+    engine:Remove("focus")
+    H.Equal(engine:ClearRecent(), 1)
+    H.Equal(#engine:Snapshot(), 1)
+    engine:Observe(active)
+    clock.Advance(2); engine:Tick()
+    H.Equal(count, 2)
+end)
+
+H.Test("temporary contact snooze cancels queued output, preserves tracking and expires", function()
+    local RG = H.Addon({ "Core/Bootstrap.lua", "Core/Util.lua", "Core/Defaults.lua", "Core/Rules.lua", "Core/Engine.lua" })
+    local clock, alerts = H.Clock(), {}
+    local engine = RG.Engine.New({ clock = clock.Now, onAlert = function(event) alerts[#alerts + 1] = event end })
+    local observation = { token = "nameplate1", guid = "A", name = "Quiet", class = "ROGUE", hostile = true, isPlayer = true }
+    local contact = engine:Observe(observation)
+    local ok, untilTime = engine:ToggleContactSnooze(contact.id, 5)
+    H.True(ok); H.Equal(untilTime, 5)
+    clock.Advance(1); engine:Tick()
+    H.Equal(#alerts, 0); H.True(engine:Snapshot()[1].visible)
+    H.Equal(engine:ExplainView(contact.id).reason, "contact_snoozed")
+    clock.Advance(5); engine:Observe(observation); clock.Advance(1); engine:Tick()
+    H.Equal(#alerts, 1)
+    H.Nil(engine:ToggleContactSnooze("missing", 5))
+end)
+
+H.Test("merged evidence emits only the strongest notification for the same sighting burst", function()
+    local RG = H.Addon({ "Core/Bootstrap.lua", "Core/Util.lua", "Core/Defaults.lua", "Core/Rules.lua", "Core/Engine.lua" })
+    local clock, alerts = H.Clock(), {}
+    local engine = RG.Engine.New({ clock = clock.Now, onAlert = function(event) alerts[#alerts + 1] = event end })
+    engine:Observe({ token = "target", class = "ROGUE", hostile = true, isPlayer = true })
+    engine:Observe({ token = "nameplate1", guid = "A", name = "Rogue", class = "ROGUE", stealth = true, stealthReadable = true, hostile = true, isPlayer = true })
+    engine:Observe({ token = "target", guid = "A", name = "Rogue", class = "ROGUE", hostile = true, isPlayer = true })
+    engine:Tick(); clock.Advance(1); engine:Tick()
+    H.Equal(#alerts, 1); H.Equal(alerts[1].kind, "stealth")
+end)
