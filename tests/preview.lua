@@ -115,7 +115,17 @@ elseif view == "rules" then
     end
 elseif view == "conditions" then app.ui:OpenRules(); app.ui.rulesDialog.conditions:Click()
 elseif view == "appearance" then app.ui:OpenSettings("appearance")
-elseif view == "import" then app.ui:OpenTransfer("import")
+elseif view == "import" then
+    app.ui:OpenTransfer("import")
+    if page == "validated" then
+        local profile = assert(RG.Defaults.NewProfile("farming"))
+        profile.alerts.sound = false
+        local transfer = app.ui.transferDialog
+        transfer.nameInput:SetText(locale == "ruRU" and "Патруль" or "Patrol")
+        transfer.edit:SetText(assert(RG.Codec.Encode({ format = "RivalGuardProfile", schemaVersion = RG.schemaVersion, profile = profile })))
+        transfer.preview:Click()
+        assert(transfer.applyAndUse.enabled, "profile preview was not accepted")
+    end
 elseif view == "export" then app.ui:OpenTransfer("export")
 elseif view == "details" and page == "sample" then
     app:Demo()

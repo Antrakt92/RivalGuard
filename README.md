@@ -46,8 +46,9 @@ current profile would handle that new sighting in the open world.
   when a targeting warning fires.
 - **Profiles:** choose a ready-made setup and enter a name. **Create and use**
   applies the new profile immediately. **Save without switching** adds it to
-  the list for later. Imports require a preview and a new name. They do not
-  include personal lists or history. Right-click **…** on Nearby or use `/rg profile` to switch
+  the list for later. Imports require a preview and a new name and can be applied
+  immediately. They do not include personal lists or history. Right-click
+  **…** on Nearby or use `/rg profile` to switch
   quickly. `/rg profile NAME` activates an exact saved profile name.
 - **Journal:** search names or notes and select a personal list directly.
   Retain all eligible encounters, listed players or observed threats.

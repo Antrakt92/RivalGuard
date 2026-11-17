@@ -2477,6 +2477,131 @@ H.Test("direct preset choices distinguish saving a paginated profile from creati
     H.True(state.messages[#state.messages]:find(ui:T("profileLimit"), 1, true) ~= nil)
 end)
 
+local function profileImportPayload(RG, detectionEnabled)
+    local detached = RG.Database.New()
+    local profile = detached:GetProfile()
+    profile.enabled = detectionEnabled
+    profile.alerts.sound, profile.alerts.banner = false, true
+    profile.alerts.classes = { HUNTER = true, ROGUE = true }
+    profile.context.world, profile.context.arena = false, true
+    profile.rules = { soundRule("Imported example", "quest", 80) }
+    return assert(detached:ExportProfile())
+end
+
+H.Test("validated inactive import reveals the normalized profile without replacing active or private data", function()
+    local _, RG, app = setup(nil, function(mock) mock.locale = "ruRU" end)
+    local db, ui = app.db, app.ui
+    local original = db:GetProfile()
+    for index = 1, 10 do assert(db:CreateProfile(string.format("Field %02d", index))) end
+    local key = "guid:Player-ImportPrivate"
+    assert(db:SetList(key, "watch", "Local private note", { name = "Local name", class = "ROGUE" }))
+    assert(db:Record({ identity = key, name = "Local name", class = "ROGUE" }, app.engine.epoch()))
+    local listBefore, historyBefore = RG.Codec.Encode(db:GetList()), RG.Codec.Encode(db:GetJournal())
+    local encoded = profileImportPayload(RG, true)
+    ui.scroll:SetHeight(260)
+    ui:OpenSettings("profiles")
+    ui:OpenTransfer("import")
+    local dialog = ui.transferDialog
+    local name = "Импорт карты"
+    local function enabled(expected)
+        H.Equal(dialog.apply.enabled, expected)
+        H.Equal(dialog.applyAndUse.enabled, expected)
+    end
+    enabled(false)
+    dialog.nameInput:SetText("  " .. name .. "  ")
+    dialog.edit:SetText(encoded)
+    enabled(false)
+    dialog.apply:Click(); dialog.applyAndUse:Click()
+    H.Nil(db:GetProfile(name))
+    dialog.preview:Click()
+    enabled(true)
+    local summary = dialog.summary:GetText()
+    H.Equal(summary, table.concat({
+        ui:F("importPreview", ui:T("importOn"), ui:T("importOn"), 1),
+        ui:F("importPreviewOutput", ui:T("importOff"), ui:T("importOn"), RG.Locale.Class("HUNTER", "ruRU") .. ", " .. RG.Locale.Class("ROGUE", "ruRU")),
+        ui:F("importPreviewAreas", ui:T("battleground") .. ", " .. ui:T("arena")),
+    }, "\n"))
+    H.Nil(summary:find("Local private note", 1, true))
+    H.Nil(summary:find(key, 1, true))
+    dialog.edit:SetText(encoded .. " ")
+    enabled(false)
+    dialog.apply:Click(); dialog.applyAndUse:Click()
+    H.Nil(db:GetProfile(name))
+
+    dialog.edit:SetText(encoded)
+    dialog.preview:Click()
+    enabled(true)
+    dialog:Hide()
+    enabled(false)
+    dialog.apply:Click(); dialog.applyAndUse:Click()
+    H.Nil(db:GetProfile(name))
+    ui:OpenTransfer("import")
+    enabled(false)
+    dialog.edit:SetText(encoded)
+    dialog.preview:Click()
+    dialog.nameInput:SetText("Default")
+    dialog.apply:Click(); dialog.applyAndUse:Click()
+    H.Equal(db:GetProfile(), original)
+    H.Equal(#db:ListProfiles(), 11)
+    H.True(dialog:IsShown())
+
+    dialog.nameInput:SetText("  " .. name .. "  ")
+    dialog.preview:Click()
+    dialog.apply:Click()
+    H.False(dialog:IsShown())
+    H.Equal(db:GetActiveProfileName(), "Default")
+    H.Equal(app.engine.profile, original)
+    local imported = assert(db:GetProfile(name))
+    H.False(imported.alerts.sound); H.True(imported.alerts.banner)
+    H.True(imported.alerts.classes.ROGUE); H.True(imported.context.arena)
+    H.Equal(imported.rules[1].soundCue, "quest")
+    H.Equal(ui.currentPage, "profiles")
+    local importedRow
+    for _, row in ipairs(ui.profileRows) do if row.profileName == name then importedRow = row; break end end
+    H.True(assert(importedRow).use.enabled)
+    local _, _, _, _, rowY = importedRow:GetPoint(1)
+    local scroll = ui.scroll:GetVerticalScroll()
+    H.True(-rowY >= scroll and -rowY + importedRow:GetHeight() <= scroll + ui.scroll:GetHeight())
+    H.Equal(RG.Codec.Encode(db:GetList()), listBefore)
+    H.Equal(RG.Codec.Encode(db:GetJournal()), historyBefore)
+end)
+
+H.Test("explicitly activating an imported profile updates detection and the profile picker", function()
+    local state, RG, app = setup()
+    local db, ui = app.db, app.ui
+    seeSoundRuleRival(state, 1)
+    H.True(app.sensors.running)
+    H.True(#app.engine.pending > 0)
+    local original, name = db:GetProfile(), "Imported quiet profile"
+    assert(db:SetList("guid:Player-LocalImport", "avoid", "Keep local", { name = "Local only" }))
+    local listBefore, historyBefore = RG.Codec.Encode(db:GetList()), RG.Codec.Encode(db:GetJournal())
+    local encoded = profileImportPayload(RG, false)
+    ui:OpenSettings("profiles")
+    ui:OpenTransfer("import")
+    local dialog = ui.transferDialog
+    dialog.nameInput:SetText(name)
+    dialog.edit:SetText(encoded)
+    dialog.preview:Click()
+    H.True(dialog.applyAndUse.enabled)
+    dialog.applyAndUse:Click()
+    H.False(dialog:IsShown())
+    H.Equal(db:GetActiveProfileName(), name)
+    H.Equal(app.engine.profile, db:GetProfile())
+    H.False(app.sensors.running)
+    H.Equal(#app.engine.pending, 0)
+    H.Equal(app:Status().detectionState, "disabled")
+    H.Equal(RG.Codec.Encode(db:GetList()), listBefore)
+    H.Equal(RG.Codec.Encode(db:GetJournal()), historyBefore)
+
+    local slash = state.api.SlashCmdList.RIVALGUARD
+    slash("profile")
+    H.False(assert(quickProfileRow(ui.profilePicker, name)).enabled)
+    slash("profile Default")
+    H.False(ui.profilePicker:IsShown())
+    H.Equal(db:GetProfile(), original); H.Equal(app.engine.profile, original)
+    H.True(app.sensors.running)
+end)
+
 H.Test("pause control resumes immediately and expires in an otherwise idle world", function()
     local state, _, app = setup()
     local slash = state.api.SlashCmdList.RIVALGUARD

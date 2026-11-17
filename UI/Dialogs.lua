@@ -605,6 +605,13 @@ function D.Attach(ui, app, H)
         showDialog(self.rulesFrame)
     end
 
+    function self:ResetImportPreview(message)
+        local f = self.transferFrame
+        self.importText, self.importPreview = nil, nil
+        f.apply:SetEnabled(false); f.applyAndUse:SetEnabled(false)
+        if message then f.summary:SetText(t(message)) end
+    end
+
     function self:BuildTransfer()
         local f = dialog("RivalGuardTransfer", "transfer", 730, 650)
         self.transferFrame, ui.transferDialog = f, f
@@ -624,19 +631,21 @@ function D.Attach(ui, app, H)
         edit:SetScript("OnTextChanged", function(box)
             box:SetHeight(math.max(280, math.min(100000, M.Number(box:GetNumLines(), 1) * 16 + 24)))
             if self.loadingTransfer or self.transferMode ~= "import" then return end
-            self.importText, self.importPreview = nil, nil
-            f.summary:SetText(t("importChanged")); f.apply:SetEnabled(false)
+            self:ResetImportPreview("importChanged")
         end)
         scroll:SetScrollChild(edit); f.edit, f.scroll = edit, scroll
         f.summary = H.font(f, 12, H.C.accent)
-        f.summary:SetPoint("BOTTOMLEFT", 18, 83); f.summary:SetWidth(690); f.summary:SetHeight(68)
+        f.summary:SetPoint("BOTTOMLEFT", 18, 74); f.summary:SetWidth(690); f.summary:SetHeight(82)
         f.preview = H.localButton(f, "validateImport", 190, function() self:PreviewImport() end)
         f.preview:SetPoint("BOTTOMLEFT", 18, 25)
-        f.apply = H.localButton(f, "importNew", 310, function() self:ApplyImport() end)
-        f.apply:SetPoint("LEFT", f.preview, "RIGHT", 12, 0)
+        f.applyAndUse = H.localButton(f, "importAndUse", 205, function() self:ApplyImport(true) end)
+        f.applyAndUse:SetPoint("LEFT", f.preview, "RIGHT", 12, 0)
+        f.applyAndUse.bg:SetColorTexture(0.10, 0.22, 0.28, 1)
+        f.apply = H.localButton(f, "importNew", 245, function() self:ApplyImport(false) end)
+        f.apply:SetPoint("LEFT", f.applyAndUse, "RIGHT", 12, 0)
         f:SetScript("OnHide", function()
             f.edit:ClearFocus(); f.nameInput:ClearFocus()
-            self.importText, self.importPreview = nil, nil
+            self:ResetImportPreview()
         end)
         return f
     end
@@ -645,11 +654,12 @@ function D.Attach(ui, app, H)
         if not self.transferFrame then self:BuildTransfer() end
         local f = self.transferFrame
         self.transferMode = mode == "export" and "export" or "import"
-        self.importText, self.importPreview = nil, nil
+        self:ResetImportPreview()
         f.help:SetText(t(self.transferMode == "export" and "exportHelp" or "importHelp"))
         f.nameLabel:SetShown(self.transferMode == "import"); f.nameInput:SetShown(self.transferMode == "import")
         f.preview:SetShown(self.transferMode == "import"); f.apply:SetShown(self.transferMode == "import")
-        f.apply:SetEnabled(false); f.nameInput:SetText("")
+        f.applyAndUse:SetShown(self.transferMode == "import")
+        f.nameInput:SetText("")
         self.loadingTransfer = true
         local text = ""
         if self.transferMode == "export" then
@@ -664,28 +674,45 @@ function D.Attach(ui, app, H)
 
     function self:PreviewImport()
         local f = self.transferFrame
-        if not f or self.transferMode ~= "import" then return end
+        if not f or not f:IsShown() or self.transferMode ~= "import" then return end
         local text = f.edit:GetText()
         local clean = app.db.PreviewImport and app.db:PreviewImport(text)
         if not clean then
-            self.importText, self.importPreview = nil, nil
-            f.summary:SetText(t("importInvalid")); f.apply:SetEnabled(false); return
+            self:ResetImportPreview("importInvalid")
+            return
         end
         self.importText, self.importPreview = text, clean
-        f.summary:SetText(ui:F("importPreview", #clean.rules, t(clean.enabled and "active" or "disabled")))
-        f.apply:SetEnabled(true)
+        local function state(enabled) return t(enabled and "importOn" or "importOff") end
+        local areas = {}
+        for _, kind in ipairs({ "world", "battleground", "arena", "instance" }) do
+            if clean.context[kind] then areas[#areas + 1] = t(kind) end
+        end
+        local classes = {}
+        for _, class in ipairs(RG.Defaults.classes) do
+            if clean.alerts.classes[class] then classes[#classes + 1] = RG.Locale.Class(class, ui:Profile().locale) end
+        end
+        f.summary:SetText(table.concat({
+            ui:F("importPreview", state(clean.enabled), state(clean.alerts.enabled), #clean.rules),
+            ui:F("importPreviewOutput", state(clean.alerts.sound), state(clean.alerts.banner), #classes > 0 and table.concat(classes, ", ") or t("all")),
+            ui:F("importPreviewAreas", #areas > 0 and table.concat(areas, ", ") or t("importNone")),
+        }, "\n"))
+        f.apply:SetEnabled(true); f.applyAndUse:SetEnabled(true)
     end
 
-    function self:ApplyImport()
+    function self:ApplyImport(activate)
         local f = self.transferFrame
-        if not f or not self.importText or not self.importPreview then notify("importReady") return end
-        if f.edit:GetText() ~= self.importText then self.importText = nil; f.apply:SetEnabled(false); notify("importChanged") return end
-        local name = f.nameInput:GetText()
-        local result = app.db.ImportProfile and app.db:ImportProfile(name, self.importText)
-        if not result then notify("profileError") return end
-        self.importText, self.importPreview = nil, nil
-        f.apply:SetEnabled(false); f:Hide()
-        H.changed(); notify("importSuccess")
+        if not f or not f:IsShown() or self.transferMode ~= "import" or not self.importText or not self.importPreview then notify("importReady") return end
+        if f.edit:GetText() ~= self.importText then
+            self:ResetImportPreview("importChanged")
+            return
+        end
+        local name = RG.Util.Text(f.nameInput:GetText(), 64)
+        local result, reason
+        if app.db.ImportProfile then result, reason = app.db:ImportProfile(name, self.importText) end
+        if not result then notify(reason == "profile_limit" and "profileLimit" or "profileError"); return end
+        f:Hide()
+        if activate then app:UseProfile(name) else notify("importSuccess") end
+        ui:RevealProfile(name)
     end
 
     function self:RefreshRuleCheck()

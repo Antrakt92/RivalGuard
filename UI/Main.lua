@@ -872,6 +872,24 @@ function UI.New(app)
     nameInput:SetScript("OnEscapePressed", function(box) box:ClearFocus() end)
     self.profileInput = nameInput
     local firstProfileRowY, profileRowSpacing, profilePageSize = y - 244, 39, 10
+    function self:RevealProfile(name)
+        if self.currentPage ~= "profiles" or not settings:IsShown() then self:OpenSettings("profiles") end
+        local rowTop
+        for index, savedName in ipairs(app.db:ListProfiles()) do
+            if savedName == name then
+                self.profileOffset = math.floor((index - 1) / profilePageSize) * profilePageSize
+                rowTop = -firstProfileRowY + (index - self.profileOffset - 1) * profileRowSpacing
+                break
+            end
+        end
+        self:RefreshProfiles()
+        if rowTop then
+            local height = scroll:GetHeight()
+            local _, maximum = scrollbar:GetMinMaxValues()
+            local visible = math.max(rowTop + 38 - height, math.min(rowTop, scrollbar:GetValue()))
+            scrollbar:SetValue(math.max(0, math.min(maximum, visible)))
+        end
+    end
     local function createProfile(activate)
         if not app.db.CreateProfile then notify("noProfileAPI") return end
         local name = RG.Util.Text(nameInput:GetText(), 64)
@@ -881,22 +899,8 @@ function UI.New(app)
             return
         end
         nameInput:SetText(""); nameInput:ClearFocus()
-        local rowTop
-        for index, savedName in ipairs(app.db:ListProfiles()) do
-            if savedName == name then
-                self.profileOffset = math.floor((index - 1) / profilePageSize) * profilePageSize
-                rowTop = -firstProfileRowY + (index - self.profileOffset - 1) * profileRowSpacing
-                break
-            end
-        end
         if activate then app:UseProfile(name) elseif app.Notify then app:Notify(self:F("profileCreated", name)) end
-        self:RefreshProfiles()
-        if rowTop then
-            local height = scroll:GetHeight()
-            local _, maximum = scrollbar:GetMinMaxValues()
-            local visible = math.max(rowTop + 38 - height, math.min(rowTop, scrollbar:GetValue()))
-            scrollbar:SetValue(math.max(0, math.min(maximum, visible)))
-        end
+        self:RevealProfile(name)
     end
     self.createAndUseProfile = localButton(profiles, "createAndUseProfile", 202, function() createProfile(true) end)
     self.createAndUseProfile:SetPoint("TOPLEFT", 0, y - 194)
