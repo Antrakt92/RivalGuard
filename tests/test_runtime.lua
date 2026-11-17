@@ -3963,7 +3963,7 @@ H.Test("watch ignore and note actions preserve notes through repeated toggles", 
     end
     H.Equal(app.db:GetList()[contact.identity].kind, "note")
     assert(app:SetNote(contact, ""))
-    H.Nil(app.db:GetList()[contact.identity].note)
+    H.Nil(app.db:GetList()[contact.identity])
 end)
 
 H.Test("Personal lists avoid copying history and still apply exact name note and kind filters", function()
@@ -4332,6 +4332,100 @@ local function journalRowFor(ui, identity)
         if row:IsShown() and row.contact and row.contact.identity == identity then return row end
     end
 end
+
+H.Test("saving a blank recent note leaves no record and clearing a saved note removes it", function()
+    local state, _, app = setup()
+    local db, ui = app.db, app.ui
+    local identity = "guid:Player-RuleCue1"
+    seeSoundRuleRival(state, 1)
+    ui:OpenSettings("journal")
+    assert(journalRowFor(ui, identity)):Click()
+    local detail = ui.detailsFrame
+    for _, blank in ipairs({ "", "   " }) do
+        detail.note:SetText(blank)
+        detail.saveNote:Click()
+        H.Nil(db:GetList()[identity])
+        H.True(state.messages[#state.messages]:find(ui:T("noteEmpty"), 1, true) ~= nil)
+    end
+    detail.note:SetText("Stand-alone note")
+    detail.saveNote:Click()
+    H.Equal(db:GetList()[identity].kind, "note")
+    H.Equal(db:GetList()[identity].note, "Stand-alone note")
+    ui.journalPersonal:Click()
+    assert(journalRowFor(ui, identity)):Click()
+    detail.note:SetText("   ")
+    detail.saveNote:Click()
+    H.Nil(db:GetList()[identity])
+    H.Nil(journalRowFor(ui, identity))
+    H.True(state.messages[#state.messages]:find(ui:T("noteCleared"), 1, true) ~= nil)
+    H.Equal(db:GetJournal()[1].identity, identity)
+end)
+
+H.Test("clearing or rejecting a note leaves Watch, Avoid, and Ignore metadata intact", function()
+    local state, _, app = setup()
+    local db, ui = app.db, app.ui
+    for _, kind in ipairs({ "watch", "avoid", "ignore" }) do
+        local identity, name = "guid:Player-Clear-" .. kind, "Saved name " .. kind
+        assert(db:SetList(identity, kind, "Prior note", { name = name, class = "HUNTER" }))
+        ui:OpenSettings("journal")
+        ui.journalPersonal:Click()
+        assert(journalRowFor(ui, identity)):Click()
+        local detail = ui.detailsFrame
+        for _, invalid in ipairs({ "\t", "Bad" .. string.char(255), "|HInjected", string.rep("a", 513) }) do
+            detail.note:SetText(invalid)
+            detail.saveNote:Click()
+            H.Equal(db:GetList()[identity].note, "Prior note")
+            H.True(state.messages[#state.messages]:find(ui:T("saveFailed"), 1, true) ~= nil)
+        end
+        detail.note:SetText("")
+        detail.saveNote:Click()
+        local record = assert(db:GetList()[identity])
+        H.Equal(record.kind, kind)
+        H.Equal(record.name, name); H.Equal(record.class, "HUNTER")
+        H.Nil(record.note)
+        H.True(journalRowFor(ui, identity) ~= nil)
+        H.True(state.messages[#state.messages]:find(ui:T("noteCleared"), 1, true) ~= nil)
+    end
+end)
+
+H.Test("legacy empty personal notes disappear on loading SavedVariables", function()
+    local state, _, app = setup({ schemaVersion = 1, lists = {
+        ["guid:Player-EmptyLegacy"] = { kind = "note", note = "", name = "Empty legacy", class = "ROGUE" },
+        ["guid:Player-SpaceLegacy"] = { kind = "note", note = "   ", name = "Spaces legacy", class = "MAGE" },
+        ["guid:Player-NoteLegacy"] = { kind = "note", note = "Keep this", name = "Populated legacy", class = "HUNTER" },
+        ["guid:Player-WatchLegacy"] = { kind = "watch", name = "Watch without note", class = "HUNTER" },
+    } })
+    local list, ui = app.db:GetList(), app.ui
+    H.Nil(list["guid:Player-EmptyLegacy"]); H.Nil(list["guid:Player-SpaceLegacy"])
+    H.Equal(list["guid:Player-NoteLegacy"].note, "Keep this")
+    H.Equal(list["guid:Player-WatchLegacy"].kind, "watch")
+    ui:OpenSettings("journal")
+    ui.journalPersonal:Click()
+    H.Nil(journalRowFor(ui, "guid:Player-EmptyLegacy")); H.Nil(journalRowFor(ui, "guid:Player-SpaceLegacy"))
+    H.True(journalRowFor(ui, "guid:Player-NoteLegacy") ~= nil)
+    state:Fire("PLAYER_LOGOUT")
+    local _, _, fresh = setup(state.api.RivalGuardDB)
+    H.Equal(state.RG.Util.Count(fresh.db:GetList()), 2)
+    H.Equal(fresh.db:GetList()["guid:Player-NoteLegacy"].note, "Keep this")
+end)
+
+H.Test("clearing a note from Recent keeps existing membership metadata", function()
+    local _, _, app = setup()
+    local db, ui = app.db, app.ui
+    local identity = "guid:Player-OldNoteMetadata"
+    assert(db:SetList(identity, "watch", "Prior note", { name = "Saved name", class = "HUNTER" }))
+    assert(db:Record({ identity = identity, name = "Encounter name", class = "ROGUE" }, app.engine.epoch()))
+    ui:OpenSettings("journal")
+    local row = assert(journalRowFor(ui, identity))
+    H.Equal(row.contact.name, "Encounter name")
+    H.Equal(row.contact.class, "ROGUE")
+    row:Click()
+    ui.detailsFrame.note:SetText("")
+    ui.detailsFrame.saveNote:Click()
+    local saved = db:GetList()[identity]
+    H.Equal(saved.kind, "watch"); H.Equal(saved.name, "Saved name"); H.Equal(saved.class, "HUNTER")
+    H.Nil(saved.note)
+end)
 
 H.Test("Recent uses the verified live list alias for display, editing, and search", function()
     local _, app, nameKey, guidKey = recentListAliasFixture()

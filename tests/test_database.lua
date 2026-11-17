@@ -152,6 +152,28 @@ H.Test("watchlists validate durable identities and notes without partial updates
     H.Nil(db:GetList()["name:Somebody-Realm"])
 end)
 
+H.Test("blank notes do not use capacity and clearing a note frees its slot", function()
+    local RG = addon()
+    local db = RG.Database.New()
+    for index = 1, 999 do assert(db:SetList("guid:Fixture-" .. index, "watch")) end
+    assert(db:SetList("guid:LastNote", "note", "Kept until cleared"))
+    local ok, reason, changed = db:SetList("guid:Blank", "note", "   ")
+    H.True(ok); H.Nil(reason); H.False(changed)
+    H.Nil(db:GetList()["guid:Blank"])
+    H.Equal(RG.Util.Count(db:GetList()), 1000)
+    H.Nil(db:SetList("guid:LastNote", "note", string.rep(" ", 513)))
+    H.Equal(db:GetList()["guid:LastNote"].note, "Kept until cleared")
+    assert(db:SetList("guid:LastNote", "note", ""))
+    H.Nil(db:GetList()["guid:LastNote"])
+    H.True(db:SetList("guid:Replacement", "avoid"))
+    H.Equal(RG.Util.Count(db:GetList()), 1000)
+    local reloaded = RG.Database.New({ schemaVersion = 1, lists = {
+        ["guid:Same"] = { kind = "note", note = "Keep this" },
+        ["guid:Same "] = { kind = "note" },
+    } })
+    H.Equal(reloaded:GetList()["guid:Same"].note, "Keep this")
+end)
+
 H.Test("journal is bounded expires old entries and never restores live sightings", function()
     local RG = addon()
     local db = RG.Database.New()

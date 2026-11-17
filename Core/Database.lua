@@ -221,7 +221,9 @@ function DB.New(raw)
     if type(raw.lists) == "table" then
         for identity, entry in pairs(raw.lists) do
             if U.Count(self.root.lists) >= MAX_LISTS then break end
-            if type(entry) == "table" then self:SetList(identity, entry.kind, entry.note, entry) end
+            if type(entry) == "table" and (entry.kind ~= "note" or U.Text(entry.note, 512)) then
+                self:SetList(identity, entry.kind, entry.note, entry)
+            end
         end
     end
     -- Session sightings are deliberately not restored as live contacts.
@@ -332,12 +334,19 @@ function DB:SetList(identity, kind, note, metadata)
     if not identity or not (identity:match("^guid:") or identity:match("^name:")) then return nil, "unknown_identity" end
     if kind == nil then self.root.lists[identity] = nil return true end
     if kind ~= "watch" and kind ~= "avoid" and kind ~= "ignore" and kind ~= "note" then return nil, "invalid_list" end
-    if not self.root.lists[identity] and U.Count(self.root.lists) >= MAX_LISTS then return nil, "list_limit" end
-    if note ~= nil and note ~= "" and not U.Text(note, 512) then return nil, "invalid_note" end
+    local savedNote = U.Text(note, 512)
+    if note ~= nil and not savedNote and (type(note) ~= "string" or #note > 512 or not note:match("^ *$")) then
+        return nil, "invalid_note"
+    end
     local existing = self.root.lists[identity]
+    if kind == "note" and not savedNote then
+        self.root.lists[identity] = nil
+        return true, nil, existing ~= nil
+    end
+    if not existing and U.Count(self.root.lists) >= MAX_LISTS then return nil, "list_limit" end
     metadata = type(metadata) == "table" and metadata or {}
     self.root.lists[identity] = {
-        kind = kind, note = U.Text(note, 512), name = U.Text(metadata.name, 160) or (existing and existing.name),
+        kind = kind, note = savedNote, name = U.Text(metadata.name, 160) or (existing and existing.name),
         class = D.classSet[metadata.class] and metadata.class or (existing and existing.class),
     }
     return true

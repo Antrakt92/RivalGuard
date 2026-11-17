@@ -1626,10 +1626,10 @@ function UI.New(app)
                 local contact = selectedList()
                 if not contact or self:Profile().display.streamer then return end
                 if not app.SetNote then notify("noListAPI") return end
-                local ok = app:SetNote(contact, detail.note:GetText())
+                local ok, _, feedback = app:SetNote(contact, detail.note:GetText())
                 detail.note:ClearFocus()
                 if ok then self.noteDraft = nil; self:ShowDetails() end
-                notify(ok and "noteSaved" or "saveFailed")
+                notify(ok and (feedback or "noteSaved") or "saveFailed")
             end)
             save:SetPoint("TOPLEFT", 18, -380)
             save:SetScript("OnEnter", function() tooltip(save, self:T("saveNote"), self:T("keyboardEditHelp")) end)

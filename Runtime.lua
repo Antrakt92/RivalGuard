@@ -317,7 +317,11 @@ function App:SetNote(contact, note)
     local entry, identity = self:ResolveList(contact)
     if not identity then return nil, "unknown_identity" end
     if note == nil then note = "" end
-    return self:SetList(contact, entry and entry.kind or "note", note)
+    local ok, err = self:SetList(contact, entry and entry.kind or "note", note, entry)
+    if not ok then return nil, err end
+    local current = self.db:GetList()[identity]
+    if current and current.note then return true, nil, "noteSaved" end
+    return true, nil, entry and entry.note and "noteCleared" or "noteEmpty"
 end
 
 local function alertListKind(entry)
@@ -325,15 +329,15 @@ local function alertListKind(entry)
     if kind ~= "note" then return kind end
 end
 
-function App:SetList(contact, kind, note)
+function App:SetList(contact, kind, note, metadata)
     local entry, identity = self:ResolveList(contact)
     if not identity then return nil, "unknown_identity" end
     if note == nil then note = entry and entry.note end
     local id = self.engine.identities[identity]
     local current = id and self.engine.contacts[id]
     local previousKind = current and alertListKind(self.engine:ListEntry(current))
-    local ok, err = self.db:SetList(identity, kind, note, contact)
-    if ok then
+    local ok, err, changed = self.db:SetList(identity, kind, note, metadata or contact)
+    if ok and changed ~= false then
         local currentKind = current and alertListKind(self.engine:ListEntry(current))
         if current and currentKind ~= previousKind then self.engine:RevalidateContactPending(current) end
         if kind == "ignore" and (not current or currentKind == "ignore") and self.ui and self.ui.SuppressContactBanners then
