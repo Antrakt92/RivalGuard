@@ -79,7 +79,15 @@ if view == "settings" then
 elseif view == "guide" then
     app.ui:ShowGuide(true)
     if page == "rules" then app.ui.guideDialog.next:Click() end
-elseif view == "journal" then app.ui:OpenSettings("journal")
+elseif view == "journal" then
+    if page == "last-page" then
+        for i = 11, 13 do
+            local name = locale == "ruRU" and ("Противник " .. i) or ("Opponent " .. i)
+            assert(app.db:Record({ identity = "guid:Player-JournalPreview-" .. i, name = name, class = "ROGUE" }, state.api.time() - i))
+        end
+    end
+    app.ui:OpenSettings("journal")
+    if page == "last-page" then app.ui.journalNext:Click() end
 elseif view == "diagnostics" then app.ui:ShowDiagnostics()
 elseif view == "personal" then app.ui:OpenSettings("journal"); app.ui.journalPersonal:Click()
 elseif view == "rules" then

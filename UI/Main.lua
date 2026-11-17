@@ -989,24 +989,33 @@ function UI.New(app)
     self.journalCount = font(journal, 12, C.muted, "RIGHT")
     self.journalCount:SetPoint("TOPRIGHT", -16, y - 6); self.journalCount:SetWidth(220)
     y = y - 43
+    local firstJournalRowY, journalRowSpacing = y, 39
     self.journalEmpty = label(journal, "emptyJournal", 14, C.muted)
     self.journalEmpty:SetPoint("TOPLEFT", 0, y); self.journalEmpty:SetWidth(550)
     self.journalRows = {}
     for i = 1, 12 do
         local row = button(journal, "", 550, function() end)
-        row:SetPoint("TOPLEFT", 0, y - (i - 1) * 39); row:SetHeight(34)
+        row:SetPoint("TOPLEFT", 0, firstJournalRowY - (i - 1) * journalRowSpacing); row:SetHeight(34)
         row:SetScript("OnClick", function() if row.contact then self:Select(row.contact) end end)
         self.journalRows[i] = row
     end
-    local journalPrev = localButton(journal, "previous", 120, function() self.journalOffset = math.max(0, self.journalOffset - 12); self:RefreshJournal() end)
-    journalPrev:SetPoint("TOPLEFT", 0, y - 485)
-    local journalNext = localButton(journal, "next", 120, function() self.journalOffset = self.journalOffset + 12; self:RefreshJournal() end)
+    local function moveJournalPage(direction)
+        self.journalOffset = math.max(0, self.journalOffset + direction * #self.journalRows)
+        self:RefreshJournal()
+        scrollbar:SetValue(0)
+    end
+    local journalPrev = localButton(journal, "previous", 120, function() moveJournalPage(-1) end)
+    local journalNext = localButton(journal, "next", 120, function() moveJournalPage(1) end)
     journalNext:SetPoint("LEFT", journalPrev, "RIGHT", 12, 0)
     self.journalPrev, self.journalNext = journalPrev, journalNext
-    local retentionY = section(journal, "journalDays", y - 545, "retentionHelp")
-    retentionY = choice(journal, "retentionMode", "retention.journalMode", { { "all", "retentionAll" }, { "watched", "retentionWatched" }, { "threats", "retentionThreats" } }, retentionY)
-    retentionY = slider(journal, "journalDays", "retention.journalDays", retentionY, 0, 90, 1)
-    journal.height = -retentionY + 20
+    local journalRetention = CreateFrame("Frame", nil, journal)
+    self.journalRetention = journalRetention
+    local retentionY = section(journalRetention, "journalRetention", 0, "retentionHelp")
+    retentionY = choice(journalRetention, "retentionMode", "retention.journalMode", { { "all", "retentionAll" }, { "watched", "retentionWatched" }, { "threats", "retentionThreats" } }, retentionY)
+    retentionY = slider(journalRetention, "journalDays", "retention.journalDays", retentionY, 0, 90, 1)
+    local retentionHeight = -retentionY + 20
+    journalRetention:SetSize(550, retentionHeight)
+    journal.height = -firstJournalRowY + journalRowSpacing + retentionHeight
 
     local support = CreateFrame("Frame", nil, content); self.pages.support = support; support:SetAllPoints()
     y = section(support, "support", 0, "supportHelp")
@@ -1155,8 +1164,24 @@ function UI.New(app)
         paintText(self.journalCount, self:F("filteredCount", count))
         paintShown(self.journalEmpty, count == 0)
         self.journalEmpty:SetText(self:T(query ~= "" and "noMatches" or personal and "listEmpty" or "emptyJournal"))
+        local paginated = count > pageSize
+        local visibleRows = math.min(pageSize, count - self.journalOffset)
+        local footerY = firstJournalRowY - math.max(1, visibleRows) * journalRowSpacing - 8
+        if self.journalFooterY ~= footerY then
+            journalPrev:ClearAllPoints(); journalPrev:SetPoint("TOPLEFT", 0, footerY)
+            self.journalFooterY = footerY
+        end
+        local retentionTop = footerY - (paginated and 45 or 0)
+        if self.journalRetentionTop ~= retentionTop then
+            journalRetention:ClearAllPoints(); journalRetention:SetPoint("TOPLEFT", 0, retentionTop)
+            self.journalRetentionTop = retentionTop
+        end
+        paintShown(journalPrev, paginated); paintShown(journalNext, paginated)
+        paintShown(journalRetention, not personal)
         self.journalPrev:SetEnabled(self.journalOffset > 0)
         self.journalNext:SetEnabled(self.journalOffset + pageSize < count)
+        journal.height = personal and (-footerY + (paginated and 44 or 0)) or (-retentionTop + retentionHeight)
+        if self.currentPage == "journal" and self.pageHeight ~= journal.height then resizeSettingsPage(journal.height) end
         local epoch = not personal and app.engine.epoch and M.Number(app.engine.epoch())
         local now = self:Now()
         for i, row in ipairs(self.journalRows) do

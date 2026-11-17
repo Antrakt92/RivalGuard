@@ -5491,6 +5491,81 @@ H.Test("Recent renders a detached journal page without cloning history and clamp
     H.Equal(measuredRecords, 12)
 end)
 
+for _, mode in ipairs({ "recent", "personal" }) do
+    H.Test("journal navigation follows the visible " .. mode .. " results and resets scroll between pages", function()
+        local state, _, app = setup()
+        local db, ui = app.db, app.ui
+        local retention = db:GetProfile().retention.journalDays
+        local function identity(index) return "guid:Player-JournalNav" .. index end
+        for index = 1, 14 do
+            local name = string.format("Journal rival %02d", index)
+            local note = index == 14 and "Unique last page note" or nil
+            assert(db:Record({ identity = identity(index), name = name, class = "ROGUE" }, state.api.time() - index))
+            assert(db:SetList(identity(index), "watch", note, { name = name, class = "ROGUE" }))
+        end
+
+        ui.scroll:SetHeight(260)
+        ui:OpenSettings("journal")
+        if mode == "personal" then ui.journalPersonal:Click() end
+        H.Equal(ui.journalMode, mode)
+        H.True(ui.journalPrev:IsShown()); H.True(ui.journalNext:IsShown())
+        H.False(ui.journalPrev.enabled); H.True(ui.journalNext.enabled)
+        H.Equal(ui.journalRows[1].contact.identity, identity(1))
+        H.Equal(ui.journalRows[12].contact.identity, identity(12))
+        local fullHeight = ui.pageHeight
+        local _, max = ui.scrollbar:GetMinMaxValues()
+        H.True(max > 0)
+        ui.scrollbar:SetValue(max)
+        H.True(ui.scroll:GetVerticalScroll() > 0)
+        ui.journalNext:Click()
+        H.Equal(ui.scroll:GetVerticalScroll(), 0)
+        H.Equal(ui.journalRetention:IsShown(), mode == "recent")
+        H.Equal(ui.journalRows[1].contact.identity, identity(13))
+        H.Equal(ui.journalRows[2].contact.identity, identity(14))
+        H.Nil(ui.journalRows[3].contact)
+        H.True(ui.journalPrev.enabled); H.False(ui.journalNext.enabled)
+        H.True(ui.journalPrev:IsShown()); H.True(ui.journalNext:IsShown())
+        local lastHeight = ui.pageHeight
+        H.True(lastHeight < fullHeight)
+
+        local row = ui.journalRows[2]
+        local _, parent, anchor, _, y = ui.journalPrev:GetPoint(1)
+        local _, _, _, _, rowY = row:GetPoint(1)
+        local gap = parent == row and anchor == "BOTTOMLEFT" and -y or rowY - row:GetHeight() - y
+        H.True(gap >= 0 and gap <= 24, "pager should be next to the last visible row")
+        _, max = ui.scrollbar:GetMinMaxValues()
+        local pagerBottom = -rowY + row:GetHeight() + gap + ui.journalPrev:GetHeight()
+        H.True(pagerBottom <= max + ui.scroll:GetHeight(), "pager should be reachable on the final page")
+        ui.scrollbar:SetValue(max)
+        ui.journalPrev:Click()
+        H.Equal(ui.scroll:GetVerticalScroll(), 0)
+        H.Equal(ui.journalRows[1].contact.identity, identity(1))
+        H.Equal(ui.pageHeight, fullHeight)
+
+        ui.journalNext:Click()
+        ui.journalSearch:SetText("last page note")
+        H.Equal(ui.journalOffset, 0)
+        H.Equal(ui.journalRows[1].contact.identity, identity(14))
+        H.Nil(ui.journalRows[2].contact)
+        H.False(ui.journalPrev:IsShown()); H.False(ui.journalNext:IsShown())
+        H.True(ui.pageHeight < lastHeight)
+        H.Equal(ui.journalRetention:IsShown(), mode == "recent")
+        if mode == "personal" then
+            ui.journalRows[1]:Click()
+            H.Equal(ui.detailsFrame.note:GetText(), "Unique last page note")
+            ui.detailsFrame.note:SetText("Updated note")
+            ui.detailsFrame.saveNote:Click()
+            H.Equal(db:GetList()[identity(14)].note, "Updated note")
+            ui.journalSearch:SetText("updated note")
+            H.Equal(ui.journalRows[1].contact.identity, identity(14))
+        end
+        ui.journalSearch:SetText("no matching figure")
+        H.True(ui.journalEmpty:IsShown())
+        H.False(ui.journalPrev:IsShown()); H.False(ui.journalNext:IsShown())
+        H.Equal(db:GetProfile().retention.journalDays, retention)
+    end)
+end
+
 H.Test("loss of epoch clock never rewrites an earlier saved encounter with a fake timestamp", function()
     local state, _, app = setup()
     local clock, identity = state.api.time, "guid:Player-ClockFixture"
