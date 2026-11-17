@@ -152,6 +152,28 @@ H.Test("slash pause resume mute and settings operate without hidden side effects
     H.Equal(#app.engine:Snapshot(), 0)
 end)
 
+H.Test("pause control resumes immediately and expires in an otherwise idle world", function()
+    local state, _, app = setup()
+    local slash = state.api.SlashCmdList.RIVALGUARD
+    state.api.GetCVarBool = function() return true end
+    state.clock.Advance(2)
+    slash("pause 1")
+    state:Advance(0.3)
+    H.Equal(app.ui.pauseButton.label:GetText(), app.ui:T("resume"))
+    slash("resume")
+    state:Advance(0.3)
+    H.Equal(app.ui.pauseButton.label:GetText(), app.ui:T("pause"))
+
+    state.clock.Advance(2)
+    slash("pause 1")
+    state:Advance(0.3)
+    H.Equal(app.ui.pauseButton.label:GetText(), app.ui:T("resume"))
+    state:Advance(61)
+    H.Nil(app.engine.pausedUntil)
+    H.Equal(app.ui.pauseButton.label:GetText(), app.ui:T("pause"))
+    H.Equal(#app.engine:Snapshot(), 0)
+end)
+
 H.Test("demo uses UI-only fixtures and leaves saved history and lists untouched", function()
     local state, RG, app = setup()
     local before = assert(RG.Codec.Encode(app.db.root))

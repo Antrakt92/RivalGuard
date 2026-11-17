@@ -948,17 +948,19 @@ function UI.New(app)
         self:FitWindow(main, UI.layout.width, mainHeight, profile.display.scale)
         main:SetShown(profile.display.showList or preview)
         self.offset = math.max(0, math.min(self.offset, math.max(0, #rows - maxRows)))
+        local untilTime = M.Number(app.engine.pausedUntil)
+        local paused = untilTime ~= nil and untilTime > now
         local needsStatus = self.statusAt == nil or now - self.statusAt >= 1
+            or self.statusPaused ~= paused or self.statusEnabled ~= profile.enabled
             or settings:IsShown() and self.currentPage == "support" and self.statusPage ~= "support"
         if needsStatus then
             self.statusCache = app.Status and app:Status() or {}
             self.statusAt = now
+            self.statusPaused, self.statusEnabled = paused, profile.enabled
         end
         self.statusPage = settings:IsShown() and self.currentPage or nil
         local appStatus = self.statusCache or {}
         if type(appStatus) ~= "table" then appStatus = { detail = appStatus } end
-        local untilTime = M.Number(app.engine.pausedUntil)
-        local paused = appStatus.state == "paused" or (untilTime and untilTime > now)
         local visibleCount = 0
         for _, row in ipairs(rows) do if row.visible and row.contact.behindCamera ~= true then visibleCount = visibleCount + 1 end end
         self.visibleCount = preview and 0 or visibleCount

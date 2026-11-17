@@ -440,7 +440,8 @@ end
 
 function E:Tick()
     local now = self:Now()
-    if self.pausedUntil and now >= self.pausedUntil then self.pausedUntil = nil end
+    local resumed = self.pausedUntil and now >= self.pausedUntil
+    if resumed then self.pausedUntil = nil end
     local ready, waiting = {}, {}
     for _, item in ipairs(self.pending) do
         if item.decision.priority >= 70 or now - item.at >= self.profile.alerts.waveWindow then ready[#ready + 1] = item
@@ -491,7 +492,7 @@ function E:Tick()
     for _, id in ipairs(expired) do self:Drop(id) end
     for key, at in pairs(self.cooldowns) do if now - at > 1800 then self.cooldowns[key] = nil end end
     for identity, at in pairs(self.snoozes) do if at <= now then self.snoozes[identity] = nil end end
-    if #expired > 0 then self:Changed() end
+    if resumed or #expired > 0 then self:Changed() end
 end
 
 function E:Snapshot()
