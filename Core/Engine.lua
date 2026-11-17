@@ -205,6 +205,10 @@ function E:Reconcile(contact, now)
     end
     contact.hostile, contact.isPlayer = hostile, player
     contact.targeting, contact.dead, contact.behindCamera = targeting, dead, behind
+    if targeting == false and contact.targetingNotified ~= nil then
+        contact.targetingNotified = nil
+        self:CancelTargeting(contact)
+    end
     contact.currentTarget, contact.currentFocus = currentTarget, currentFocus
     local incompatible = rangeMin and rangeMax and (rangeMin > rangeMax or (rangeMin == rangeMax and rangeExclusive))
     if incompatible and not conflict and (contact.rangeEvidence ~= "conflict" or contact.rangeAt ~= rangeAt) then
@@ -267,6 +271,16 @@ local function ordinaryAlert(decision)
     return decision.priority < 70 and (decision.kind == "sighting" or decision.kind == "returning")
 end
 
+function E:CancelTargeting(contact)
+    for index = #self.pending, 1, -1 do
+        local item = self.pending[index]
+        if item.id == contact.id then
+            if item.event == "targeting" then table.remove(self.pending, index)
+            else item.coversTargeting = nil end
+        end
+    end
+end
+
 function E:Queue(contact, event)
     local now = self:Now()
     if self:SnoozedUntil(contact) then return false end
@@ -284,18 +298,24 @@ function E:Queue(contact, event)
                 if event == "stealth" then upgradeStealthEvidence(item, contact.stealthEvidence, contact.stealthSpell) end
                 return false
             end
-            if age <= self.profile.alerts.waveWindow and item.decision.priority >= decision.priority then return false end
+            if age <= self.profile.alerts.waveWindow and item.decision.priority >= decision.priority then
+                if event == "targeting" then item.coversTargeting = true end
+                return false
+            end
         end
     end
+    local coversTargeting
     for index = #self.pending, 1, -1 do
         local item = self.pending[index]
         if item.id == contact.id and now - item.at <= self.profile.alerts.waveWindow and item.decision.priority < decision.priority then
             if item.event == "sighting" then contact.arrivalQueued = false end
+            coversTargeting = coversTargeting or item.event == "targeting" or item.coversTargeting
             table.remove(self.pending, index)
         end
     end
     self.sequence = self.sequence + 1
-    local item = { id = contact.id, event = event, decision = decision, at = now, sequence = self.sequence, revision = self.revision }
+    local item = { id = contact.id, event = event, decision = decision, at = now, sequence = self.sequence,
+        revision = self.revision, coversTargeting = coversTargeting }
     if event == "stealth" then
         item.stealthEvidence, item.stealthSpell = contact.stealthEvidence, contact.stealthSpell
     end
@@ -322,7 +342,8 @@ end
 
 function E:RememberEvictedEncounter(contact, now)
     if not contact.guid or now - contact.lastSeen >= self.profile.alerts.returnAfter then return nil end
-    if not (contact.encounterRecorded or contact.arrivalNotified or contact.lastStealthCast or contact.targeting or contact.stealth) then return nil end
+    if not (contact.encounterRecorded or contact.arrivalNotified or contact.lastStealthCast
+        or contact.targetingNotified ~= nil or contact.stealth) then return nil end
     -- Capacity eviction cannot end an encounter on its own. Keep bounded
     -- session evidence keyed by GUID and leave live state to fresh unit reads.
     local cursor = self.evictionCursor % EVICTED_ENCOUNTER_LIMIT + 1
@@ -334,7 +355,7 @@ function E:RememberEvictedEncounter(contact, now)
         guid = contact.guid, slot = cursor, lastSeen = contact.lastSeen,
         encounterRecorded = contact.encounterRecorded, arrivalNotified = contact.arrivalNotified,
         notifiedClass = contact.notifiedClass, lastStealthCast = contact.lastStealthCast,
-        targeting = contact.targeting, stealth = contact.stealth,
+        targetingNotified = contact.targetingNotified, stealth = contact.stealth,
     }
     self.evictionSlots[cursor] = record
     self.evictionCursor = cursor
@@ -351,6 +372,9 @@ function E:RestoreEvictedEncounter(contact, now)
     contact.arrivalNotified = contact.arrivalNotified or record.arrivalNotified
     contact.notifiedClass = contact.notifiedClass or record.notifiedClass
     contact.lastStealthCast = contact.lastStealthCast or record.lastStealthCast
+    if contact.targetingNotified ~= true and record.targetingNotified ~= nil then
+        contact.targetingNotified = record.targetingNotified
+    end
     if record.arrivalNotified and contact.arrivalQueued then
         for index = #self.pending, 1, -1 do
             local item = self.pending[index]
@@ -430,6 +454,9 @@ function E:Merge(target, other)
     target.arrivalQueued = target.arrivalQueued or other.arrivalQueued
     target.encounterRecorded = target.encounterRecorded or other.encounterRecorded
     target.notifiedClass = target.notifiedClass or other.notifiedClass
+    if target.targetingNotified ~= true and other.targetingNotified ~= nil then
+        target.targetingNotified = other.targetingNotified
+    end
     for _, field in ipairs({ "class", "level", "name", "realm", "guid", "identity", "nameIdentity", "rangeMin", "rangeMax", "targeting", "hostile", "isPlayer" }) do
         if target[field] == nil then target[field] = other[field] end
     end
@@ -449,6 +476,7 @@ function E:Merge(target, other)
             for _, strongest in ipairs(kept) do
                 if math.abs(item.at - strongest.at) <= self.profile.alerts.waveWindow then
                     upgradeStealthEvidence(strongest, item.stealthEvidence, item.stealthSpell)
+                    strongest.coversTargeting = strongest.coversTargeting or item.event == "targeting" or item.coversTargeting
                     discard[item] = true
                     break
                 end
@@ -475,6 +503,7 @@ end
 function E:ResetReturningEncounter(contact, now)
     if next(contact.tokens) ~= nil or now - contact.lastSeen < self.profile.alerts.returnAfter then return false end
     contact.encounterRecorded = false
+    contact.targetingNotified = nil
     contact.stealth, contact.stealthAt, contact.stealthEvidence, contact.stealthSpell = nil, nil, nil, nil
     return true
 end
@@ -549,8 +578,6 @@ function E:Observe(raw)
     local oldClass = contact.class
     if obs.class then contact.class = obs.class end
     if obs.level then contact.level = obs.level end
-    local wasTargeting = contact.targeting
-    if wasTargeting == nil and previous then wasTargeting = previous.targeting end
     -- A restricted alias cannot erase another available source's clean evidence.
     -- Conversely, evidence vanishes when every active source becomes unreadable.
     self:Reconcile(contact, now)
@@ -571,7 +598,12 @@ function E:Observe(raw)
     end
     if not oldClass and contact.class and contact.arrivalNotified and not contact.notifiedClass then self:Queue(contact, "identified") end
     if contact.stealth and not oldStealth then self:Queue(contact, "stealth") end
-    if contact.targeting and wasTargeting ~= true then self:Queue(contact, "targeting") end
+    -- An unreadable target does not end an episode. Retry from a fresh positive
+    -- observation until the current target actually produces a warning.
+    if obs.targeting == true and contact.targetingNotified ~= true then
+        contact.targetingNotified = false
+        if self.profile.alerts.targeting then self:Queue(contact, "targeting") end
+    end
     self:Changed()
     return self:View(contact, now)
 end
@@ -587,11 +619,12 @@ function E:Remove(token, contradiction)
         if not visible then
             contact.lastSeen = self:Now()
             contact.targeting, contact.currentTarget, contact.currentFocus = nil, nil, nil
+            if contact.targetingNotified ~= nil then self:CancelTargeting(contact) end
         else self:Reconcile(contact, self:Now()) end
         if contradiction and (not visible or contact.hostile ~= true or contact.isPlayer ~= true) then
             if contradiction.hostile == false then contact.hostile = false end
             if contradiction.isPlayer == false then contact.isPlayer = false end
-            contact.targeting, contact.arrivalQueued = nil, false
+            contact.targeting, contact.targetingNotified, contact.arrivalQueued = nil, nil, false
             for index = #self.pending, 1, -1 do
                 if self.pending[index].id == contact.id then table.remove(self.pending, index) end
             end
@@ -625,10 +658,11 @@ function E:Emit(decision, now)
             or now - self.lastSound < self.profile.alerts.soundGap then decision.sound = false
         else self.lastSound = now end
     end
-    if not decision.sound and not decision.banner then return end
+    if not decision.sound and not decision.banner then return false end
     self.counters.alerts = self.counters.alerts + 1
     U.ArrayPush(self.history, { at = now, kind = decision.kind, id = decision.contact and decision.contact.id, reason = decision.reason }, self.profile.retention.maxHistory)
     self.onAlert(decision)
+    return true
 end
 
 function E:EmitOrdinary(group, now)
@@ -676,23 +710,33 @@ function E:Tick()
     for _, item in ipairs(ready) do
         local contact = self.contacts[item.id]
         local decision
-        if contact and (item.event ~= "targeting" or contact.targeting == true) then
+        if contact and (item.event ~= "targeting" or (contact.targeting == true and contact.targetingNotified ~= true)) then
             decision = self:Explain(contact, item.event, now)
         end
         if decision and not (self.pausedUntil and now < self.pausedUntil) and not self:SnoozedUntil(contact) then
             local key = contact.id .. ":" .. (decision.dedupKey or decision.kind)
             if not accepted[key] and (not self.cooldowns[key] or now - self.cooldowns[key] >= decision.cooldown) then
                 accepted[key] = true
-                self.cooldowns[key] = now
                 decision.contact = self:View(contact, now)
                 decision.stealthEvidence, decision.stealthSpell = item.stealthEvidence, item.stealthSpell
-                contact.arrivalNotified, contact.arrivalQueued = true, false
-                if contact.class then contact.notifiedClass = contact.class end
+                local emitted
                 if ordinaryAlert(decision) then
                     item.decision = decision
                     ordinary[#ordinary + 1] = item
                 else
-                    self:Emit(decision, now)
+                    emitted = self:Emit(decision, now)
+                end
+                if emitted and contact.targeting == true and contact.targetingNotified ~= true then
+                    -- A stronger warning counts only if it replaced an
+                    -- eligible targeting warning from the same burst.
+                    if item.event == "targeting" or (item.coversTargeting and self:Explain(contact, "targeting", now)) then
+                        contact.targetingNotified = true
+                    end
+                end
+                if item.event ~= "targeting" or emitted then
+                    self.cooldowns[key] = now
+                    contact.arrivalNotified, contact.arrivalQueued = true, false
+                    if contact.class then contact.notifiedClass = contact.class end
                 end
             end
         elseif contact and item.event == "sighting" then

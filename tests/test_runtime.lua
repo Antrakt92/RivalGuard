@@ -355,6 +355,95 @@ for _, queued in ipairs({ false, true }) do
     end)
 end
 
+local function targetingFixture(initialDistance)
+    local distance, unknown = initialDistance, false
+    local secret = H.Secret("restricted target relation")
+    local state, _, app = setup(nil, function(fixture)
+        fixture.api.UnitDistanceSquared = function(token)
+            if token == "nameplate1" then return distance * distance, true end
+        end
+        local compare = fixture.api.UnitIsUnit
+        fixture.api.UnitIsUnit = function(first, second)
+            if unknown and first == "nameplate1target" and second == "player" then return secret end
+            return compare(first, second)
+        end
+    end)
+    local profile = app.db:GetProfile()
+    profile.range.enabled, profile.range.policy, profile.range.yards, profile.range.unknown = true, "confirmed", 35, false
+    profile.alerts.muteOrdinary, profile.alerts.cooldown = true, 0
+    app:ProfileChanged()
+    state:Unit("player", { guid = "Player-TargetingSelf" })
+    state:Unit("nameplate1", { guid = "Player-RangeTargeting", name = "Rival", class = "ROGUE", hostile = true, isPlayer = true })
+    state:Unit("nameplate1target", state.units.player)
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    local function target(value)
+        unknown = value == nil
+        if not unknown then state.units.nameplate1target = value and state.units.player or nil end
+        state:Fire("UNIT_TARGET", "nameplate1")
+    end
+    return state, app, function(value) distance = value end, target
+end
+
+H.Test("continuous targeting recovers once in range and a clean new episode can warn again", function()
+    local state, app, setDistance, target = targetingFixture(48)
+    state:Advance(0.5)
+    H.True(app.engine:Snapshot()[1].targeting)
+    H.Equal(app.engine.counters.alerts, 0)
+    setDistance(21)
+    state:Advance(1)
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(app.ui.activeBanner.kind, "targeting")
+    state:Advance(2)
+    H.Equal(app.engine.counters.alerts, 1)
+
+    target(false)
+    H.False(app.engine:Snapshot()[1].targeting)
+    target(true)
+    state:Advance(0.5)
+    H.Equal(app.engine.counters.alerts, 2)
+    H.Equal(app.engine.history[2].kind, "targeting")
+    state:Advance(1)
+    H.Equal(app.engine.counters.alerts, 2)
+end)
+
+H.Test("an unreadable target relation does not start a second warning episode", function()
+    local state, app, _, target = targetingFixture(21)
+    state:Advance(0.5)
+    H.Equal(app.engine.counters.alerts, 1)
+    target(nil)
+    H.Nil(app.engine:Snapshot()[1].targeting)
+    state:Advance(0.5)
+    H.Equal(app.engine.counters.alerts, 1)
+    target(true)
+    state:Advance(0.5)
+    H.True(app.engine:Snapshot()[1].targeting)
+    H.Equal(app.engine.counters.alerts, 1)
+end)
+
+H.Test("a queued targeting warning canceled by range can recover without emitting stale output", function()
+    local state, app, setDistance, target = targetingFixture(21)
+    H.Equal(app.engine.counters.alerts, 0)
+    setDistance(48)
+    state:Fire("UNIT_FLAGS", "nameplate1")
+    state:Advance(0.5)
+    H.True(app.engine:Snapshot()[1].targeting)
+    H.Equal(app.engine.counters.alerts, 0)
+    H.False(app.ui.banner:IsShown())
+
+    setDistance(21)
+    state:Fire("UNIT_FLAGS", "nameplate1")
+    state:Advance(0.5)
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(app.engine.history[1].kind, "targeting")
+    target(false)
+    target(true)
+    state.units.nameplate1 = nil
+    state:Fire("NAME_PLATE_UNIT_REMOVED", "nameplate1")
+    state:Advance(0.5)
+    H.Equal(app.engine.counters.alerts, 1)
+    H.False(app.ui.banner:IsShown())
+end)
+
 for _, scenario in ipairs({ { kind = "sighting", count = 1 }, { kind = "wave", count = 3 } }) do
     H.Test("a silent " .. scenario.kind .. " banner leaves sound budget for the next warning", function()
         local state, _, app = setup()
