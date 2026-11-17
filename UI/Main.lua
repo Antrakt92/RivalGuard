@@ -443,6 +443,7 @@ function UI.New(app)
     main:EnableMouseWheel(true)
     local mainBackground = fill(main); local mainBorder = outline(main)
     local nearbyMoveProfile, nearbyDefaultX, nearbyDefaultY
+    local nearbyOpened = false
     local function savedNearby(profile)
         local saved = profile.positions.nearby
         -- Old builds sometimes saved their automatic right-side anchor.
@@ -456,9 +457,9 @@ function UI.New(app)
         nearbyDefaultX, nearbyDefaultY = nil, nil
     end
 
-    local function fitNearby(height, profile)
+    local function fitNearby(width, height, profile)
         if nearbyMoveProfile then return end
-        local width = UI.layout.width
+        if main:GetWidth() ~= width or main:GetHeight() ~= height then main:SetSize(width, height) end
         local scale, screenWidth, screenHeight = self:FitWindow(main, width, height, profile.display.scale)
         if savedNearby(profile) then return end
         local x = math.min(screenWidth * 0.08, screenWidth - WINDOW_MARGIN - width * scale) / scale
@@ -472,7 +473,7 @@ function UI.New(app)
     restoreNearby()
 
     local header = CreateFrame("Button", nil, main)
-    header:SetPoint("TOPLEFT", 0, 0); header:SetPoint("TOPRIGHT", -34, 0); header:SetHeight(28)
+    header:SetPoint("TOPLEFT", 0, 0); header:SetPoint("TOPRIGHT", -66, 0); header:SetHeight(28)
     header:EnableMouse(true)
     header:RegisterForDrag("LeftButton")
     header:SetScript("OnEnter", function()
@@ -519,7 +520,33 @@ function UI.New(app)
         tooltip(settingsButton, self:F("currentProfileChoice", app.db:GetActiveProfileName()), self:T("profilePickerTip"))
     end)
     settingsButton:SetScript("OnLeave", hideTooltip)
-    local statusText = font(main, 11, C.muted)
+    local collapseButton = button(main, "−", 28, function()
+        self:Profile().display.nearbyCollapsed = true
+        nearbyOpened = false
+        self.nearbyMoveMode = nil
+        if nearbyMoveProfile then restoreNearby() end
+        self.previewContacts, self.previewUntil = nil, nil
+        self:ClosePreviewDetails()
+        self:Refresh()
+    end)
+    collapseButton:SetPoint("RIGHT", settingsButton, "LEFT", -4, 0); collapseButton:SetHeight(25)
+    self.nearbyCollapseButton = collapseButton
+    local expandButton = button(main, "RivalGuard   +", 112, function()
+        self:Profile().display.nearbyCollapsed = false
+        nearbyOpened = true
+        self:Refresh()
+    end)
+    expandButton:SetAllPoints(main)
+    self.nearbyExpandButton = expandButton
+    for widget, key in pairs({ [collapseButton] = "collapseNearby", [expandButton] = "expandNearby" }) do
+        widget:SetScript("OnEnter", function(frame) tooltip(frame, self:T(key)) end)
+        widget:SetScript("OnLeave", hideOwnedTooltip)
+        widget:SetScript("OnHide", hideOwnedTooltip)
+    end
+
+    local body = CreateFrame("Frame", nil, main)
+    body:SetAllPoints(main)
+    local statusText = font(body, 11, C.muted)
     statusText:SetPoint("TOPLEFT", 12, -31); statusText:SetWidth(324)
     self.statusText = statusText
 
@@ -560,17 +587,17 @@ function UI.New(app)
         return chips
     end
 
-    self.quickChips = makeClassChips(main, 12, -53, "display", true)
+    self.quickChips = makeClassChips(body, 12, -53, "display", true)
 
-    local empty = label(main, "noEnemies", 14, C.text)
+    local empty = label(body, "noEnemies", 14, C.text)
     empty:SetPoint("TOPLEFT", 15, -104); empty:SetWidth(318); empty:SetJustifyH("CENTER")
-    local emptyHelp = label(main, "noEnemiesHelp", 11, C.muted)
+    local emptyHelp = label(body, "noEnemiesHelp", 11, C.muted)
     emptyHelp:SetPoint("TOPLEFT", 20, -130); emptyHelp:SetWidth(308); emptyHelp:SetJustifyH("CENTER")
     emptyHelp:SetHeight(63)
     self.empty, self.emptyHelp = empty, emptyHelp
 
     for i = 1, 20 do
-        local row = CreateFrame("Button", nil, main)
+        local row = CreateFrame("Button", nil, body)
         row:SetPoint("TOPLEFT", 8, -UI.layout.header - (i - 1) * 33)
         row:SetSize(UI.layout.width - 16, 33)
         row.bg = fill(row, { 0.09, 0.115, 0.15, i % 2 == 0 and 0.7 or 0.25 })
@@ -595,7 +622,7 @@ function UI.New(app)
         self.rows[i] = row
     end
 
-    local more = font(main, 10, C.muted, "CENTER")
+    local more = font(body, 10, C.muted, "CENTER")
     more:SetPoint("BOTTOMLEFT", 10, 43); more:SetPoint("BOTTOMRIGHT", -10, 43); self.moreText = more
     function self:TogglePause()
         local untilTime = M.Number(app.engine.pausedUntil)
@@ -603,15 +630,16 @@ function UI.New(app)
         if paused then app.engine:Resume() else app.engine:Pause(600) end
         self:Refresh()
     end
-    local pauseButton = button(main, self:T("pause"), 118, function() self:TogglePause() end)
+    local pauseButton = button(body, self:T("pause"), 118, function() self:TogglePause() end)
     pauseButton:SetPoint("BOTTOMLEFT", 10, 9); self.pauseButton = pauseButton
-    local muteButton = button(main, self:T("mute"), 111, function() app:ToggleMute(); self:SettingsChanged() end)
+    local muteButton = button(body, self:T("mute"), 111, function() app:ToggleMute(); self:SettingsChanged() end)
     muteButton:SetPoint("LEFT", pauseButton, "RIGHT", 5, 0); self.muteButton = muteButton
-    local demoButton = localButton(main, "demo", 85, function() app:Demo() end)
+    local demoButton = localButton(body, "demo", 85, function() app:Demo() end)
     demoButton:SetPoint("LEFT", muteButton, "RIGHT", 5, 0)
     demoButton:SetScript("OnEnter", function() tooltip(demoButton, self:T("demo"), self:T("demoTip")) end)
     demoButton:SetScript("OnLeave", hideTooltip)
     main:SetScript("OnMouseWheel", function(_, delta)
+        if not body:IsShown() then return end
         local count = self.renderedCount or 0
         self.offset = math.max(0, math.min(math.max(0, count - self:Profile().display.maxRows), self.offset - delta))
         self:Refresh()
@@ -1341,6 +1369,7 @@ function UI.New(app)
         end
         self:UpdateClasses()
         if self.lastProfile ~= profile then
+            nearbyOpened = false
             self.nearbyMoveMode = nil
             restoreNearby()
             cancelBannerMove(); restoreBanner()
@@ -1355,16 +1384,17 @@ function UI.New(app)
             self:ClosePreviewDetails()
         end
         local moving = self.nearbyMoveMode == profile or nearbyMoveProfile == profile
+        local compact = profile.display.showList and profile.display.nearbyCollapsed and not preview and not moving
         local detailsShown = self.detailsFrame and self.detailsFrame:IsShown() and self.selected
         local liveDetailsShown = detailsShown and not self.selected.preview and not self.selected.recentDraft
         local maxRows = math.floor(RG.Util.Clamp(profile.display.maxRows, 3, 20, 8))
         local livePage, nearbyCount, nearbyVisible, nearbyIds
-        local paged = (profile.display.showList or moving) and not preview
+        local paged = (profile.display.showList or moving) and not preview and not compact
         if paged then
             livePage, nearbyCount, nearbyVisible, self.offset, nearbyIds = app.engine:NearbyPage(self.offset, maxRows, profile.display.streamer)
         end
-        local nearbyShown = preview == true or moving
-            or (profile.display.showList and (profile.display.showEmpty or (nearbyVisible or 0) > 0))
+        local expanded = preview == true or moving or (profile.display.showList and not compact
+            and (nearbyOpened or profile.display.showEmpty or (nearbyVisible or 0) > 0))
         local untilTime = M.Number(app.engine.pausedUntil)
         local paused = untilTime ~= nil and untilTime > now
         local supportShown = settings:IsShown() and self.currentPage == "support"
@@ -1380,10 +1410,10 @@ function UI.New(app)
         local appStatus = self.statusCache or {}
         if type(appStatus) ~= "table" then appStatus = { detail = appStatus } end
         local detection = self:DetectionKey(appStatus)
-        local alertBlock = (nearbyShown and not preview or supportShown) and self:AlertBlock()
+        local alertBlock = (expanded and not preview or supportShown) and self:AlertBlock()
         paintText(self.pauseButton.label, self:T(paused and "resume" or "pause"))
         paintText(self.muteButton.label, self:T(profile.alerts.sound and "mute" or "unmute"))
-        if nearbyShown then
+        if expanded then
             local snapshot = preview and self.previewContacts or livePage
             local rows = M.Rows(snapshot, profile, now, preview and self.previewAliases or self.aliases, nearbyIds, paged and self.offset or nil)
             local rowCount = nearbyCount or #rows
@@ -1391,11 +1421,7 @@ function UI.New(app)
             local rowHeight = profile.display.textSize + UI.layout.rowPadding
             local shownRows = rowCount > 0 and math.min(maxRows, rowCount) or 3
             local mainHeight = UI.layout.header + shownRows * rowHeight + UI.layout.footer
-            if self.nearbyHeight ~= mainHeight then
-                main:SetHeight(mainHeight)
-                self.nearbyHeight = mainHeight
-            end
-            fitNearby(mainHeight, profile)
+            fitNearby(UI.layout.width, mainHeight, profile)
             local visibleCount = nearbyVisible
             if not paged then
                 self.offset = math.max(0, math.min(self.offset, math.max(0, rowCount - maxRows)))
@@ -1422,12 +1448,17 @@ function UI.New(app)
                 empty:SetText(self:T(titleKey)); emptyHelp:SetText(self:T(helpKey))
             end
         else
+            if compact then fitNearby(112, 28, profile) end
             self.visibleCount = app.engine:CountVisible()
             self.renderedCount = 0
             if main:IsShown() then
                 for _, row in ipairs(self.rows) do paintNearbyRow(row) end
             end
         end
+        paintShown(body, expanded); paintShown(header, expanded)
+        paintShown(settingsButton, expanded); paintShown(collapseButton, expanded)
+        paintShown(expandButton, compact)
+        local nearbyShown = expanded or compact
         if main:IsShown() ~= nearbyShown then main:SetShown(nearbyShown) end
         if self.controlsDirty then self:RefreshControls(); self.controlsDirty = false end
         self.badges:Refresh()
@@ -1495,6 +1526,7 @@ function UI.New(app)
     end
 
     function self:Toggle()
+        nearbyOpened = false
         self:Profile().display.showList = not self:Profile().display.showList
         changed()
     end

@@ -4369,7 +4369,7 @@ for _, locale in ipairs({ "enUS", "ruRU" }) do
             if child:GetText() == hint and child:IsShown() then hintShown = true end
         end
         H.True(hintShown)
-        for _, frame in ipairs({ findChip("ROGUE", ui.pages.overview), findChip("ROGUE", ui.frame) }) do
+        for _, frame in ipairs({ findChip("ROGUE", ui.pages.overview), findChip("ROGUE", ui.statusText:GetParent()) }) do
             for _, button in ipairs(frame.clickButtons or {}) do
                 H.False(button == "RightButtonUp" or button == "RightButtonDown")
             end
