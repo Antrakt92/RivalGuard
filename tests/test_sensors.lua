@@ -125,6 +125,61 @@ H.Test("retry capacity cannot increase the current poll plate-read budget", func
     H.Nil(next(sensors.plateRetries))
 end)
 
+H.Test("a crowded acquisition limits exact aura reads and promptly revisits current occupants", function()
+    local sensors, units, observed, _, _, _, _, api, _, secret = fixture()
+    local calls, indexed, searched = 0, 0, {}
+    api.C_UnitAuras = {
+        GetAuraDataByIndex = function() indexed = indexed + 1; return secret end,
+        GetUnitAuraBySpellID = function(token, id)
+            calls = calls + 1
+            searched[token] = units[token].guid
+            if (token == "nameplate123" or token == "target") and id == 1784 then
+                return { isHelpful = true, spellId = id }
+            end
+        end,
+    }
+    sensors:Start()
+    for index = 1, 124 do
+        local token = "nameplate" .. index
+        units[token] = player("Rival " .. index, "Player-Crowd-" .. index)
+        sensors:OnEvent("NAME_PLATE_UNIT_ADDED", token)
+    end
+    units.target = player("Target", "Player-Crowd-Target")
+    sensors:OnEvent("PLAYER_TARGET_CHANGED")
+    H.Equal(sensors.plateCount, 124)
+    H.Equal(searched.target, "Player-Crowd-Target")
+    H.True(calls <= 20 * 17, "burst exceeded the acquisition budget")
+    H.Nil(searched.nameplate123)
+    sensors:OnEvent("UNIT_AURA", "nameplate122", { isFullUpdate = false,
+        addedAuras = { { isHelpful = true, spellId = 1784 } } })
+    H.True(observed[#observed].stealth)
+    H.Nil(searched.nameplate122)
+    units.nameplate124 = nil
+    sensors:OnEvent("NAME_PLATE_UNIT_REMOVED", "nameplate124")
+    units.nameplate123 = player("Replacement", "Player-Crowd-Replacement")
+    sensors:OnEvent("NAME_PLATE_UNIT_ADDED", "nameplate123")
+    for _ = 1, 12 do
+        local before, beforeIndexed = calls, indexed
+        sensors:Poll(true)
+        H.True(calls - before <= 20 * 17, "scheduled pass exceeded the acquisition budget")
+        H.True(indexed - beforeIndexed <= 16, "waiting plates repeated indexed reads after exhausting the budget")
+    end
+    H.Equal(searched.nameplate123, "Player-Crowd-Replacement")
+    H.Nil(searched.nameplate124)
+    H.Nil(searched.nameplate122)
+    for index = 1, 121 do
+        H.Equal(searched["nameplate" .. index], "Player-Crowd-" .. index)
+    end
+    local confirmed
+    for _, obs in ipairs(observed) do
+        if obs.guid == "Player-Crowd-Replacement" and obs.stealth == true then confirmed = obs end
+    end
+    H.True(confirmed ~= nil)
+    local settled = calls
+    for _ = 1, 4 do sensors:Poll(true) end
+    H.Equal(calls, settled)
+end)
+
 H.Test("sensors never correlate casts after removal or from mismatched current owners", function()
     local sensors, units, observed, _, casts = fixture()
     units.nameplate1 = player()

@@ -275,7 +275,7 @@ local function indexedStealth(self, token, ns)
     return nil
 end
 
-function Client:Stealth(token, update, acquiring)
+function Client:Stealth(token, update, acquiring, budget)
     -- Event additions and exact spell lookups can prove presence. Absence
     -- requires a complete indexed read.
     if hasAddedStealth(self, update) then return true, true end
@@ -284,6 +284,10 @@ function Client:Stealth(token, update, acquiring)
     local indexed = indexedStealth(self, token, ns)
     if indexed ~= nil then return indexed, true end
     if acquiring and type(ns.GetUnitAuraBySpellID) == "function" then
+        if budget then
+            if budget.remaining == 0 then return nil, false, true end
+            budget.remaining = budget.remaining - 1
+        end
         for _, id in ipairs(self.stealthAuraIDs) do
             local aura = self:Safe(ns.GetUnitAuraBySpellID, token, id)
             if helpfulAuraID(self, aura) == id then return true, true end
@@ -292,7 +296,7 @@ function Client:Stealth(token, update, acquiring)
     return nil, false
 end
 
-function Client:ReadUnit(token, source, checkRequalifiedAura, auraUpdate, auraOwner)
+function Client:ReadUnit(token, source, checkRequalifiedAura, auraUpdate, auraOwner, auraBudget)
     token = self:IsToken(token)
     if not token then return nil end
     local api = self.api
@@ -332,7 +336,8 @@ function Client:ReadUnit(token, source, checkRequalifiedAura, auraUpdate, auraOw
             or (not auraOwner.guid and auraOwner.name and nameComplete and auraOwner.name == name))
         if not sameOwner then auraUpdate = nil end
         local acquiring = player == true and hostile == true and (checkRequalifiedAura or source ~= "aura")
-        observation.stealth, observation.stealthReadable = self:Stealth(token, auraUpdate, acquiring)
+        observation.stealth, observation.stealthReadable, observation.deferredAuraLookup =
+            self:Stealth(token, auraUpdate, acquiring, auraBudget)
     end
     if token:match("^nameplate%d+$") then
         local manager = api.C_NamePlateManager

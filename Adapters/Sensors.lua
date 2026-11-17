@@ -18,6 +18,8 @@ local MAX_PLATES = MAX_ACTIVE - RG.Util.Count(DIRECT)
 local POLL_SECONDS = 0.25
 local PLATE_PHASES = 4
 local PLATE_RETRY_POLLS = 3
+local PLATE_AURA_LOOKUPS = 16
+local DIRECT_AURA_LOOKUPS = 4
 local PLATE_EVENTS = { NAME_PLATE_UNIT_ADDED = true, NAME_PLATE_UNIT_REMOVED = true }
 local SAMPLE_BOUNDARY = {
     ADDON_RESTRICTION_STATE_CHANGED = true,
@@ -28,6 +30,7 @@ local SAMPLE_BOUNDARY = {
 
 function Sensors.New(app, client, api)
     return setmetatable({ app = app, client = client, api = api or _G, active = {}, plateRetries = {}, deferredPlates = {}, count = 0, plateCount = 0,
+        plateAuraBudget = { remaining = PLATE_AURA_LOOKUPS }, directAuraBudget = { remaining = DIRECT_AURA_LOOKUPS },
         generation = 0, elapsed = 0, phase = 0, running = false, loading = false }, Sensors)
 end
 
@@ -57,6 +60,17 @@ function Sensors:ForgetDeferredPlate(token)
     end
 end
 
+function Sensors:ReadUnit(token, source, auraUpdate)
+    local state = self.active[token]
+    local budget = DIRECT[token] and self.directAuraBudget or self.plateAuraBudget
+    local waiting = state and state.deferredAuraLookup
+    local skipRetry = waiting and source == "poll" and budget.remaining == 0
+    local checkAura = state and (state.awaitingEligibility or (waiting and not skipRetry))
+    local obs = self.client:ReadUnit(token, source, checkAura, auraUpdate, state, budget)
+    if obs and skipRetry and not checkAura then obs.auraRetrySkipped = true end
+    return obs
+end
+
 function Sensors:Observe(token, source, behindCamera, event, auraUpdate)
     token = self.client:IsToken(token)
     if not token then return end
@@ -65,8 +79,7 @@ function Sensors:Observe(token, source, behindCamera, event, auraUpdate)
         self:DeferPlate(token)
         return
     end
-    local state = self.active[token]
-    local obs = self.client:ReadUnit(token, source, state and state.awaitingEligibility, auraUpdate, state)
+    local obs = self:ReadUnit(token, source, auraUpdate)
     if not obs then
         self:Remove(token)
         if not DIRECT[token] and RG.Util.Count(self.plateRetries) < MAX_PLATES then
@@ -122,6 +135,10 @@ function Sensors:Record(obs, behindCamera, event)
     state.unverifiedName = unverifiedName
     state.awaitingEligibility = obs.isPlayer == false or obs.hostile == false
         or (awaitingEligibility and (obs.isPlayer ~= true or obs.hostile ~= true))
+    -- Keep an unattempted retry only on the current eligible generation.
+    state.deferredAuraLookup = obs.deferredAuraLookup or (state.deferredAuraLookup
+        and not obs.stealthReadable and obs.isPlayer ~= false and obs.hostile ~= false
+        and (obs.auraRetrySkipped or obs.isPlayer ~= true or obs.hostile ~= true))
     local contact = self:Call("Observe", obs)
     local view = type(contact) == "table" and contact or nil
     state.contactID = view and view.id
@@ -194,7 +211,7 @@ function Sensors:RecoverPlates(budget)
             if not rawequal(self.client:Nameplate(token), retry.frame) then
                 self.plateRetries[token] = nil
             else
-                local obs = self.client:ReadUnit(token, "nameplate")
+                local obs = self:ReadUnit(token, "nameplate")
                 if obs then self:Record(obs) end
             end
         end
@@ -216,6 +233,10 @@ end
 
 function Sensors:Poll(scheduled)
     if not self.running then return end
+    if scheduled then
+        self.plateAuraBudget.remaining = PLATE_AURA_LOOKUPS
+        self.directAuraBudget.remaining = DIRECT_AURA_LOOKUPS
+    end
     self:Call("SetContext", self.client:Context())
     if not self.loading then
         local refresh = self.refreshSamples
@@ -296,7 +317,7 @@ function Sensors:OnEvent(event, token, unitEventData, spellID)
         if state and spellID and spellID > 0 and spellID == math.floor(spellID) then
             local engine = self.app.engine
             if engine and type(engine.TracksCast) == "function" and self:Call("TracksCast", spellID) ~= true then return end
-            local obs = self.client:ReadUnit(token, "cast", state.awaitingEligibility)
+            local obs = self:ReadUnit(token, "cast")
             if obs and ((state.guid and obs.guid == state.guid) or (not state.guid and state.name and obs.nameComplete and obs.name == state.name)) then
                 self:Record(obs, nil, event)
                 if obs.isPlayer ~= false and obs.hostile ~= false then self:Call("Cast", token, spellID) end
@@ -326,6 +347,8 @@ function Sensors:Start()
         frame, self.frame = created, created
     end
     self.running = true
+    self.plateAuraBudget.remaining = PLATE_AURA_LOOKUPS
+    self.directAuraBudget.remaining = DIRECT_AURA_LOOKUPS
     self.nameplateEvents = frame ~= nil
     if frame then
         for _, event in ipairs(EVENTS) do

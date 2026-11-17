@@ -55,7 +55,11 @@ whose owner still matches. With no matching addition they scan up to 40 entries
 through `C_UnitAuras.GetAuraDataByIndex`. During acquisition or requalification
 of a confirmed hostile player, an inconclusive scan can fall back to bounded
 exact spell lookups through `C_UnitAuras.GetUnitAuraBySpellID`. These lookups
-require a readable helpful aura whose spell ID matches the request. Only a
+require a readable helpful aura whose spell ID matches the request. Each 250 ms
+sensor interval allows exact lookups for 16 nameplates and reserves four for
+target, focus, mouseover and soft enemy. Eligible deferred contacts are checked
+again in the normal poll rotation. Readable aura events can still confirm an
+aura immediately. Only a
 complete readable indexed scan can establish absence. A confirmed nonhostile or
 non-player token retains identity evidence and skips threat detail queries.
 The first clean confirmation of hostile player status, including after
