@@ -1,5 +1,13 @@
 local _, RG = ...
 local B = RG.Register("Badges", {})
+local SECURITY_METHODS = { "IsForbidden", "IsProtected" }
+
+local function show(badge, region, shown)
+    if badge.shownState[region] == shown then return end
+    local frame = region == "root" and badge or badge[region]
+    frame:SetShown(shown)
+    badge.shownState[region] = shown
+end
 
 function B.New(getProfile)
     local self = { active = {}, pool = {}, count = 0 }
@@ -15,7 +23,7 @@ function B.New(getProfile)
     end
 
     local function available(frame)
-        for _, method in ipairs({ "IsForbidden", "IsProtected" }) do
+        for _, method in ipairs(SECURITY_METHODS) do
             if frame[method] then
                 local ok, value = pcall(frame[method], frame)
                 if not ok then return false end
@@ -35,6 +43,7 @@ function B.New(getProfile)
         if self.count >= 128 then return nil end
         self.count = self.count + 1
         badge = CreateFrame("Frame", nil, UIParent)
+        badge.shownState = {}
         badge:SetSize(24, 24)
         badge:EnableMouse(false)
         badge.bg = badge:CreateTexture(nil, "BACKGROUND")
@@ -56,7 +65,7 @@ function B.New(getProfile)
         badge.locator = badge:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
         badge.locator:SetFont(STANDARD_TEXT_FONT or "Fonts\\ARIALN.TTF", 26, "OUTLINE")
         badge.locator:SetText("▼"); badge.locator:SetTextColor(1, 0.85, 0.38)
-        badge.locator:Hide()
+        show(badge, "locator", false)
         return badge
     end
 
@@ -64,39 +73,45 @@ function B.New(getProfile)
         local profile = getProfile()
         local contact = badge.contact
         local class = contact and RG.UIModel.Text(contact.class, "")
-        local observed = profile.enabled and contact and contact.hostile == true and contact.isPlayer == true
+        local observed = profile.enabled == true and contact ~= nil and contact.hostile == true and contact.isPlayer == true
             and contact.dead ~= true and contact.behindCamera ~= true and contact.listKind ~= "ignore"
-        local showLocator = observed and self.highlight and self.highlight.badge == badge and self.highlight.id == contact.id
-        local showClass = observed and profile.display.showBadges and RG.Defaults.classSet[class]
+        local highlight = self.highlight
+        local showLocator = observed and highlight ~= nil and highlight.badge == badge and highlight.id == contact.id
+        local showClass = observed and profile.display.showBadges == true and RG.Defaults.classSet[class] == true
             and RG.UIModel.ClassEnabled(profile.display.classes, class)
-        badge.locator:SetShown(showLocator == true)
+        show(badge, "locator", showLocator)
         if not showClass and not showLocator then
-            badge:Hide()
+            show(badge, "root", false)
             return false
         end
-        badge.bg:SetShown(showClass == true); badge.icon:SetShown(showClass == true)
-        if showClass then badge.icon:SetTexture("Interface\\Icons\\ClassIcon_" .. class) end
-        badge.marker:SetShown(showClass and (contact.watched == true or contact.listKind == "avoid") or false)
-        badge.target:SetShown(showClass and profile.display.badgeTarget == true and contact.currentTarget == true or false)
-        badge.focus:SetShown(showClass and profile.display.badgeFocus == true and contact.currentFocus == true or false)
-        if not locked() then
-            local size = RG.Util.Clamp(profile.display.badgeSize, 16, 40, 24)
-            local offset = RG.Util.Clamp(profile.display.badgeOffset, 0, 30, 6)
-            if badge.styleSize ~= size then badge:SetSize(size, size); badge.styleSize = size end
-            if badge.styleOffset ~= offset and badge.parent then
+        show(badge, "bg", showClass)
+        show(badge, "icon", showClass)
+        if showClass and badge.textureClass ~= class then
+            badge.icon:SetTexture("Interface\\Icons\\ClassIcon_" .. class)
+            badge.textureClass = class
+        end
+        show(badge, "marker", showClass and (contact.watched == true or contact.listKind == "avoid"))
+        show(badge, "target", showClass and profile.display.badgeTarget == true and contact.currentTarget == true)
+        show(badge, "focus", showClass and profile.display.badgeFocus == true and contact.currentFocus == true)
+        local size = RG.Util.Clamp(profile.display.badgeSize, 16, 40, 24)
+        local offset = RG.Util.Clamp(profile.display.badgeOffset, 0, 30, 6)
+        local resize, reposition = badge.styleSize ~= size, badge.styleOffset ~= offset and badge.parent ~= nil
+        if (resize or reposition) and not locked() then
+            if resize then badge:SetSize(size, size); badge.styleSize = size end
+            if reposition then
                 badge:ClearAllPoints(); badge:SetPoint("LEFT", badge.parent, "RIGHT", offset, 0); badge.styleOffset = offset
             end
         end
-        badge:Show()
-        return showLocator == true
+        show(badge, "root", true)
+        return showLocator
     end
 
     function self:ClearHighlight()
         local highlight = self.highlight
         if not highlight then return end
         self.highlight = nil
-        highlight.badge.locator:Hide()
-        if available(highlight.frame) then paint(highlight.badge) else highlight.badge:Hide() end
+        show(highlight.badge, "locator", false)
+        if available(highlight.frame) then paint(highlight.badge) else show(highlight.badge, "root", false) end
     end
 
     function self:Highlight(unit, frame, id, now)
@@ -113,7 +128,7 @@ function B.New(getProfile)
         if type(unit) ~= "string" or not unit:match("^nameplate%d+$") then return end
         if not frame or not frame.SetPoint or not available(frame) then self:Remove(unit); return end
         local badge = self.active[unit]
-        if locked() and (not badge or badge.parent ~= frame) then
+        if (not badge or badge.parent ~= frame) and locked() then
             if badge then self:Remove(unit) end
             return
         end
@@ -141,10 +156,10 @@ function B.New(getProfile)
         if not badge then return end
         if self.highlight and self.highlight.unit == unit then
             self.highlight = nil
-            badge.locator:Hide()
         end
         self.active[unit] = nil
-        badge:Hide()
+        show(badge, "locator", false)
+        show(badge, "root", false)
         badge.contact = nil
         if not locked() then
             badge:ClearAllPoints()

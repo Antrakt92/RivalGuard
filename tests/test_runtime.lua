@@ -914,6 +914,68 @@ local function locatorVisible(ui, token)
     return badge ~= nil and badge.locator ~= nil and badge.locator:IsVisible()
 end
 
+H.Test("stationary nameplate polling reads all opponents without repainting unchanged badges", function()
+    local state, _, app = setup()
+    local ui = app.ui
+    for index = 1, 64 do
+        local token = "nameplate" .. index
+        state:Unit(token, { guid = "Player-Stationary-" .. index, name = "Rival " .. index,
+            class = "ROGUE", hostile = true, isPlayer = true })
+        state:Fire("NAME_PLATE_UNIT_ADDED", token)
+    end
+    state:Advance(1.25)
+    H.Equal(#app.engine:Snapshot(), 64)
+    H.Equal(app.engine.history[1].kind, "wave")
+
+    local reads, writes = {}, { SetShown = 0, Show = 0, Hide = 0, SetTexture = 0 }
+    local guid = state.api.UnitGUID
+    state.api.UnitGUID = function(token)
+        if token:match("^nameplate%d+$") then reads[token] = (reads[token] or 0) + 1 end
+        return guid(token)
+    end
+    local function instrument(frame, method)
+        local invoke = frame[method]
+        frame[method] = function(self, ...)
+            writes[method] = writes[method] + 1
+            return invoke(self, ...)
+        end
+    end
+    for index = 1, 64 do
+        local badge = assert(ui.badges.active["nameplate" .. index])
+        H.True(badge.icon:IsVisible())
+        for _, region in ipairs({ badge, badge.bg, badge.icon, badge.marker, badge.target, badge.focus, badge.locator }) do
+            for _, method in ipairs({ "SetShown", "Show", "Hide" }) do instrument(region, method) end
+        end
+        instrument(badge.icon, "SetTexture")
+    end
+    local observed = app.engine.counters.observations
+    app.sensors:Poll()
+    ui:Refresh()
+    H.Equal(app.engine.counters.observations - observed, 64)
+    for index = 1, 64 do H.Equal(reads["nameplate" .. index], 1) end
+    H.Equal(writes.SetShown + writes.Show + writes.Hide + writes.SetTexture, 0,
+        string.format("Stationary badge writes: SetShown=%d Show=%d Hide=%d SetTexture=%d",
+            writes.SetShown, writes.Show, writes.Hide, writes.SetTexture))
+
+    local emitted = app.engine.counters.alerts
+    state:Unit("player", { guid = "Player-StationarySelf" })
+    state:Unit("nameplate1target", state.units.player)
+    state:Fire("UNIT_TARGET", "nameplate1")
+    state:Advance(0.5)
+    H.Equal(app.engine.counters.alerts, emitted + 1)
+    H.Equal(app.engine.history[#app.engine.history].kind, "targeting")
+    local first
+    for _, contact in ipairs(app.engine:Snapshot()) do
+        if contact.identity == "guid:Player-Stationary-1" then first = contact break end
+    end
+    ui:Select(assert(first))
+    ui.detailsFrame.locate:Click()
+    H.True(locatorVisible(ui, "nameplate1"))
+    state:Advance(3.6)
+    H.False(locatorVisible(ui, "nameplate1"))
+    H.True(ui.badges.active.nameplate1.icon:IsVisible())
+end)
+
 H.Test("nameplate highlight works on an already anchored badge in combat and expires", function()
     local state, app, ui = locatorFixture()
     local badge = assert(ui.badges.active.nameplate1)

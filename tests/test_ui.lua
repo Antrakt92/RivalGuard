@@ -812,6 +812,55 @@ H.Test("badge geometry waits for combat end and unsafe parent receives nothing",
     H.Equal(#state.blocked, 0)
 end)
 
+H.Test("badge visual updates stay selective through style changes and frame reuse", function()
+    local state, _, app, ui = setup()
+    state:Unit("nameplate1", {}); state:Unit("nameplate2", {})
+    local first, second = state.plates.nameplate1, state.plates.nameplate2
+    local contact = { id = "first", class = "ROGUE", hostile = true, isPlayer = true, currentTarget = true, watched = true }
+    ui:SetNameplate("nameplate1", first, contact)
+    local badge = assert(ui.badges.active.nameplate1)
+    local writes = {}
+    local function count(frame, method, key)
+        local original = frame[method]
+        frame[method] = function(...)
+            writes[key] = (writes[key] or 0) + 1
+            return original(...)
+        end
+    end
+    count(badge, "SetShown", "root")
+    count(badge.target, "SetShown", "target")
+    count(badge.focus, "SetShown", "focus")
+    count(badge.marker, "SetShown", "watch")
+    count(badge.icon, "SetTexture", "texture")
+
+    contact.currentTarget, contact.currentFocus = false, true
+    ui:SetNameplate("nameplate1", first, contact)
+    H.Equal(writes.target, 1); H.Equal(writes.focus, 1)
+    H.Nil(writes.root); H.Nil(writes.texture); H.Nil(writes.watch)
+    H.False(badge.target:IsShown()); H.True(badge.focus:IsShown())
+
+    state.combat = true
+    local display = app.db:GetProfile().display
+    display.badgeSize, display.badgeOffset = 33, 11
+    ui.badges:Refresh()
+    H.Equal(badge:GetWidth(), 24)
+    H.Equal(writes.target, 1); H.Equal(writes.focus, 1)
+    state.combat = false
+    ui.badges:Refresh()
+    H.Equal(badge:GetWidth(), 33)
+    local _, _, _, offset = badge:GetPoint(1)
+    H.Equal(offset, 11)
+
+    ui:RemoveNameplate("nameplate1")
+    H.False(badge:IsShown())
+    ui:SetNameplate("nameplate2", second, { id = "second", class = "HUNTER", hostile = true, isPlayer = true })
+    H.Equal(ui.badges.active.nameplate2, badge)
+    H.Equal(badge:GetParent(), second)
+    H.True(badge:IsShown()); H.False(badge.marker:IsShown()); H.False(badge.focus:IsShown())
+    H.Equal(writes.root, 2); H.Equal(writes.texture, 1); H.Equal(writes.watch, 1)
+    H.Equal(#state.blocked, 0)
+end)
+
 H.Test("advanced rule settings survive tab changes and constrain real decisions", function()
     local _, RG, app, ui = setup()
     ui:OpenRules()
