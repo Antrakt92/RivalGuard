@@ -204,6 +204,42 @@ H.Test("sensors behind-camera events preserve clean false and true flags", funct
     H.True(observed[#observed].behindCamera)
 end)
 
+H.Test("sensors check auras once when clean faction evidence qualifies a known token", function()
+    local sensors, units, _, _, _, _, _, api, badges, secret, engine = fixture(true)
+    local reads, hostility = 0, false
+    api.UnitIsEnemy = function() return hostility end
+    api.C_UnitAuras = { GetAuraDataByIndex = function()
+        reads = reads + 1
+        return { spellId = 1784 }
+    end }
+    units.nameplate1 = player()
+    sensors:Start(); sensors:OnEvent("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    H.Equal(reads, 0); H.True(sensors.active.nameplate1 ~= nil)
+    H.Equal(#engine.pending, 0)
+    hostility = secret
+    sensors:OnEvent("UNIT_FACTION", "nameplate1")
+    H.Equal(reads, 0); H.Equal(#engine.pending, 0)
+    hostility = true
+    sensors:OnEvent("UNIT_FACTION", "nameplate1")
+    H.Equal(reads, 1); H.Equal(badges.nameplate1.contact.stealthEvidence, "aura")
+    H.Equal(#engine.pending, 1); H.Equal(engine.pending[1].event, "stealth")
+    sensors:Poll()
+    H.Equal(reads, 1)
+end)
+
+H.Test("sensors preserve same-owner cancellation when a player becomes nonhostile", function()
+    local sensors, units, _, _, _, _, _, api, badges, _, engine = fixture(true)
+    local hostility = true
+    api.UnitIsEnemy = function() return hostility end
+    units.nameplate1 = player()
+    sensors:Start(); sensors:OnEvent("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    H.Equal(#engine.pending, 1)
+    hostility = false
+    sensors:OnEvent("UNIT_FACTION", "nameplate1")
+    H.Equal(#engine.pending, 0)
+    H.False(engine:Snapshot()[1].hostile); H.Nil(badges.nameplate1.contact)
+end)
+
 H.Test("one GUID on several tokens merges into a single engine contact", function()
     local sensors, units, _, _, _, _, _, _, _, _, engine = fixture(true)
     units.target, units.focus, units.nameplate1 = player(), player(), player()

@@ -195,7 +195,7 @@ function Client:Stealth(token)
     return nil, false
 end
 
-function Client:ReadUnit(token, source)
+function Client:ReadUnit(token, source, checkRequalifiedAura)
     token = self:IsToken(token)
     if not token then return nil end
     local api = self.api
@@ -205,37 +205,43 @@ function Client:ReadUnit(token, source)
     local guid = self:Text(self:Safe(api.UnitGUID, token), 128)
     local player = self:Boolean(self:Safe(api.UnitIsPlayer, token))
     if exists ~= true and not name and not guid and player ~= true then return nil end
+    local hostile = self:Boolean(self:Safe(api.UnitIsEnemy, "player", token))
+    if hostile == nil then hostile = self:Boolean(self:Safe(api.UnitCanAttack, "player", token)) end
+    local observation = {
+        token = token, guid = guid, name = name, nameComplete = nameComplete, realm = realm,
+        hostile = hostile, isPlayer = player, source = source or "unit", stealthReadable = false,
+    }
+    if player == false or hostile == false then
+        -- Keep owner evidence for cancellations and future changes in eligibility.
+        self:ForgetToken(token)
+        return observation
+    end
     local _, class = self:Safe(api.UnitClass, token)
     class = self:Text(class, 20)
     if not class then class = self:Text(self:Safe(api.UnitClassBase, token), 20) end
     if not CLASS[class or ""] then class = nil end
-    local hostile = self:Boolean(self:Safe(api.UnitIsEnemy, "player", token))
-    if hostile == nil then hostile = self:Boolean(self:Safe(api.UnitCanAttack, "player", token)) end
     local level = self:Number(self:Safe(api.UnitLevel, token))
     if level and (level <= 0 or level > 1000) then level = nil end
     local rangeOwner = guid and ("guid:" .. guid) or (nameComplete and ("name:" .. name))
-    local rangeMin, rangeMax, rangeMinExclusive = self:Range(token, rangeOwner)
-    local stealth, readable
-    -- Aura scans are driven by acquisition and aura signals, including the first
-    -- sighting if a client's direct-token event was unavailable.
-    if source ~= "poll" and source ~= "unit" and source ~= "cast" then stealth, readable = self:Stealth(token) end
-    local behind, currentTarget, currentFocus
+    observation.class, observation.level = class, level
+    observation.rangeMin, observation.rangeMax, observation.rangeMinExclusive = self:Range(token, rangeOwner)
+    -- Acquisition, aura events and the first clean return to eligibility may
+    -- reveal an aura that will not emit a separate update for this token.
+    if (checkRequalifiedAura and player == true and hostile == true)
+        or (source ~= "poll" and source ~= "unit" and source ~= "cast") then
+        observation.stealth, observation.stealthReadable = self:Stealth(token)
+    end
     if token:match("^nameplate%d+$") then
         local manager = api.C_NamePlateManager
-        if type(manager) == "table" then behind = self:Boolean(self:Safe(manager.IsNamePlateUnitBehindCamera, token)) end
-        currentTarget = self:UnitMatch(token, "target")
-        currentFocus = self:UnitMatch(token, "focus")
+        if type(manager) == "table" then
+            observation.behindCamera = self:Boolean(self:Safe(manager.IsNamePlateUnitBehindCamera, token))
+        end
+        observation.currentTarget = self:UnitMatch(token, "target")
+        observation.currentFocus = self:UnitMatch(token, "focus")
     end
-    return {
-        token = token, guid = guid, name = name, nameComplete = nameComplete, realm = realm, class = class, level = level,
-        hostile = hostile, isPlayer = player, source = source or "unit",
-        dead = self:Boolean(self:Safe(api.UnitIsDeadOrGhost, token)),
-        rangeMin = rangeMin, rangeMax = rangeMax,
-        rangeMinExclusive = rangeMinExclusive,
-        targeting = self:UnitMatch(token .. "target", "player"),
-        currentTarget = currentTarget, currentFocus = currentFocus,
-        stealth = stealth, stealthReadable = readable == true, behindCamera = behind,
-    }
+    observation.dead = self:Boolean(self:Safe(api.UnitIsDeadOrGhost, token))
+    observation.targeting = self:UnitMatch(token .. "target", "player")
+    return observation
 end
 
 function Client:Context()

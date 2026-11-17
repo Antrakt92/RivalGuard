@@ -40,8 +40,11 @@ Available class controls can be populated from the client's
 enumeration returns unknown rather than guessing classes from a build number.
 
 Aura checks use `C_UnitAuras.GetAuraDataByIndex` on relevant events. Restricted or
-failed reads cannot prove an aura disappeared. Regular identity polling does not
-walk aura lists. A disappearing nameplate does not establish stealth.
+failed reads cannot prove an aura disappeared. A confirmed nonhostile or
+non-player token retains identity evidence and skips threat detail queries. Its
+first clean return to hostile player status checks auras again. Steady-state
+polling does not walk aura lists. A disappearing nameplate does not establish
+stealth.
 
 Nameplates behind the camera have a separate state when the client exposes it.
 Target and focus preference comes from readable `UnitIsUnit` comparisons. The

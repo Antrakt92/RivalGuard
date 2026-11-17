@@ -49,7 +49,8 @@ function Sensors:Observe(token, source, behindCamera)
         self.client:Count("sensor_capacity")
         return
     end
-    local obs = self.client:ReadUnit(token, source)
+    local state = self.active[token]
+    local obs = self.client:ReadUnit(token, source, state and state.awaitingEligibility)
     if not obs then self:Remove(token); return end
     self:Record(obs, behindCamera)
 end
@@ -72,6 +73,8 @@ function Sensors:Record(obs, behindCamera)
     obs.generation = state.generation
     if behindCamera ~= nil then obs.behindCamera = behindCamera end
     state.guid, state.name = obs.guid or state.guid, name or state.name
+    state.awaitingEligibility = obs.isPlayer == false or obs.hostile == false
+        or (state.awaitingEligibility and (obs.isPlayer ~= true or obs.hostile ~= true))
     local contact = self:Call("Observe", obs)
     local view = type(contact) == "table" and contact or nil
     state.contactID = view and view.id
@@ -204,10 +207,10 @@ function Sensors:OnEvent(event, token, castGUID, spellID)
         if state and spellID and spellID > 0 and spellID == math.floor(spellID) then
             local engine = self.app.engine
             if engine and type(engine.TracksCast) == "function" and self:Call("TracksCast", spellID) ~= true then return end
-            local obs = self.client:ReadUnit(token, "cast")
+            local obs = self.client:ReadUnit(token, "cast", state.awaitingEligibility)
             if obs and ((state.guid and obs.guid == state.guid) or (not state.guid and state.name and obs.nameComplete and obs.name == state.name)) then
                 self:Record(obs)
-                self:Call("Cast", token, spellID)
+                if obs.isPlayer ~= false and obs.hostile ~= false then self:Call("Cast", token, spellID) end
             end
         end
     elseif event == "UNIT_AURA" or event == "UNIT_FLAGS" or event == "UNIT_FACTION" or event == "UNIT_NAME_UPDATE" or event == "UNIT_TARGET"

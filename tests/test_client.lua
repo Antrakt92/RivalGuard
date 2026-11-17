@@ -43,6 +43,38 @@ H.Test("client retains anonymous players when individual identity fields are res
     H.Nil(client:ReadUnit("target", "poll"))
 end)
 
+H.Test("client retains rejected owner identities without querying threat details", function()
+    local client, api = fixture()
+    local calls = 0
+    local function detail() calls = calls + 1 end
+    api.UnitClass, api.UnitLevel, api.UnitIsDeadOrGhost, api.UnitIsUnit = detail, detail, detail, detail
+    api.UnitDistanceSquared, api.CheckInteractDistance = detail, detail
+    api.C_UnitAuras = { GetAuraDataByIndex = detail }
+    api.C_NamePlateManager = { IsNamePlateUnitBehindCamera = detail }
+    api.UnitIsEnemy = function() return false end
+    local obs = client:ReadUnit("nameplate1", "nameplate")
+    H.False(obs.hostile); H.True(obs.isPlayer)
+    H.Equal(obs.guid, "Player-A"); H.Equal(obs.name, "Alpha-Realm"); H.True(obs.nameComplete)
+    H.Equal(calls, 0); H.False(obs.stealthReadable)
+    api.UnitIsEnemy = function() return true end
+    api.UnitIsPlayer = function() return false end
+    obs = client:ReadUnit("nameplate1", "aura")
+    H.True(obs.hostile); H.False(obs.isPlayer); H.Equal(obs.guid, "Player-A")
+    H.Equal(calls, 0)
+end)
+
+H.Test("client still queries evidence when eligibility is unknown", function()
+    local client, api, _, secret = fixture()
+    api.UnitIsEnemy = function() return secret end
+    api.UnitIsPlayer = function() return secret end
+    api.C_UnitAuras = { GetAuraDataByIndex = function() return { spellId = 1784 } end }
+    api.UnitDistanceSquared = function() return 400, true end
+    local obs = client:ReadUnit("nameplate1", "aura")
+    H.Nil(obs.hostile); H.Nil(obs.isPlayer)
+    H.Equal(obs.class, "ROGUE"); H.Equal(obs.rangeMax, 20)
+    H.True(obs.stealth); H.True(obs.stealthReadable)
+end)
+
 H.Test("client API exceptions degrade to unknown while clean metadata survives", function()
     local client, api = fixture()
     api.UnitGUID = function() error("unavailable") end
