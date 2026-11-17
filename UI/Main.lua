@@ -460,6 +460,7 @@ function UI.New(app)
 
     local function makeClassChips(parent, x, y, group, compact)
         local chips = {}
+        local alertClasses = group == "alerts"
         local size, gap = compact and 21 or 29, compact and 3 or 7
         for i, token in ipairs(RG.Defaults.classes) do
             local class = token
@@ -471,12 +472,22 @@ function UI.New(app)
             chip.icon:SetPoint("TOPLEFT", 2, -2); chip.icon:SetPoint("BOTTOMRIGHT", -2, 2)
             chip.icon:SetTexture("Interface\\Icons\\ClassIcon_" .. class)
             chip.edge = outline(chip)
-            chip:SetScript("OnClick", function()
-                local profile = self:Profile()
-                profile[group].classes = M.ToggleClass(profile[group].classes, class)
+            if alertClasses then chip:RegisterForClicks("LeftButtonUp", "RightButtonUp") end
+            chip:SetScript("OnClick", function(_, mouseButton)
+                local settings = self:Profile()[group]
+                if alertClasses and mouseButton == "RightButton" then
+                    if settings.classes[class] == true and next(settings.classes) == class
+                        and not next(settings.classes, class) and not settings.unknownClass then return end
+                    settings.classes = { [class] = true }
+                    settings.unknownClass = false
+                else
+                    settings.classes = M.ToggleClass(settings.classes, class)
+                end
                 changed()
             end)
-            chip:SetScript("OnEnter", function() tooltip(chip, RG.Locale.Class(class, self:Profile().locale), self:T(group == "display" and "displayClasses" or "alertClasses")) end)
+            chip:SetScript("OnEnter", function()
+                tooltip(chip, RG.Locale.Class(class, self:Profile().locale), self:T(alertClasses and "classSoloTip" or "displayClasses"))
+            end)
             chip:SetScript("OnLeave", hideTooltip)
             chips[#chips + 1] = { frame = chip, class = class, group = group }
         end
@@ -688,7 +699,7 @@ function UI.New(app)
 
     local function classSelector(page, group, y)
         local titleText = label(page, group == "display" and "displayClasses" or "alertClasses", 13)
-        titleText:SetPoint("TOPLEFT", 0, y); titleText:SetWidth(550)
+        titleText:SetPoint("TOPLEFT", 0, y); titleText:SetWidth(group == "alerts" and 290 or 550)
         makeClassChips(page, 0, y - 28, group, false)
         local allButton = localButton(page, "all", 160, function() self:Profile()[group].classes = {}; changed() end)
         allButton:SetPoint("TOPLEFT", 0, y - 69)
@@ -702,6 +713,8 @@ function UI.New(app)
         end)
         clearButton:SetScript("OnLeave", hideTooltip)
         if group == "alerts" then
+            local soloHint = label(page, "classSoloHint", 12, C.muted)
+            soloHint:SetPoint("TOPRIGHT", -20, y); soloHint:SetWidth(250); soloHint:SetJustifyH("RIGHT")
             self.alertAllClassesButton = allButton
             local presetButton = localButton(page, "hunterRogueClasses", 220, function()
                 local alerts = self:Profile().alerts

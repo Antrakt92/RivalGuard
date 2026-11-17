@@ -1249,6 +1249,97 @@ for _, locale in ipairs({ "enUS", "ruRU" }) do
         H.True(profile.alerts.unknownClass)
     end)
 
+    H.Test("right-click selects only one Alerts class and persists in " .. locale, function()
+        local function localize(mock) mock.locale = locale end
+        local state, RG, app = setup(nil, localize)
+        local profile, ui = app.db:GetProfile(), app.ui
+        profile.display.classes = { MAGE = true }
+        profile.alerts.sounds.sighting = "ready"
+        profile.alerts.sounds.watch = "whisper"
+        app:OnSettingsChanged()
+        local watchKey = "guid:Player-ClassSolo4"
+        assert(app.db:SetList(watchKey, "watch", "Manual watch remains", { name = "Watched mage", class = "MAGE" }))
+        ui:OpenSettings("alerts")
+        local function findChip(class, parent)
+            for _, control in ipairs(ui.controls) do
+                for _, chip in ipairs(control.chips or {}) do
+                    if chip.class == class and chip.frame:GetParent() == parent then return chip.frame end
+                end
+            end
+            error("missing class chip " .. class)
+        end
+        local rogue = findChip("ROGUE", ui.pages.alerts)
+        local hunter = findChip("HUNTER", ui.pages.alerts)
+        local function onlyRogue()
+            H.Equal(RG.Util.Count(profile.alerts.classes), 1)
+            H.True(profile.alerts.classes.ROGUE)
+            H.False(profile.alerts.unknownClass)
+        end
+
+        H.Nil(next(profile.alerts.classes)); H.True(profile.alerts.unknownClass)
+        rogue:Click("RightButton")
+        onlyRogue()
+        H.Equal(#rogue.clickButtons, 2)
+        H.Equal(rogue.clickButtons[1], "LeftButtonUp"); H.Equal(rogue.clickButtons[2], "RightButtonUp")
+        local hint = RG.Locale.Get("classSoloHint", locale)
+        H.True(hint ~= "classSoloHint")
+        local hintShown = false
+        for _, child in ipairs(ui.pages.alerts.children) do
+            if child:GetText() == hint and child:IsShown() then hintShown = true end
+        end
+        H.True(hintShown)
+        for _, frame in ipairs({ findChip("ROGUE", ui.pages.overview), findChip("ROGUE", ui.frame) }) do
+            for _, button in ipairs(frame.clickButtons or {}) do
+                H.False(button == "RightButtonUp" or button == "RightButtonDown")
+            end
+        end
+        rogue:Click("RightButton")
+        onlyRogue()
+        hunter:Click("LeftButton")
+        H.Equal(RG.Util.Count(profile.alerts.classes), 2)
+        H.True(profile.alerts.classes.ROGUE); H.True(profile.alerts.classes.HUNTER)
+        rogue:Click("RightButton")
+        onlyRogue()
+        ui.alertAllClassesButton:Click()
+        H.Nil(next(profile.alerts.classes)); H.False(profile.alerts.unknownClass)
+        ui.hunterRogueButton:Click()
+        H.Equal(RG.Util.Count(profile.alerts.classes), 2)
+        H.True(profile.alerts.classes.HUNTER); H.True(profile.alerts.classes.ROGUE)
+        rogue:Click("RightButton")
+        onlyRogue()
+        H.Equal(RG.Util.Count(profile.display.classes), 1); H.True(profile.display.classes.MAGE)
+        H.True(profile.alerts.sound); H.Equal(profile.alerts.sounds.sighting, "ready")
+        H.Equal(profile.alerts.sounds.watch, "whisper"); H.False(profile.alerts.watchedOnly)
+        H.Equal(app.db:GetList()[watchKey].note, "Manual watch remains")
+
+        state:Fire("PLAYER_LOGOUT")
+        local fresh, _, reloaded = setup(state.api.RivalGuardDB, localize)
+        profile = reloaded.db:GetProfile()
+        onlyRogue()
+        H.True(profile.display.classes.MAGE)
+        H.Equal(profile.alerts.sounds.watch, "whisper")
+        local function see(index, class, name)
+            local token = "nameplate" .. index
+            fresh:Unit(token, { guid = "Player-ClassSolo" .. index, name = name, class = class, hostile = true, isPlayer = true })
+            fresh:Fire("NAME_PLATE_UNIT_ADDED", token)
+        end
+        see(1, "ROGUE", "Selected rogue")
+        see(2, "HUNTER", "Excluded hunter")
+        see(3, "UNKNOWN_FIXTURE", "Unidentified rival")
+        fresh:Advance(2.8)
+        H.Equal(reloaded.engine.counters.alerts, 1)
+        H.Equal(reloaded.engine.history[1].kind, "sighting")
+        H.Equal(reloaded.ui.activeBanner.name, "Selected rogue")
+        H.Equal(#fresh.sounds, 1)
+
+        see(4, "MAGE", "Watched mage")
+        fresh:Advance(0.5)
+        H.Equal(reloaded.engine.counters.alerts, 2)
+        H.Equal(reloaded.engine.history[2].kind, "watch")
+        H.Equal(reloaded.ui.activeBanner.name, "Watched mage")
+        H.Equal(#fresh.sounds, 2)
+    end)
+
     H.Test("streamer transition redacts open live and saved UI in " .. locale, function()
         local state, RG, app = setup()
         local profile, ui = app.db:GetProfile(), app.ui
@@ -2517,6 +2608,25 @@ local function queuedSettingsVanish()
     H.False(app.ui.banner:IsShown())
     return state, app
 end
+
+H.Test("atomic Rogue class selection preserves an already eligible queued Vanish", function()
+    local state, app = queuedSettingsVanish()
+    local ui = app.ui
+    ui:OpenSettings("alerts")
+    local rogue
+    for _, control in ipairs(ui.controls) do
+        for _, chip in ipairs(control.chips or {}) do
+            if chip.group == "alerts" and chip.class == "ROGUE" then rogue = chip.frame end
+        end
+    end
+    assert(rogue):Click("RightButton")
+    H.Equal(app.engine.counters.alerts, 0)
+    state:Advance(0.5)
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(app.engine.history[1].kind, "stealth")
+    H.Equal(ui.banner.title:GetText(), ui:F("stealthCast", ui:T("spellVanish")))
+    H.Equal(#state.sounds, 1)
+end)
 
 local function addQueuedRival(state, app, index)
     local token, guid = "nameplate" .. index, "Player-QueuedList" .. index

@@ -51,8 +51,9 @@ pausing or resuming alerts, and muting or restoring alert sound.
 
 For a quick setup, click **Alerts → Hunters and Rogues**. This keeps the Nearby
 list unchanged, selects those two classes for ordinary alerts and turns off
-banners for unknown classes. Personal lists and matching advanced rules can
-override the alert class filter.
+banners for unknown classes. Right-click a class icon on the Alerts page to
+select just that class and turn off unknown-class banners. Personal lists and
+matching advanced rules can override the alert class filter.
 
 Enable enemy nameplates in WoW to provide the broadest available coverage.
 **Always Show Nameplates** can help when automatic mode hides enemy plates.
