@@ -133,7 +133,9 @@ function M.State(contact, now, locale)
         if clean(contact.behindCamera) == true then return RG.Locale.Get("behindCamera", locale) end
         return M.Range(contact, locale)
     end
-    return RG.Locale.Format("lastSeen", locale, M.Age(now - M.Number(contact.lastSeen, now), locale))
+    local lastSeen = M.Number(contact.lastSeen)
+    if not lastSeen then return RG.Locale.Get("lastSeenUnknown", locale) end
+    return RG.Locale.Format("lastSeen", locale, M.Age(now - lastSeen, locale))
 end
 
 function M.Rows(snapshot, profile, now, aliases)

@@ -874,6 +874,8 @@ function UI.New(app)
         self.journalOffset = math.max(0, math.min(self.journalOffset, math.max(0, math.floor((#entries - 1) / 12) * 12)))
         self.journalPrev:SetEnabled(self.journalOffset > 0)
         self.journalNext:SetEnabled(self.journalOffset + 12 < #entries)
+        local epoch = not personal and app.engine.epoch and M.Number(app.engine.epoch())
+        local now = self:Now()
         for i, row in ipairs(self.journalRows) do
             local entry = entries[self.journalOffset + i]
             if entry then
@@ -881,9 +883,8 @@ function UI.New(app)
                 entry.visible = false
                 entry.sources = { journal = true }
                 if not entry.savedOnly then
-                    local epoch = app.engine.epoch and app.engine.epoch() or (time and time() or 0)
-                    local elapsed = math.max(0, M.Number(epoch, 0) - M.Number(entry.lastSeen, 0))
-                    entry.lastSeen = self:Now() - elapsed
+                    local recorded = M.Number(entry.lastSeen)
+                    entry.lastSeen = epoch and epoch > 0 and recorded and recorded > 0 and now - math.max(0, epoch - recorded) or nil
                     local record = list[entry.identity]
                     if record then entry.note, entry.listKind = record.note, record.kind end
                 end
@@ -893,7 +894,7 @@ function UI.New(app)
             if entry then
                 local name = M.Text(entry.name, self:T("nameUnavailable"))
                 if profile.display.streamer then name = self:T("unknownPlayer") .. " " .. (self.journalOffset + i) end
-                local tag = personal and self:T(LIST_KIND_KEYS[entry.listKind] or "unlisted") or M.State(entry, self:Now(), profile.locale)
+                local tag = personal and self:T(LIST_KIND_KEYS[entry.listKind] or "unlisted") or M.State(entry, now, profile.locale)
                 row.label:SetText(name .. "  ·  " .. tag)
             end
         end

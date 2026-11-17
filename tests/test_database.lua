@@ -123,6 +123,28 @@ H.Test("journal is bounded expires old entries and never restores live sightings
     H.Equal(#db:GetJournal(), 0)
 end)
 
+H.Test("duplicate saved journal rows recover one identity with coherent recent metadata", function()
+    local RG = addon()
+    local raw = { schemaVersion = 1, journal = {
+        { identity = "guid:Player-Recovered", name = "CurrentName", class = "HUNTER", lastSeen = 105, encounters = 4, zone = "Current zone" },
+        { identity = "guid:Player-Recovered", name = "OldName", class = "ROGUE", lastSeen = 100, encounters = 3, zone = "Old zone" },
+        { identity = "guid:Player-Other", name = "Other", lastSeen = 101, encounters = 1 },
+    } }
+    local db = RG.Database.New(raw)
+    local journal = db:GetJournal()
+    H.Equal(#journal, 2)
+    H.Equal(journal[1].identity, "guid:Player-Recovered")
+    H.Equal(journal[1].name, "CurrentName")
+    H.Equal(journal[1].class, "HUNTER")
+    H.Equal(journal[1].zone, "Current zone")
+    H.Equal(journal[1].lastSeen, 105)
+    H.Equal(journal[1].encounters, 4)
+    H.True(db:Record({ identity = "guid:Player-Recovered", name = "CurrentName", class = "HUNTER" }, 107, "New zone"))
+    H.Equal(#db:GetJournal(), 2)
+    H.Equal(db:GetJournal()[1].encounters, 5)
+    H.Equal(#raw.journal, 3)
+end)
+
 H.Test("profile copy and import use the same normalized names as creation", function()
     local RG = addon()
     local db = RG.Database.New()

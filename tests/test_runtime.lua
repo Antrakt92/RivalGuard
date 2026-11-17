@@ -461,6 +461,48 @@ H.Test("threat journal records confirmed cast and does not regenerate cleared en
     H.Equal(app.db:GetJournal()[1].encounters, 1)
 end)
 
+H.Test("journal entries expire online and refresh the open journal without new sightings", function()
+    local state, _, app = setup()
+    local now = state.api.time()
+    app.db:GetProfile().retention.journalDays = 1
+    app:ProfileChanged()
+    assert(app.db:Record({ identity = "guid:Player-AgingFixture", name = "Old Encounter", class = "HUNTER" }, now - 86400 + 20))
+    app.ui:OpenSettings("journal")
+    H.True(app.ui.journalRows[1]:IsShown())
+    state:Advance(90)
+    H.Equal(#app.db:GetJournal(), 0)
+    H.False(app.ui.journalRows[1]:IsShown())
+    H.Equal(#app.engine:Snapshot(), 0)
+end)
+
+H.Test("loss of epoch clock never rewrites an earlier saved encounter with a fake timestamp", function()
+    local state, _, app = setup()
+    local clock, identity = state.api.time, "guid:Player-ClockFixture"
+    local observedAt = clock() - 50
+    assert(app.db:Record({ identity = identity, name = "Saved Known Name", class = "ROGUE" }, observedAt, "Known zone"))
+    state.api.time = function() error("simulated unavailable epoch clock") end
+    state:Unit("nameplate1", { guid = "Player-ClockFixture", name = "Current Name", class = "ROGUE", hostile = true, isPlayer = true })
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    state:Advance(1.5)
+    H.Equal(#app.engine:Snapshot(), 1)
+    local before = app.db:GetJournal()
+    H.Equal(#before, 1)
+    H.Equal(before[1].lastSeen, observedAt)
+    H.Equal(before[1].name, "Saved Known Name")
+    H.Equal(before[1].encounters, 1)
+    app.ui:OpenSettings("journal")
+    H.True(app.ui.journalRows[1]:IsShown())
+    H.Nil(app.ui.journalRows[1].contact.lastSeen)
+    H.True(app.ui.journalRows[1].label:GetText():find(app.ui:T("lastSeenUnknown"), 1, true) ~= nil)
+
+    state.api.time = clock
+    state:Advance(2)
+    local recovered = app.db:GetJournal()
+    H.Equal(#recovered, 1)
+    H.Equal(recovered[1].identity, identity)
+    H.True(recovered[1].lastSeen > 0)
+end)
+
 H.Test("status uses clean C_CVar evidence and falls back only when the reader is absent", function()
     local state, _, app = setup()
     local legacyReads = 0

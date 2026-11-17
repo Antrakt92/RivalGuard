@@ -21,7 +21,7 @@ local function alertConfig(profile)
 end
 
 function App.New(api)
-    return setmetatable({ api = api or _G, dirty = true, elapsed = 0, initialized = false }, App)
+    return setmetatable({ api = api or _G, dirty = true, elapsed = 0, journalElapsed = 0, initialized = false }, App)
 end
 
 function App:Notify(message)
@@ -250,7 +250,12 @@ function App:Update(elapsed)
     if not self.initialized then return end
     self.elapsed = self.elapsed + elapsed
     if self.elapsed < 0.2 then return end
+    self.journalElapsed = self.journalElapsed + self.elapsed
     self.elapsed = 0
+    if self.journalElapsed >= 60 then
+        self.journalElapsed = 0
+        if self.db:Prune(readClock(self.api, "time")) > 0 then self.dirty = true end
+    end
     if self.dirty then
         self.dirty = false
         local ok = pcall(self.ui.Refresh, self.ui)

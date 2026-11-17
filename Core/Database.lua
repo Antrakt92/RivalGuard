@@ -164,8 +164,24 @@ local function newRoot()
     return { schemaVersion = RG.schemaVersion, activeProfile = "Default", profiles = { Default = D.NewProfile() }, lists = {}, journal = {}, onboardingSeen = false }
 end
 
+local function newerEncounter(a, b)
+    if a.lastSeen ~= b.lastSeen then return a.lastSeen > b.lastSeen end
+    return a.identity < b.identity
+end
+
+-- Keep the serialized list sorted and find insertion/removal positions without
+-- sorting or scanning the entire journal on every encounter.
+local function encounterPosition(journal, record)
+    local low, high = 1, #journal + 1
+    while low < high do
+        local middle = math.floor((low + high) / 2)
+        if newerEncounter(journal[middle], record) then low = middle + 1 else high = middle end
+    end
+    return low
+end
+
 function DB.New(raw)
-    local self = setmetatable({ root = newRoot(), writable = true, recovered = false }, DB)
+    local self = setmetatable({ root = newRoot(), journalByIdentity = {}, writable = true, recovered = false }, DB)
     if raw == nil then return self end
     if type(raw) ~= "table" then self.recovered = true return self end
     if U.IsFinite(raw.schemaVersion) and raw.schemaVersion > RG.schemaVersion then
@@ -200,13 +216,25 @@ function DB.New(raw)
     if type(raw.journal) == "table" then
         for _, item in ipairs(raw.journal) do
             if #self.root.journal >= 1000 then break end
-            if type(item) == "table" and U.Text(item.identity, 256) and U.Text(item.name, 160) and U.IsFinite(item.lastSeen) then
-                self.root.journal[#self.root.journal + 1] = {
-                    identity = item.identity, name = item.name, class = D.classSet[item.class] and item.class or nil,
-                    lastSeen = item.lastSeen, encounters = U.Clamp(item.encounters, 1, 1000000, 1), zone = U.Text(item.zone, 160),
-                }
+            if type(item) == "table" and U.IsFinite(item.lastSeen) and item.lastSeen > 0 then
+                local identity, name = U.Text(item.identity, 256), U.Text(item.name, 160)
+                if identity and name then
+                    local record = self.journalByIdentity[identity]
+                    local count = math.floor(U.Clamp(item.encounters, 1, 1000000, 1))
+                    if not record then
+                        record = { identity = identity, encounters = count }
+                        self.journalByIdentity[identity] = record
+                        self.root.journal[#self.root.journal + 1] = record
+                    end
+                    if not record.lastSeen or item.lastSeen > record.lastSeen then
+                        record.name, record.lastSeen, record.zone = name, item.lastSeen, U.Text(item.zone, 160)
+                        record.class = D.classSet[item.class] and item.class or nil
+                    end
+                    record.encounters = math.max(record.encounters, count)
+                end
             end
         end
+        table.sort(self.root.journal, newerEncounter)
     end
     return self
 end
@@ -221,7 +249,7 @@ function DB:MarkGuideSeen() self.root.onboardingSeen = true end
 
 function DB:ClearJournal()
     local count = #self.root.journal
-    self.root.journal = {}
+    self.root.journal, self.journalByIdentity = {}, {}
     return count
 end
 
@@ -307,35 +335,46 @@ function DB:ImportProfile(name, text)
 end
 
 function DB:Record(contact, epoch, zone)
-    if not contact.identity or not contact.name or not U.IsFinite(epoch) then return false end
+    if not contact.identity or not contact.name or not U.IsFinite(epoch) or epoch <= 0 then return false end
     local profile = self:GetProfile()
     if profile.retention.journalDays == 0 then return false end
     local mode = profile.retention.journalMode
     if mode == "watched" and not contact.watched then return false end
     if mode == "threats" and not contact.watched and not contact.targeting and contact.stealth ~= "confirmed" then return false end
+    local journal, lookup = self.root.journal, self.journalByIdentity
+    local record = lookup[contact.identity]
+    -- The wall clock can move backwards. Count the encounter without
+    -- replacing newer timestamps or their associated display evidence.
+    if record and epoch < record.lastSeen then
+        record.encounters = math.min(1000000, record.encounters + 1)
+        return true
+    end
     if type(zone) == "function" then zone = zone() end
-    local record
-    for _, item in ipairs(self.root.journal) do if item.identity == contact.identity then record = item break end end
-    if not record then
-        record = { identity = contact.identity, name = contact.name, encounters = 0 }
-        self.root.journal[#self.root.journal + 1] = record
+    if record then
+        table.remove(journal, encounterPosition(journal, record))
+    else
+        record = { identity = contact.identity, encounters = 0 }
+        lookup[contact.identity] = record
     end
     record.name, record.class, record.lastSeen = contact.name, contact.class, epoch
     record.zone = U.Text(zone, 160)
     record.encounters = math.min(1000000, record.encounters + 1)
+    table.insert(journal, encounterPosition(journal, record), record)
     self:Prune(epoch)
     return true
 end
 
 function DB:Prune(epoch)
-    local profile = self:GetProfile()
-    local journal = self.root.journal
-    if profile.retention.journalDays == 0 then
-        for index = #journal, 1, -1 do journal[index] = nil end
-        return
-    end
-    table.sort(journal, function(a, b) return a.lastSeen > b.lastSeen end)
+    local policy = self:GetProfile().retention
+    local journal, lookup = self.root.journal, self.journalByIdentity
+    local maximum = policy.journalDays == 0 and 0 or policy.maxJournal
+    local cutoff = U.IsFinite(epoch) and epoch > 0 and epoch - policy.journalDays * 86400
+    local removed = 0
     for index = #journal, 1, -1 do
-        if index > profile.retention.maxJournal or epoch - journal[index].lastSeen > profile.retention.journalDays * 86400 then table.remove(journal, index) end
+        local item = journal[index]
+        if index <= maximum and (not cutoff or item.lastSeen >= cutoff) then break end
+        lookup[item.identity], journal[index] = nil, nil
+        removed = removed + 1
     end
+    return removed
 end
