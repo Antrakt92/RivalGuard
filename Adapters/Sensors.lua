@@ -17,6 +17,7 @@ local MAX_ACTIVE = 128
 local MAX_PLATES = MAX_ACTIVE - RG.Util.Count(DIRECT)
 local POLL_SECONDS = 0.25
 local PLATE_PHASES = 4
+local PLATE_EVENTS = { NAME_PLATE_UNIT_ADDED = true, NAME_PLATE_UNIT_REMOVED = true }
 local SAMPLE_BOUNDARY = {
     ADDON_RESTRICTION_STATE_CHANGED = true,
     PLAYER_REGEN_ENABLED = true, PLAYER_REGEN_DISABLED = true,
@@ -156,7 +157,11 @@ function Sensors:Poll(scheduled)
         end
         for _, token in ipairs(tokens) do self:Observe(token, "poll") end
         for token in pairs(DIRECT) do self:Observe(token, self.active[token] and "poll" or token) end
-        if self.reseed then self.reseed = nil; self:Seed() end
+        -- Discovery still works at a bounded cadence when an event is denied.
+        if self.reseed or (scheduled and not self.nameplateEvents and self.phase == 0) then
+            self.reseed = nil
+            self:Seed()
+        end
     end
     self:Call("Tick")
 end
@@ -229,10 +234,13 @@ function Sensors:Start()
         frame, self.frame = created, created
     end
     self.running = true
+    self.nameplateEvents = frame ~= nil
     if frame then
         for _, event in ipairs(EVENTS) do
-            local registered = pcall(frame.RegisterEvent, frame, event)
-            if not registered then self.client:Count("unsupported_events") end
+            if self.client:Boolean(self.client:Safe(frame.RegisterEvent, frame, event)) ~= true then
+                if PLATE_EVENTS[event] then self.nameplateEvents = false end
+                self.client:Count("unsupported_events")
+            end
         end
         frame:SetScript("OnEvent", function(_, ...) self:OnEvent(...) end)
         frame:SetScript("OnUpdate", function(_, elapsed)
@@ -250,6 +258,7 @@ end
 function Sensors:Stop()
     if not self.running then return end
     self.running = false
+    self.nameplateEvents = nil
     if self.frame then
         pcall(self.frame.UnregisterAllEvents, self.frame)
         self.frame:SetScript("OnEvent", nil)

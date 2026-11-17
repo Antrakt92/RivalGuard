@@ -1291,6 +1291,9 @@ function UI.New(app)
                 local detectionText = detection == "disabled" and "sensorDisabled" or detection == "limited" and "sensorLimited" or "sensorReady"
                 local lines = { M.Text(appStatus.detail, self:T(detectionText)) }
                 if alertBlock then lines[#lines + 1] = RG.Locale.Reason(alertBlock, profile.locale) end
+                if appStatus.capabilities and appStatus.capabilities.nameplateEvents == false then
+                    lines[#lines + 1] = self:T("nameplateEventsLimited")
+                end
                 if appStatus.nameplates == false then
                     lines[#lines + 1] = self:T("nameplatesOff")
                 elseif appStatus.nameplates == true and appStatus.alwaysNameplates == false then

@@ -137,9 +137,11 @@ function App:Status()
     local plates = self.client:Boolean(self.client:Safe(read, "nameplateShowEnemies"))
     local alwaysPlates = self.client:Boolean(self.client:Safe(read, "nameplateShowAll"))
     local capabilities = self.client:Capabilities()
+    if self.sensors and self.sensors.running then capabilities.nameplateEvents = self.sensors.nameplateEvents end
     local detectionState = "active"
     if not profile.enabled then detectionState = "disabled"
-    elseif plates == false or not capabilities.nameplates or (self.sensors and not self.sensors.running) then detectionState = "limited" end
+    elseif plates == false or not capabilities.nameplates or capabilities.nameplateEvents == false
+        or (self.sensors and not self.sensors.running) then detectionState = "limited" end
     local state = detectionState
     if profile.enabled and self.engine.pausedUntil and self.engine.pausedUntil > self.engine:Now() then state = "paused" end
     return { state = state, detectionState = detectionState, nameplates = plates, alwaysNameplates = alwaysPlates,

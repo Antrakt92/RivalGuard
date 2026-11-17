@@ -153,6 +153,111 @@ H.Test("runtime status reads both nameplate settings through the supported API w
     H.Equal(writes, 0)
 end)
 
+local function eventRegistrationFixture(unavailableEvent, failure)
+    local reject, enumerations = true, 0
+    local state, _, app = setup(nil, function(mock)
+        local api, secret = mock.api, H.Secret("restricted registration result")
+        local create = api.CreateFrame
+        function api.CreateFrame(...)
+            local frame = create(...)
+            local register = frame.RegisterEvent
+            function frame:RegisterEvent(event)
+                if not reject or event ~= unavailableEvent then return register(self, event) end
+                if failure == "throw" then error("unsupported registration fixture") end
+                if failure == "secret" then return secret end
+                return false
+            end
+            return frame
+        end
+        local plates = api.C_NamePlate.GetNamePlates
+        api.C_NamePlate.GetNamePlates = function()
+            enumerations = enumerations + 1
+            return plates()
+        end
+    end)
+    return state, app, function() reject = false end, function() return enumerations end
+end
+
+for _, event in ipairs({ "NAME_PLATE_UNIT_ADDED", "NAME_PLATE_UNIT_REMOVED" }) do
+    for _, failure in ipairs({ "false", "throw", "secret" }) do
+        H.Test(event .. " registration " .. failure .. " reports limited detection until a successful restart", function()
+            local state, app, allowRegistration, enumerations = eventRegistrationFixture(event, failure)
+            H.True(app.sensors.running)
+            H.Nil(app.sensors.frame.events[event])
+            local status = app:Status()
+            H.Equal(status.detectionState, "limited")
+            H.False(status.capabilities.nameplateEvents)
+            H.True(status.capabilities.nameplates); H.True(status.nameplates)
+            H.Equal(app.diagnostics.counts.unsupported_events, 1)
+            app.ui:OpenSettings("support")
+            H.True(app.ui.supportStatus:GetText():find(app.ui:T("nameplateEventsLimited"), 1, true) ~= nil)
+            app.ui:ShowDiagnostics()
+            local report = app.ui.copyFrame.edit:GetText()
+            H.True(report:find("nameplateEvents=false", 1, true) ~= nil)
+            H.True(report:find("detection=limited", 1, true) ~= nil)
+            H.True(report:find("unsupported_events=1", 1, true) ~= nil)
+
+            local unit = { guid = "Player-Registration", name = "Observed rival", class = "ROGUE", hostile = true, isPlayer = true }
+            state:Unit("target", unit)
+            state:Fire("PLAYER_TARGET_CHANGED")
+            H.True(app.engine:Snapshot()[1].sources.target)
+            local before = enumerations()
+            state:Unit("nameplate1", unit)
+            state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+            if event == "NAME_PLATE_UNIT_ADDED" then H.Nil(app.sensors.active.nameplate1) end
+            state:Advance(1.25)
+            H.Equal(app.sensors.active.nameplate1.guid, unit.guid)
+            if event == "NAME_PLATE_UNIT_ADDED" then H.True(enumerations() - before >= 1 and enumerations() - before <= 2) end
+            state.units.nameplate1, state.plates.nameplate1 = nil, nil
+            state:Fire("NAME_PLATE_UNIT_REMOVED", "nameplate1")
+            state:Advance(1.25)
+            H.Nil(app.sensors.active.nameplate1)
+
+            local profile = app.db:GetProfile()
+            profile.enabled = false
+            app:OnSettingsChanged()
+            H.False(app.sensors.running)
+            H.Equal(app:Status().detectionState, "disabled")
+            state.units.target = nil
+            allowRegistration()
+            profile.enabled = true
+            app:OnSettingsChanged()
+            H.True(app.sensors.running)
+            H.True(app.sensors.frame.events.NAME_PLATE_UNIT_ADDED)
+            H.True(app.sensors.frame.events.NAME_PLATE_UNIT_REMOVED)
+            H.Equal(app:Status().detectionState, "active")
+            H.True(app:Status().capabilities.nameplateEvents)
+            H.Equal(app.diagnostics.counts.unsupported_events, 1)
+            local healthy = enumerations()
+            state:Unit("nameplate2", unit)
+            state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+            H.Equal(app.sensors.active.nameplate2.guid, unit.guid)
+            state.units.nameplate2, state.plates.nameplate2 = nil, nil
+            state:Fire("NAME_PLATE_UNIT_REMOVED", "nameplate2")
+            H.Nil(app.sensors.active.nameplate2)
+            state:Advance(1.25)
+            H.Equal(enumerations(), healthy)
+            app.ui:ShowDiagnostics()
+            report = app.ui.copyFrame.edit:GetText()
+            H.True(report:find("nameplateEvents=true", 1, true) ~= nil)
+            H.True(report:find("detection=active", 1, true) ~= nil)
+        end)
+    end
+end
+
+H.Test("one optional registration failure is counted without limiting nameplate detection", function()
+    local state, app, _, enumerations = eventRegistrationFixture("SPELL_TEXT_UPDATE", "false")
+    H.Nil(app.sensors.frame.events.SPELL_TEXT_UPDATE)
+    H.Equal(app.diagnostics.counts.unsupported_events, 1)
+    H.True(app:Status().capabilities.nameplateEvents)
+    H.Equal(app:Status().detectionState, "active")
+    app.ui:OpenSettings("support")
+    H.Nil(app.ui.supportStatus:GetText():find(app.ui:T("nameplateEventsLimited"), 1, true))
+    local before = enumerations()
+    state:Advance(1.25)
+    H.Equal(enumerations(), before)
+end)
+
 for _, fixture in ipairs({
     { "enUS", "Toggle Nearby window", "Pause or resume alerts", "Toggle alert sound" },
     { "ruRU", "Показать или скрыть окно «Рядом»", "Приостановить или возобновить оповещения", "Включить или выключить звук оповещений" },

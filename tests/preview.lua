@@ -13,6 +13,19 @@ if view == "launcher" or view == "appearance" then
     local background = map:CreateTexture(nil, "BACKGROUND")
     background:SetAllPoints(); background:SetColorTexture(0.12, 0.2, 0.27, 1)
 end
+if view == "settings" and page == "support-limited" then
+    local create = state.api.CreateFrame
+    state.api.CreateFrame = function(...)
+        local frame = create(...)
+        local register = frame.RegisterEvent
+        function frame:RegisterEvent(event)
+            if event == "NAME_PLATE_UNIT_ADDED" then return false end
+            return register(self, event)
+        end
+        return frame
+    end
+    state.cvars.nameplateShowAll = false
+end
 local RG = state:LoadTOC()
 state:Fire("ADDON_LOADED", "RivalGuard")
 local app = RG.instance
@@ -30,7 +43,9 @@ for index, class in ipairs(classes) do
 end
 app.ui:Refresh()
 if view == "settings" then
-    if page == "profile-picker" then
+    if page == "support-limited" then
+        app.ui:OpenSettings("support")
+    elseif page == "profile-picker" then
         assert(app.db:CreateProfile(RG.Locale.Get("quiet", locale), "quiet"))
         assert(app.db:CreateProfile(RG.Locale.Get("farming", locale), "farming"))
         app.ui.nearbySettingsButton:Click("RightButton")

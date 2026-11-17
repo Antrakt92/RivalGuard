@@ -19,7 +19,7 @@ local function fixture(realEngine)
     }
     api.CreateFrame = function()
         local frame = { scripts = {}, events = {} }
-        function frame:RegisterEvent(event) self.events[event] = true end
+        function frame:RegisterEvent(event) self.events[event] = true; return true end
         function frame:UnregisterAllEvents() self.events = {} end
         function frame:SetScript(name, fn) self.scripts[name] = fn end
         frames[#frames + 1] = frame
