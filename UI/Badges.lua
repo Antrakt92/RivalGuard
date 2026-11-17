@@ -47,6 +47,12 @@ function B.New(getProfile)
         badge.marker:SetPoint("TOPRIGHT", 5, 6)
         badge.marker:SetText("!")
         badge.marker:SetTextColor(1, 0.80, 0.25)
+        badge.target = badge:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        badge.target:SetPoint("BOTTOM", badge, "TOP", 0, 0)
+        badge.target:SetText("▼"); badge.target:SetTextColor(0.36, 0.86, 0.98)
+        badge.focus = badge:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        badge.focus:SetPoint("TOP", badge, "BOTTOM", 0, 0)
+        badge.focus:SetText("◆"); badge.focus:SetTextColor(0.91, 0.62, 1)
         return badge
     end
 
@@ -54,20 +60,30 @@ function B.New(getProfile)
         local profile = getProfile()
         local contact = badge.contact
         local class = contact and RG.UIModel.Text(contact.class, "")
-        if not profile.enabled or not profile.display.showBadges or not contact or contact.hostile ~= true or contact.isPlayer ~= true or not RG.Defaults.classSet[class] then
+        if not profile.enabled or not profile.display.showBadges or not contact or contact.hostile ~= true or contact.isPlayer ~= true
+            or contact.dead == true or contact.behindCamera == true or contact.listKind == "ignore" or not RG.Defaults.classSet[class] then
             badge:Hide()
             return
         end
         if not RG.UIModel.ClassEnabled(profile.display.classes, class) then badge:Hide() return end
         badge.icon:SetTexture("Interface\\Icons\\ClassIcon_" .. class)
         badge.marker:SetShown(contact.watched == true or contact.listKind == "avoid")
-        local scale = profile.display.highContrast and 1.15 or 1
-        if badge.styleScale ~= scale and not locked() then badge:SetScale(scale); badge.styleScale = scale end
+        badge.target:SetShown(profile.display.badgeTarget == true and contact.currentTarget == true)
+        badge.focus:SetShown(profile.display.badgeFocus == true and contact.currentFocus == true)
+        if not locked() then
+            local size = RG.Util.Clamp(profile.display.badgeSize, 16, 40, 24)
+            local offset = RG.Util.Clamp(profile.display.badgeOffset, 0, 30, 6)
+            if badge.styleSize ~= size then badge:SetSize(size, size); badge.styleSize = size end
+            if badge.styleOffset ~= offset and badge.parent then
+                badge:ClearAllPoints(); badge:SetPoint("LEFT", badge.parent, "RIGHT", offset, 0); badge.styleOffset = offset
+            end
+        end
         badge:Show()
     end
 
     function self:Set(unit, frame, contact)
-        if type(unit) ~= "string" or not unit:match("^nameplate%d+$") or not frame or not frame.SetPoint or not available(frame) then return end
+        if type(unit) ~= "string" or not unit:match("^nameplate%d+$") then return end
+        if not frame or not frame.SetPoint or not available(frame) then self:Remove(unit); return end
         local badge = self.active[unit]
         if locked() and (not badge or badge.parent ~= frame) then return end
         if not badge then
@@ -79,8 +95,8 @@ function B.New(getProfile)
         if badge.parent ~= frame then
             badge:ClearAllPoints()
             badge:SetParent(frame)
-            badge:SetPoint("LEFT", frame, "RIGHT", 6, 0)
             badge.parent = frame
+            badge.styleOffset = nil
         end
         paint(badge)
     end
@@ -95,6 +111,7 @@ function B.New(getProfile)
             badge:ClearAllPoints()
             badge:SetParent(UIParent)
             badge.parent = nil
+            badge.styleOffset = nil
         end
         self.pool[#self.pool + 1] = badge
     end

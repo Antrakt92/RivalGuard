@@ -200,3 +200,105 @@ H.Test("sensors bound active token tracking and reject excess slots", function()
     sensors:OnEvent("NAME_PLATE_UNIT_ADDED", "nameplate129")
     H.Equal(sensors.count, 128); H.True(sensors.active.nameplate129 ~= nil)
 end)
+
+H.Test("sensors spread ordinary plate reads across four ticks and keep active threat responsive", function()
+    local sensors, units, observed, _, _, frames, _, api = fixture()
+    local calls, targeting = 0, false
+    api.UnitGUID = function(token) calls = calls + 1; return units[token].guid end
+    api.UnitIsUnit = function(token, other) return token == "nameplate1target" and other == "player" and targeting end
+    sensors:Start()
+    for index = 1, 128 do
+        local token = "nameplate" .. index
+        units[token] = player("Enemy" .. index, "Player-" .. index)
+        sensors:OnEvent("NAME_PLATE_UNIT_ADDED", token)
+    end
+    calls = 0
+    local update = frames[1].scripts.OnUpdate
+    for tick = 1, 4 do
+        update(frames[1], 0.25)
+        H.Equal(calls, tick * 32)
+    end
+    targeting = true
+    sensors:OnEvent("UNIT_TARGET", "nameplate1")
+    H.True(observed[#observed].targeting)
+    calls = 0
+    for _ = 1, 4 do update(frames[1], 0.25) end
+    H.Equal(calls, 131)
+end)
+
+H.Test("sensors refresh new and previous badge selections by the next tick", function()
+    local sensors, units, _, _, _, frames, _, api, badges = fixture()
+    local selected = "nameplate1"
+    api.UnitIsUnit = function(token, other) return other == "target" and selected == token end
+    units.target, units.nameplate1, units.nameplate2 = player(), player(), player("Other", "Player-B")
+    sensors:Start()
+    sensors:OnEvent("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    sensors:OnEvent("NAME_PLATE_UNIT_ADDED", "nameplate2")
+    H.True(badges.nameplate1.obs.currentTarget); H.False(badges.nameplate2.obs.currentTarget)
+    selected = "nameplate2"
+    units.target = units.nameplate2
+    sensors:OnEvent("PLAYER_TARGET_CHANGED")
+    frames[1].scripts.OnUpdate(frames[1], 0.25)
+    H.False(badges.nameplate1.obs.currentTarget); H.True(badges.nameplate2.obs.currentTarget)
+end)
+
+H.Test("sensors invalidate samples immediately and after synchronous restriction transitions", function()
+    local sensors, units, observed, _, _, frames = fixture()
+    local invalidated, metadata = 0, 0
+    sensors.client.InvalidateRangeSamples = function() invalidated = invalidated + 1 end
+    sensors.client.InvalidateRanges = function() metadata = metadata + 1 end
+    units.nameplate1 = player()
+    sensors:Start(); sensors:OnEvent("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    local before = #observed
+    sensors:OnEvent("ADDON_RESTRICTION_STATE_CHANGED", 1, 1)
+    sensors:OnEvent("PLAYER_REGEN_DISABLED")
+    H.Equal(invalidated, 2); H.Equal(#observed, before)
+    frames[1].scripts.OnUpdate(frames[1], 0.25)
+    H.Equal(invalidated, 3); H.Equal(#observed, before + 1)
+    sensors:OnEvent("ZONE_CHANGED_INDOORS")
+    sensors:OnEvent("SHARD_TRANSFER_IMMINENT")
+    sensors:OnEvent("SHARD_TRANSFER_CANCELLED")
+    H.Equal(invalidated, 6); H.Equal(metadata, 0)
+    sensors:OnEvent("PLAYER_EQUIPMENT_CHANGED")
+    H.Equal(metadata, 1)
+end)
+
+H.Test("sensors discard old shard bindings before reacquiring current nameplates", function()
+    local sensors, units, observed, _, casts, frames, _, api = fixture()
+    api.C_NamePlate = { GetNamePlates = function() return { { namePlateUnitToken = "nameplate1" } } end }
+    units.nameplate1 = player()
+    sensors:Start()
+    local generation = observed[#observed].generation
+    sensors:OnEvent("SHARD_TRANSFER")
+    sensors:OnEvent("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "late", 1856)
+    H.Equal(sensors.count, 0); H.Equal(#casts, 0)
+    units.nameplate1 = player("Other", "Player-B")
+    frames[1].scripts.OnUpdate(frames[1], 0.25)
+    H.Equal(sensors.count, 1); H.Equal(observed[#observed].guid, "Player-B")
+    H.True(observed[#observed].generation > generation)
+end)
+
+H.Test("sensors signal world boundaries once while keeping ordinary zone changes local", function()
+    local sensors, units, _, _, _, _, errors = fixture()
+    local calls = 0
+    function sensors.app:OnWorldChanged()
+        calls = calls + 1
+        H.Equal(self, sensors.app)
+        H.Equal(sensors.count, 0)
+    end
+    units.target = player()
+    sensors:Start()
+    sensors:OnEvent("ZONE_CHANGED_NEW_AREA")
+    H.Equal(calls, 0); H.Equal(sensors.count, 1)
+    sensors:OnEvent("PLAYER_LEAVING_WORLD")
+    H.Equal(calls, 1)
+    sensors:OnEvent("SHARD_TRANSFER")
+    H.Equal(calls, 1)
+    sensors:OnEvent("PLAYER_ENTERING_WORLD")
+    H.Equal(calls, 1); H.Equal(sensors.count, 1)
+    sensors:OnEvent("SHARD_TRANSFER")
+    H.Equal(calls, 2)
+    sensors.app.OnWorldChanged = function() error("bad world listener") end
+    sensors:OnEvent("PLAYER_LEAVING_WORLD")
+    H.Equal(errors[#errors], "sensor_world_changed")
+end)

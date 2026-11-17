@@ -19,6 +19,7 @@ end
 
 function Client:ForgetToken(token) if self.range then self.range:Forget(token) end end
 function Client:InvalidateRanges() if self.range then self.range:Invalidate() end end
+function Client:InvalidateRangeSamples() if self.range then self.range:InvalidateSamples() end end
 
 function Client:Count(key)
     if self.diagnostics and self.diagnostics.Count then self.diagnostics:Count(key) end
@@ -83,6 +84,10 @@ function Client:Nameplate(token)
         if forbidden ~= false then return nil end
     end
     return frame
+end
+
+function Client:UnitMatch(token, other)
+    return self:Boolean(self:Safe(self.api.UnitIsUnit, token, other))
 end
 
 function Client:Names(token)
@@ -209,20 +214,28 @@ function Client:ReadUnit(token, source)
     if hostile == nil then hostile = self:Boolean(self:Safe(api.UnitCanAttack, "player", token)) end
     local level = self:Number(self:Safe(api.UnitLevel, token))
     if level and (level <= 0 or level > 1000) then level = nil end
-    local rangeMin, rangeMax, rangeMinExclusive = self:Range(token, guid or (nameComplete and name))
+    local rangeOwner = guid and ("guid:" .. guid) or (nameComplete and ("name:" .. name))
+    local rangeMin, rangeMax, rangeMinExclusive = self:Range(token, rangeOwner)
     local manager = api.C_NamePlateManager
     local behind
     if type(manager) == "table" then behind = self:Boolean(self:Safe(manager.IsNamePlateUnitBehindCamera, token)) end
     local stealth, readable
-    -- Aura scans are event-driven; the regular identity poll does not walk 40 buffs per unit.
-    if source ~= "poll" then stealth, readable = self:Stealth(token) end
+    -- Aura scans are driven by acquisition and aura signals, including the first
+    -- sighting if a client's direct-token event was unavailable.
+    if source ~= "poll" and source ~= "unit" and source ~= "cast" then stealth, readable = self:Stealth(token) end
+    local currentTarget, currentFocus
+    if token:match("^nameplate%d+$") then
+        currentTarget = self:UnitMatch(token, "target")
+        currentFocus = self:UnitMatch(token, "focus")
+    end
     return {
         token = token, guid = guid, name = name, nameComplete = nameComplete, realm = realm, class = class, level = level,
         hostile = hostile, isPlayer = player, source = source or "unit",
         dead = self:Boolean(self:Safe(api.UnitIsDeadOrGhost, token)),
         rangeMin = rangeMin, rangeMax = rangeMax,
         rangeMinExclusive = rangeMinExclusive,
-        targeting = self:Boolean(self:Safe(api.UnitIsUnit, token .. "target", "player")),
+        targeting = self:UnitMatch(token .. "target", "player"),
+        currentTarget = currentTarget, currentFocus = currentFocus,
         stealth = stealth, stealthReadable = readable == true, behindCamera = behind,
     }
 end

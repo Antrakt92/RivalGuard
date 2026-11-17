@@ -78,11 +78,17 @@ function App:UIContactUpdated(token, _, contact)
     if type(token) ~= "string" or not token:match("^nameplate%d+$") then return end
     if not contact then self.ui:RemoveNameplate(token) return end
     local frame = self.client:Nameplate(token)
-    if frame then self.ui:SetNameplate(token, frame, contact) end
+    if frame then self.ui:SetNameplate(token, frame, contact)
+    else self.ui:RemoveNameplate(token) end
 end
 
 function App:OnTokenRemoved(token)
     if self.ui and self.ui.RemoveNameplate then self.ui:RemoveNameplate(token) end
+end
+
+function App:OnWorldChanged()
+    self.engine:Clear()
+    if self.ui and self.ui.ClearBanners then self.ui:ClearBanners() end
 end
 
 function App:Watch(contact)
@@ -109,6 +115,15 @@ function App:SetNote(contact, note)
     if not contact or not contact.identity then return nil, "unknown_identity" end
     local entry = self.db:GetList()[contact.identity]
     local ok, err = self.db:SetList(contact.identity, entry and entry.kind or "note", note, contact)
+    if ok then self:ProfileChanged() end
+    return ok, err
+end
+
+function App:SetList(contact, kind, note)
+    if not contact or not contact.identity then return nil, "unknown_identity" end
+    local entry = self.db:GetList()[contact.identity]
+    if note == nil then note = entry and entry.note end
+    local ok, err = self.db:SetList(contact.identity, kind, note, contact)
     if ok then self:ProfileChanged() end
     return ok, err
 end
@@ -165,7 +180,7 @@ function App:Initialize()
         onChange = function() self.dirty = true end,
         onEncounter = function(contact, epoch)
             local zone = self.client:Text(self.client:Safe(self.api.GetRealZoneText), 160)
-            self.db:Record(contact, epoch, zone)
+            return self.db:Record(contact, epoch, zone)
         end,
         onAlert = function(decision)
             if decision.sound then self.audio:Play(decision.kind, false) end
@@ -185,6 +200,10 @@ function App:Initialize()
     self.ui:Refresh()
     if self.db.writable then self.api.RivalGuardDB = self.db.root end
     self.initializing, self.initialized = false, true
+    if self.db.writable and not self.db:HasSeenGuide() and self.ui.ShowGuide then
+        local ok = pcall(self.ui.ShowGuide, self.ui, false)
+        if not ok then self.diagnostics:Error("ui_guide") end
+    end
 end
 
 function App:Update(elapsed)

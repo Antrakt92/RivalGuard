@@ -1,6 +1,6 @@
 # RivalGuard
 
-<img src="Media/RivalGuard.png" width="96" alt="RivalGuard watchtower emblem">
+<img src="https://raw.githubusercontent.com/Antrakt92/RivalGuard/main/Artwork/RivalGuard.png" width="96" alt="RivalGuard watchtower emblem">
 
 PvP awareness for World of Warcraft: configurable enemy alerts, a clear nearby
 list and personal watch lists. Designed for useful defaults and honest signals.
@@ -25,8 +25,10 @@ or `/rg demo` for a preview that leaves your journal and lists untouched.
   a sound for each event, control repeat timing and add optional rules.
 - **Profiles:** start with a preset or export/import settings. Imports require
   a preview and a new name. They do not include personal lists or history.
+- **Journal:** search recent encounters or open your watch, avoid and ignore
+  lists. Retain all eligible encounters, listed players or observed threats.
 - **Support:** see available sensors and copy a report with player identities
-  and notes removed.
+  and notes removed. Replay the first-run guide here at any time.
 
 Enable enemy nameplates in WoW to provide the broadest available coverage.
 RivalGuard does not change game settings. Range estimates depend on what the

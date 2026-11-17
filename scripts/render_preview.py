@@ -252,7 +252,7 @@ def png(scene: Scene, output: Path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--locale", choices=["enUS", "ruRU"], default="enUS")
-    parser.add_argument("--view", choices=["main", "settings", "rules", "import", "export", "details", "banner"], default="settings")
+    parser.add_argument("--view", choices=["main", "settings", "rules", "import", "export", "details", "banner", "guide", "journal", "personal"], default="settings")
     parser.add_argument("--page", default="alerts")
     parser.add_argument("--width", type=int, default=1920)
     parser.add_argument("--height", type=int, default=1080)

@@ -14,6 +14,12 @@ local function setup(raw)
     function app:Notify(text) state.messages[#state.messages + 1] = text end
     function app:Status() return { state = "limited", nameplates = false, detail = "Fixture limitation" } end
     function app:ExportDiagnostics() return "RivalGuard fixture report\nNo player data" end
+    function app:SetNote(contact, note)
+        local entry = self.db:GetList()[contact.identity]
+        local ok = self.db:SetList(contact.identity, entry and entry.kind or "note", note, contact)
+        if ok then self:OnSettingsChanged() end
+        return ok
+    end
     local ui = RG.UI.New(app)
     app.ui = ui
     return state, RG, app, ui
@@ -265,4 +271,142 @@ H.Test("banner queue is capped and duplicate identity events do not inflate it",
         H.Nil(seen[queued.key]); seen[queued.key] = true
     end
     H.Equal(ui.banner.body:GetText(), "Stealth")
+end)
+
+H.Test("guide advances backtracks previews and persists dismissal through reload", function()
+    local _, _, app, ui = setup()
+    H.True(ui:ShowGuide(false))
+    local dialog = assert(ui.guideDialog)
+    local heading = dialog.heading:GetText()
+    H.False(app.db:HasSeenGuide()); H.False(dialog.back.enabled)
+    dialog.next:Click()
+    H.True(dialog.heading:GetText() ~= heading)
+    dialog.back:Click(); H.Equal(dialog.heading:GetText(), heading)
+    dialog.preview:Click(); H.Equal(app.demos, 1)
+    H.Equal(#app.engine:Snapshot(), 0); H.Equal(#app.db:GetJournal(), 0)
+    dialog.skip:Click()
+    H.False(dialog:IsShown()); H.True(app.db:HasSeenGuide())
+    local _, _, nextApp, nextUI = setup(app.db.root)
+    H.True(nextApp.db:HasSeenGuide()); H.False(nextUI:ShowGuide(false))
+    H.True(nextUI:ShowGuide(true)); H.True(nextUI.guideDialog:IsShown())
+    nextUI.guideDialog.next:Click(); nextUI.guideDialog.next:Click(); nextUI.guideDialog.next:Click()
+    H.False(nextUI.guideDialog:IsShown()); H.True(nextApp.db:HasSeenGuide())
+end)
+
+H.Test("journal search filters recent encounters and notes without exposing IDs", function()
+    local state, _, app, ui = setup()
+    local epoch = state.api.time()
+    app.db:Record({ identity = "guid:PrivateId-1", name = "Moon Weaver", class = "DRUID", hostile = true, isPlayer = true }, epoch - 30, "Zone")
+    app.db:Record({ identity = "guid:PrivateId-2", name = "Dawn Runner", class = "HUNTER", hostile = true, isPlayer = true }, epoch - 10, "Zone")
+    assert(app.db:SetList("guid:PrivateId-1", "watch", "Enemy camp", { name = "Moon Weaver", class = "DRUID" }))
+    ui:OpenSettings("journal")
+    ui.journalSearch:SetText("  enemy CAMP  ")
+    H.Equal(ui.journalRows[1].contact.name, "Moon Weaver")
+    H.Nil(ui.journalRows[2].contact)
+    H.Nil(ui.journalRows[1].label:GetText():find("PrivateId", 1, true))
+    ui.journalSearch:SetText("nothing matches")
+    H.True(ui.journalEmpty:IsShown()); H.Nil(ui.journalRows[1].contact)
+end)
+
+H.Test("personal browser includes unseen saved entries and filters by list kind", function()
+    local _, _, app, ui = setup()
+    assert(app.db:SetList("guid:Watch-A", "watch", "Watch note", { name = "Alpha", class = "ROGUE" }))
+    assert(app.db:SetList("guid:Avoid-B", "avoid", "Avoid note", { name = "Beta", class = "HUNTER" }))
+    ui:OpenSettings("journal"); ui.journalPersonal:Click()
+    H.Equal(ui.journalRows[1].contact.name, "Alpha")
+    H.True(ui.journalRows[1].contact.savedOnly)
+    H.Equal(ui.journalRows[2].contact.name, "Beta")
+    ui.journalFilterButton:Click()
+    H.Equal(ui.journalRows[1].contact.name, "Alpha")
+    H.Nil(ui.journalRows[2].contact)
+    ui.journalRows[1]:Click()
+    H.True(ui.detailsFrame:IsShown())
+    H.Equal(ui.detailsFrame.title:GetText(), "Alpha")
+    H.Equal(ui.detailsFrame.note:GetText(), "Watch note")
+    H.Nil(ui.detailsFrame.info:GetText():find("Watch-A", 1, true))
+end)
+
+H.Test("clear journal requires a timely second click and leaves personal lists intact", function()
+    local state, _, app, ui = setup()
+    app.db:Record({ identity = "guid:Keep", name = "Keep", class = "HUNTER", hostile = true, isPlayer = true }, state.api.time(), "Zone")
+    assert(app.db:SetList("guid:Keep", "watch", "Keep note", { name = "Keep" }))
+    ui:OpenSettings("journal")
+    ui.journalClear:Click(); H.Equal(#app.db:GetJournal(), 1)
+    state:Advance(7)
+    ui.journalClear:Click(); H.Equal(#app.db:GetJournal(), 1)
+    ui.journalClear:Click(); H.Equal(#app.db:GetJournal(), 0)
+    H.Equal(app.db:GetList()["guid:Keep"].note, "Keep note")
+end)
+
+H.Test("membership buttons preserve notes and full record deletion is explicit", function()
+    local _, _, app, ui = setup()
+    local identity = "guid:Membership"
+    assert(app.db:SetList(identity, "watch", "Keep forever", { name = "Rival", class = "ROGUE" }))
+    ui:OpenSettings("journal"); ui.journalPersonal:Click(); ui.journalRows[1]:Click()
+    local detail = ui.detailsFrame
+    detail.listActions.avoid:Click()
+    H.Equal(app.db:GetList()[identity].kind, "avoid")
+    H.Equal(app.db:GetList()[identity].note, "Keep forever")
+    detail.removeMembership:Click()
+    H.Equal(app.db:GetList()[identity].kind, "note")
+    H.Equal(app.db:GetList()[identity].note, "Keep forever")
+    detail.removeSaved:Click(); H.True(app.db:GetList()[identity] ~= nil)
+    detail.removeSaved:Click(); H.Nil(app.db:GetList()[identity]); H.False(detail:IsShown())
+end)
+
+H.Test("cleared saved note remains empty when details refresh", function()
+    local _, _, app, ui = setup()
+    local identity = "guid:NoteClear"
+    assert(app.db:SetList(identity, "watch", "Prior note", { name = "Rival", class = "ROGUE" }))
+    ui:OpenSettings("journal"); ui.journalPersonal:Click(); ui.journalRows[1]:Click()
+    H.Equal(ui.detailsFrame.note:GetText(), "Prior note")
+    assert(app:SetNote(ui.selected, ""))
+    H.Nil(app.db:GetList()[identity].note)
+    ui:ShowDetails(true)
+    H.Equal(ui.detailsFrame.note:GetText(), "")
+end)
+
+H.Test("nameplate badges distinguish current target focus and watch membership", function()
+    local state, _, app, ui = setup()
+    local profile = app.db:GetProfile()
+    profile.display.badgeTarget, profile.display.badgeFocus = true, true
+    profile.display.badgeSize, profile.display.badgeOffset = 30, 8
+    state:Unit("nameplate1", {})
+    local plate = state.plates.nameplate1
+    local contact = { name = "Enemy", class = "ROGUE", hostile = true, isPlayer = true, watched = true, currentTarget = true, currentFocus = false }
+    ui:SetNameplate("nameplate1", plate, contact)
+    local badge = assert(ui.badges.active.nameplate1)
+    H.True(badge:IsShown()); H.True(badge.target:IsShown()); H.False(badge.focus:IsShown()); H.True(badge.marker:IsShown())
+    H.Equal(badge:GetWidth(), 30)
+    local _, _, _, offset = badge:GetPoint(1)
+    H.Equal(offset, 8)
+    contact.currentTarget, contact.currentFocus = false, true
+    ui:SetNameplate("nameplate1", plate, contact)
+    H.False(badge.target:IsShown()); H.True(badge.focus:IsShown())
+    contact.listKind = "ignore"
+    ui:SetNameplate("nameplate1", plate, contact)
+    H.False(badge:IsShown())
+end)
+
+H.Test("badge geometry waits for combat end and unsafe parent receives nothing", function()
+    local state, _, app, ui = setup()
+    local profile = app.db:GetProfile()
+    local contact = { name = "Enemy", class = "ROGUE", hostile = true, isPlayer = true }
+    state:Unit("nameplate1", {}); state:Unit("nameplate2", {}); state:Unit("nameplate3", {})
+    local plate = state.plates.nameplate1
+    ui:SetNameplate("nameplate1", plate, contact)
+    local badge = assert(ui.badges.active.nameplate1)
+    local width = badge:GetWidth()
+    state.combat = true
+    profile.display.badgeSize = width + 4
+    ui:SetNameplate("nameplate1", plate, contact)
+    ui:SetNameplate("nameplate2", state.plates.nameplate2, contact)
+    H.Equal(badge:GetWidth(), width); H.Nil(ui.badges.active.nameplate2)
+    state.combat = false
+    ui:SetNameplate("nameplate1", plate, contact)
+    H.Equal(badge:GetWidth(), width + 4)
+    state.plates.nameplate3.forbidden = true
+    ui:SetNameplate("nameplate3", state.plates.nameplate3, contact)
+    H.Nil(ui.badges.active.nameplate3)
+    H.Equal(#state.blocked, 0)
 end)

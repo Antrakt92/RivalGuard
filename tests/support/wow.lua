@@ -84,8 +84,18 @@ function W.New()
     function methods:GetScale() return self.scale end
     function methods:SetAlpha(value) assert(finite(value) and value >= 0 and value <= 1, "invalid alpha"); self.alpha = value end
     function methods:GetAlpha() return self.alpha end
-    function methods:Show() guard(self, "Show"); self.shown = true end
-    function methods:Hide() guard(self, "Hide"); self.shown = false end
+    function methods:Show()
+        guard(self, "Show")
+        local wasVisible = self:IsVisible()
+        self.shown = true
+        if not wasVisible and self:IsVisible() and self.scripts.OnShow then self.scripts.OnShow(self) end
+    end
+    function methods:Hide()
+        guard(self, "Hide")
+        local wasVisible = self:IsVisible()
+        self.shown = false
+        if wasVisible and self.scripts.OnHide then self.scripts.OnHide(self) end
+    end
     function methods:SetShown(value) assert(value == nil or type(value) == "boolean", "invalid visibility value"); if value then self:Show() else self:Hide() end end
     function methods:IsShown() return self.shown end
     function methods:IsVisible() return self.shown and (not self.parent or self.parent:IsVisible()) end

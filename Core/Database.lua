@@ -5,6 +5,9 @@ DB.__index = DB
 
 local MAX_PROFILES, MAX_LISTS = 20, 1000
 local function profileName(name) return U.Text(name, 64) end
+local RULE_CONTEXTS = { any = true, world = true, battleground = true, arena = true, instance = true }
+local RULE_LISTS = { any = true, listed = true, unlisted = true }
+local RULE_POLICIES = { possible = true, confirmed = true }
 
 local function classMap(value)
     if type(value) ~= "table" or getmetatable(value) then return nil end
@@ -36,13 +39,18 @@ local function ruleArray(value, strict)
         count = count + 1
         if type(index) ~= "number" or index % 1 ~= 0 or index < 1 or index > 32 or type(rule) ~= "table" then return nil end
         if strict then
-            local allowed = { name = true, enabled = true, priority = true, classes = true, event = true, action = true, sound = true, banner = true, cooldown = true }
+            local allowed = { name = true, enabled = true, priority = true, classes = true, event = true, action = true, sound = true, banner = true, cooldown = true,
+                context = true, list = true, range = true, rangePolicy = true, rangeUnknown = true }
             for key in pairs(rule) do if not allowed[key] then return nil end end
-            for _, key in ipairs({ "enabled", "sound", "banner" }) do
+            for _, key in ipairs({ "enabled", "sound", "banner", "rangeUnknown" }) do
                 if rule[key] ~= nil and type(rule[key]) ~= "boolean" then return nil end
             end
             if rule.priority ~= nil and (not U.IsFinite(rule.priority) or rule.priority < 1 or rule.priority > 100 or rule.priority % 1 ~= 0) then return nil end
             if rule.cooldown ~= nil and (not U.IsFinite(rule.cooldown) or rule.cooldown < 0 or rule.cooldown > 600) then return nil end
+            if rule.range ~= nil and (not U.IsFinite(rule.range) or (rule.range ~= 0 and (rule.range < 5 or rule.range > 100))) then return nil end
+            if rule.context ~= nil and not RULE_CONTEXTS[rule.context] then return nil end
+            if rule.list ~= nil and not RULE_LISTS[rule.list] then return nil end
+            if rule.rangePolicy ~= nil and not RULE_POLICIES[rule.rangePolicy] then return nil end
         end
         local clean = {
             name = U.Text(rule.name, 80), enabled = rule.enabled ~= false,
@@ -51,6 +59,11 @@ local function ruleArray(value, strict)
             event = rule.event or "sighting", action = rule.action or "alert",
             sound = rule.sound ~= false, banner = rule.banner ~= false,
             cooldown = U.Clamp(rule.cooldown, 0, 600, 30),
+            context = RULE_CONTEXTS[rule.context] and rule.context or "any",
+            list = RULE_LISTS[rule.list] and rule.list or "any",
+            range = U.IsFinite(rule.range) and rule.range >= 5 and math.min(100, rule.range) or 0,
+            rangePolicy = RULE_POLICIES[rule.rangePolicy] and rule.rangePolicy or "possible",
+            rangeUnknown = rule.rangeUnknown == true,
         }
         if not clean.name or not clean.classes then return nil end
         if not ({ sighting = true, returning = true, stealth = true, targeting = true, any = true })[clean.event] then return nil end
@@ -99,6 +112,7 @@ function DB.ValidateProfile(value, strict)
     if not p then return nil, err end
     local checks = {
         { p.display, "maxRows", 3, 20 }, { p.display, "scale", 0.65, 2 }, { p.display, "textSize", 10, 24 },
+        { p.display, "badgeSize", 16, 40 }, { p.display, "badgeOffset", 0, 30 },
         { p.alerts, "cooldown", 0, 600 }, { p.alerts, "returnAfter", 5, 600 }, { p.alerts, "soundGap", 0.5, 10 },
         { p.alerts, "waveWindow", 0.1, 3 }, { p.alerts, "waveThreshold", 2, 20 },
         { p.range, "yards", 5, 100 }, { p.retention, "contactSeconds", 15, 1800 },
@@ -285,12 +299,12 @@ function DB:ImportProfile(name, text)
 end
 
 function DB:Record(contact, epoch, zone)
-    if not contact.identity or not contact.name or not U.IsFinite(epoch) then return end
+    if not contact.identity or not contact.name or not U.IsFinite(epoch) then return false end
     local profile = self:GetProfile()
-    if profile.retention.journalDays == 0 then return end
+    if profile.retention.journalDays == 0 then return false end
     local mode = profile.retention.journalMode
-    if mode == "watched" and not contact.watched then return end
-    if mode == "threats" and not contact.watched and not contact.targeting and contact.stealth ~= "confirmed" then return end
+    if mode == "watched" and not contact.watched then return false end
+    if mode == "threats" and not contact.watched and not contact.targeting and contact.stealth ~= "confirmed" then return false end
     local record
     for _, item in ipairs(self.root.journal) do if item.identity == contact.identity then record = item break end end
     if not record then
@@ -301,6 +315,7 @@ function DB:Record(contact, epoch, zone)
     record.zone = U.Text(zone, 160)
     record.encounters = math.min(1000000, record.encounters + 1)
     self:Prune(epoch)
+    return true
 end
 
 function DB:Prune(epoch)

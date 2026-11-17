@@ -10,7 +10,7 @@ end
 
 local function invariant(RG, engine, seed, step)
     local prefix = "seed " .. seed .. " step " .. step .. ": "
-    local count, guidOwners = 0, {}
+    local count, guidOwners, expectedNameOwners = 0, {}, {}
     for id, contact in pairs(engine.contacts) do
         count = count + 1
         assert(contact.id == id, prefix .. "contact key disagrees with identity")
@@ -20,6 +20,11 @@ local function invariant(RG, engine, seed, step)
             guidOwners[contact.guid] = id
             assert(engine.identities["guid:" .. contact.guid] == id, prefix .. "GUID alias points elsewhere")
         end
+        if contact.nameIdentity then
+            local bucket = expectedNameOwners[contact.nameIdentity] or {}
+            bucket[id] = true
+            expectedNameOwners[contact.nameIdentity] = bucket
+        end
         for token in pairs(contact.tokens) do
             assert(engine.bindings[token] and engine.bindings[token].id == id, prefix .. "contact has orphaned token")
         end
@@ -28,7 +33,29 @@ local function invariant(RG, engine, seed, step)
         assert(engine.contacts[binding.id], prefix .. "binding points to evicted contact")
         assert(engine.contacts[binding.id].tokens[token], prefix .. "binding absent from contact")
     end
-    for _, id in pairs(engine.identities) do assert(engine.contacts[id], prefix .. "identity points to evicted contact") end
+    for name, bucket in pairs(expectedNameOwners) do
+        local current = engine.nameOwners[name]
+        assert(current, prefix .. "name bucket missing")
+        local sole = next(bucket)
+        local ambiguous = next(bucket, sole) ~= nil
+        local indexed = engine.identities[name]
+        if ambiguous then assert(indexed == false, prefix .. "ambiguous name resolves to one owner")
+        else assert(indexed == sole, prefix .. "unambiguous name alias points elsewhere") end
+        for id in pairs(bucket) do
+            assert((type(current) == "string" and current == id) or (type(current) == "table" and current[id]), prefix .. "name owner missing")
+            assert((engine.contacts[id].ambiguousIdentity == true) == ambiguous, prefix .. "contact ambiguity disagrees with index")
+        end
+        if type(current) == "table" then
+            for id in pairs(current) do assert(bucket[id], prefix .. "stale name owner retained") end
+        end
+    end
+    for name in pairs(engine.nameOwners) do assert(expectedNameOwners[name], prefix .. "stale name bucket retained") end
+    for name, id in pairs(engine.identities) do
+        if id == false then assert(expectedNameOwners[name], prefix .. "ambiguous alias lacks owners")
+        else assert(engine.contacts[id], prefix .. "identity points to evicted contact") end
+    end
+    assert(engine.contactCount == count, prefix .. "tracked contact count disagrees with map")
+    assert(RG.Util.Count(engine.identities) <= count * 2, prefix .. "alias count exceeded two per contact")
     assert(count <= engine.profile.retention.maxContacts, prefix .. "contact bound exceeded")
     assert(#engine.pending <= engine.profile.retention.maxContacts, prefix .. "pending queue bound exceeded")
     assert(#engine.history <= engine.profile.retention.maxHistory, prefix .. "history bound exceeded")
@@ -52,7 +79,7 @@ for _, seed in ipairs({ 1, 17, 104729, 2147483646 }) do
                 local player = choose(80)
                 local known = choose(5) ~= 1
                 local obs = { token = token, source = "nameplate", guid = known and ("Player-" .. player) or nil,
-                    name = known and ("Enemy " .. player) or nil, realm = "Realm" .. (player % 3),
+                    name = known and ("Enemy " .. (player % 30)) or nil, realm = "Realm" .. (player % 3),
                     class = RG.Defaults.classes[choose(#RG.Defaults.classes)],
                     hostile = choose(7) ~= 1, isPlayer = choose(8) ~= 1, rangeMin = choose(30), rangeMax = 40 }
                 if choose(5) == 1 then obs.hostile = nil end
@@ -73,6 +100,8 @@ for _, seed in ipairs({ 1, 17, 104729, 2147483646 }) do
         H.Equal(RG.Util.Count(engine.contacts), 0)
         H.Equal(RG.Util.Count(engine.identities), 0)
         H.Equal(RG.Util.Count(engine.bindings), 0)
+        H.Equal(RG.Util.Count(engine.nameOwners), 0)
+        H.Equal(engine.contactCount, 0)
     end)
 end
 

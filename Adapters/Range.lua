@@ -9,7 +9,12 @@ function Range.New(api, reader)
 end
 
 function Range:Invalidate()
-    self.dirty, self.cache, self.cacheCount = true, {}, 0
+    self.dirty = true
+    self:InvalidateSamples()
+end
+
+function Range:InvalidateSamples()
+    self.cache, self.cacheCount = {}, 0
 end
 
 function Range:Forget(token)
@@ -104,6 +109,7 @@ function Range:Measure(token, identity)
     token = read:IsToken(token)
     if not token then return nil end
     identity = read:Text(identity, 200)
+    if not identity then self:Forget(token) end
     local now = read:Number(read:Safe(api.GetTime))
     if not self:Rebuild(now) then return nil end
     local cached = self.cache[token]
@@ -142,7 +148,7 @@ function Range:Measure(token, identity)
         lower, upper, lowerExclusive = nil, nil, false
         read:Count("range_conflicts")
     end
-    if now then
+    if now and identity then
         if not self.cache[token] then
             if self.cacheCount >= 128 then self.cache, self.cacheCount = {}, 0 end
             self.cacheCount = self.cacheCount + 1

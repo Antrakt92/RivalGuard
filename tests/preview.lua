@@ -4,6 +4,7 @@ assert(width >= 640 and height >= 480 and scale >= 0.5 and scale <= 2, "invalid 
 local H = assert(loadfile(root .. "/tests/support/harness.lua"))(); H.root = root; RGTest = H
 local W = assert(loadfile(root .. "/tests/support/wow.lua"))()
 local state = W.New(); state.locale = locale
+state.api.RivalGuardDB = { schemaVersion = 1, onboardingSeen = true }
 state.api.UIParent:SetSize(width / scale, height / scale); state.api.UIParent:SetScale(scale)
 local RG = state:LoadTOC()
 state:Fire("ADDON_LOADED", "RivalGuard")
@@ -22,6 +23,9 @@ for index, class in ipairs(classes) do
 end
 app.ui:Refresh()
 if view == "settings" then app.ui:OpenSettings(page)
+elseif view == "guide" then app.ui:ShowGuide(true)
+elseif view == "journal" then app.ui:OpenSettings("journal")
+elseif view == "personal" then app.ui:OpenSettings("journal"); app.ui.journalPersonal:Click()
 elseif view == "rules" then app.ui:OpenRules()
 elseif view == "import" then app.ui:OpenTransfer("import")
 elseif view == "export" then app.ui:OpenTransfer("export")
@@ -53,7 +57,8 @@ local frames = {}
 local windowNames = {}
 for name, frame in pairs(app.ui.windows or {}) do windowNames[frame.serial] = name end
 for _, frame in ipairs(state.frames) do
-    local anchors = {}
+    local anchors, enabled = {}, frame.enabled
+    if type(enabled) ~= "boolean" then enabled = nil end
     for _, point in ipairs(frame.points) do
         anchors[#anchors + 1] = { point = point[1], relative = point[2] and point[2].serial or state.api.UIParent.serial,
             relativePoint = point[3], x = point[4], y = point[5] }
@@ -65,7 +70,8 @@ for _, frame in ipairs(state.frames) do
         color = frame.color, texture = type(frame.texture) == "string" and frame.texture or nil,
         allPoints = type(frame.allPoints) == "table" and frame.allPoints.serial or nil,
         points = anchors, layer = frame.layer, strata = frame.strata,
-        justifyH = frame.justifyH, justifyV = frame.justifyV, checked = frame.checked, enabled = frame.enabled,
+        justifyH = frame.justifyH, justifyV = frame.justifyV, checked = frame.checked,
+        enabled = enabled,
         value = frame.value, minimum = frame.minimum, maximum = frame.maximum,
         scrollChild = frame.scrollChild and frame.scrollChild.serial, scroll = type(frame.scroll) == "number" and frame.scroll or 0 }
 end

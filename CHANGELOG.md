@@ -8,6 +8,8 @@
 - English and Russian settings, isolated previews and redacted support reports.
 - Nameplate class badges, priority banners and per-event sound choices.
 - Range filters distinguish confirmed, possible and unavailable distances.
+- First-run guide, searchable journal and a browser for personal lists.
+- Adjustable nameplate badge size and spacing, with target and focus markers.
 
 This is a development build. Native client behavior, combat compatibility,
 visual layout and in-game performance still require testing.

@@ -4,6 +4,8 @@ local M = RG.UIModel
 local BANNER_PRIORITY = { sighting = 20, returning = 30, wave = 35, targeting = 70, watch = 90, stealth = 100 }
 local BANNER_CATEGORIES = { watch = "watchTitle", watched = "watchTitle", avoid = "watchTitle", stealth = "stealthTitle", targeting = "targetingTitle", wave = "waveTitle" }
 local BANNER_QUEUE_LIMIT, BANNER_MAX_AGE = 8, 5
+local LIST_KIND_KEYS = { watch = "watched", avoid = "avoided", ignore = "ignored", note = "notesOnly" }
+local LIST_FILTERS = { "all", "watch", "avoid", "ignore", "note" }
 
 UI.layout = { width = 348, header = 88, footer = 58, rowPadding = 20, settingsWidth = 800, settingsHeight = 610 }
 
@@ -170,6 +172,14 @@ function UI.New(app)
     local function changed()
         if app.OnSettingsChanged then app:OnSettingsChanged() else app:ProfileChanged() end
         self:SettingsChanged()
+    end
+
+    local function setList(contact, kind, note)
+        if not contact or not contact.identity then return nil end
+        if app.SetList then return app:SetList(contact, kind, note) end
+        local ok = app.db.SetList and app.db:SetList(contact.identity, kind, note, contact)
+        if ok then app:ProfileChanged() end
+        return ok
     end
 
     local function notify(key)
@@ -478,6 +488,11 @@ function UI.New(app)
     for _, entry in ipairs({ { "locked", "display.locked" }, { "showBadges", "display.showBadges", "showBadgesTip" }, { "highContrast", "display.highContrast" }, { "reducedMotion", "display.reducedMotion" }, { "streamer", "display.streamer", "streamerTip" } }) do
         y = check(appearance, entry[1], entry[2], y, entry[3])
     end
+    y = section(appearance, "badgeOptions", y - 8)
+    y = check(appearance, "badgeTarget", "display.badgeTarget", y, "badgeTargetTip")
+    y = check(appearance, "badgeFocus", "display.badgeFocus", y, "badgeFocusTip")
+    y = slider(appearance, "badgeSize", "display.badgeSize", y - 6, 16, 40, 1)
+    y = slider(appearance, "badgeOffset", "display.badgeOffset", y, 0, 30, 1)
     y = slider(appearance, "textSize", "display.textSize", y - 8, 11, 20, 1)
     y = slider(appearance, "scale", "display.scale", y, 0.75, 1.5, 0.05)
     y = slider(appearance, "maxRows", "display.maxRows", y, 3, 20, 1)
@@ -559,6 +574,59 @@ function UI.New(app)
 
     local journal = CreateFrame("Frame", nil, content); self.pages.journal = journal; journal:SetAllPoints()
     y = section(journal, "journal", 0, "journalHelp")
+    self.journalMode = "recent"
+    self.journalFilter = "all"
+    self.journalQuery = ""
+    self.journalRecent = localButton(journal, "recent", 144, function()
+        self.journalMode, self.journalOffset, self.clearJournalUntil = "recent", 0, nil
+        self:RefreshJournal()
+    end)
+    self.journalRecent:SetPoint("TOPLEFT", 0, y)
+    self.journalPersonal = localButton(journal, "personalLists", 195, function()
+        self.journalMode, self.journalOffset, self.clearJournalUntil = "personal", 0, nil
+        self:RefreshJournal()
+    end)
+    self.journalPersonal:SetPoint("LEFT", self.journalRecent, "RIGHT", 9, 0)
+    y = y - 43
+    local searchLabel = label(journal, "searchLabel", 12, C.muted)
+    searchLabel:SetPoint("TOPLEFT", 0, y); searchLabel:SetWidth(550)
+    local search = CreateFrame("EditBox", nil, journal, "InputBoxTemplate")
+    search:SetPoint("TOPLEFT", 7, y - 24); search:SetSize(331, 27); search:SetAutoFocus(false); search:SetMaxLetters(128)
+    if search.SetMaxBytes then search:SetMaxBytes(128) end
+    search:SetScript("OnEscapePressed", function(box) box:ClearFocus() end)
+    search:SetScript("OnEnterPressed", function(box) box:ClearFocus() end)
+    search:SetScript("OnTextChanged", function(box)
+        self.journalQuery, self.journalOffset = M.SearchText(box:GetText()), 0
+        self:RefreshJournal()
+    end)
+    self.journalSearch = search
+    local clearSearch = localButton(journal, "searchClear", 130, function() search:SetText(""); search:ClearFocus() end)
+    clearSearch:SetPoint("TOPLEFT", 356, y - 24)
+    y = y - 58
+    self.journalFilterButton = button(journal, "", 300, function()
+        local index = 1
+        for i, value in ipairs(LIST_FILTERS) do if value == self.journalFilter then index = i break end end
+        self.journalFilter, self.journalOffset = LIST_FILTERS[index % #LIST_FILTERS + 1], 0
+        self:RefreshJournal()
+    end)
+    self.journalFilterButton:SetPoint("TOPLEFT", 0, y)
+    self.journalClear = localButton(journal, "clearJournal", 300, function()
+        if not app.db.ClearJournal then return end
+        if not self.clearJournalUntil or self.clearJournalUntil < self:Now() then
+            self.clearJournalUntil = self:Now() + 6
+            self:RefreshJournal()
+            if app.Notify then app:Notify(self:T("clearJournalConfirm")) end
+            return
+        end
+        self.clearJournalUntil = nil
+        app.db:ClearJournal()
+        self:RefreshJournal()
+        if app.Notify then app:Notify(self:T("journalCleared")) end
+    end)
+    self.journalClear:SetPoint("TOPLEFT", 0, y)
+    self.journalCount = font(journal, 12, C.muted, "RIGHT")
+    self.journalCount:SetPoint("TOPRIGHT", -16, y - 6); self.journalCount:SetWidth(220)
+    y = y - 43
     self.journalEmpty = label(journal, "emptyJournal", 14, C.muted)
     self.journalEmpty:SetPoint("TOPLEFT", 0, y); self.journalEmpty:SetWidth(550)
     self.journalRows = {}
@@ -574,6 +642,7 @@ function UI.New(app)
     journalNext:SetPoint("LEFT", journalPrev, "RIGHT", 12, 0)
     self.journalPrev, self.journalNext = journalPrev, journalNext
     local retentionY = section(journal, "journalDays", y - 545, "retentionHelp")
+    retentionY = choice(journal, "retentionMode", "retention.journalMode", { { "all", "retentionAll" }, { "watched", "retentionWatched" }, { "threats", "retentionThreats" } }, retentionY)
     retentionY = slider(journal, "journalDays", "retention.journalDays", retentionY, 0, 90, 1)
     journal.height = -retentionY + 20
 
@@ -585,9 +654,11 @@ function UI.New(app)
     diagnosticButton:SetPoint("TOPLEFT", 0, y - 140)
     local supportPreview = localButton(support, "demo", 180, function() app:Demo() end)
     supportPreview:SetPoint("LEFT", diagnosticButton, "RIGHT", 12, 0)
+    local guideReplayButton = localButton(support, "guideReplay", 300, function() if self.ShowGuide then self:ShowGuide(true) end end)
+    guideReplayButton:SetPoint("TOPLEFT", 0, y - 180)
     local caution = label(support, "statusHelp", 13, C.muted)
-    caution:SetPoint("TOPLEFT", 0, y - 200); caution:SetWidth(550)
-    support.height = -y + 290
+    caution:SetPoint("TOPLEFT", 0, y - 228); caution:SetWidth(550)
+    support.height = -y + 310
 
     local pageKeys = { "overview", "alerts", "appearance", "profiles", "journal", "support" }
     self.nav = {}
@@ -656,8 +727,38 @@ function UI.New(app)
     end
 
     function self:RefreshJournal()
-        local entries = app.db.GetJournal and app.db:GetJournal() or {}
+        local profile = self:Profile()
+        local entries, list = {}, app.db:GetList()
+        local personal = self.journalMode == "personal"
+        local journalEntries = app.db.GetJournal and app.db:GetJournal() or {}
+        if personal then
+            for identity, item in pairs(list) do
+                if (self.journalFilter == "all" or self.journalFilter == item.kind) and M.Matches(self.journalQuery, item.name, item.note) then
+                    entries[#entries + 1] = { identity = identity, name = item.name, class = item.class, note = item.note, listKind = item.kind, savedOnly = true }
+                end
+            end
+            table.sort(entries, function(a, b)
+                local x, y = M.SearchText(a.name), M.SearchText(b.name)
+                if x ~= y then return x < y end
+                return a.identity < b.identity
+            end)
+        else
+            for _, item in ipairs(journalEntries) do
+                local record = list[item.identity]
+                if M.Matches(self.journalQuery, item.name, record and record.note) then entries[#entries + 1] = item end
+            end
+        end
+        self.journalRecent.bg:SetColorTexture(unpack(not personal and { 0.10, 0.22, 0.28, 1 } or C.panel))
+        self.journalPersonal.bg:SetColorTexture(unpack(personal and { 0.10, 0.22, 0.28, 1 } or C.panel))
+        self.journalFilterButton:SetShown(personal)
+        self.journalClear:SetShown(not personal)
+        self.journalClear:SetEnabled(#journalEntries > 0)
+        local confirming = self.clearJournalUntil and self.clearJournalUntil >= self:Now()
+        self.journalClear.label:SetText(self:T(confirming and "clearJournalNow" or "clearJournal"))
+        self.journalFilterButton.label:SetText(self:T(LIST_KIND_KEYS[self.journalFilter] or "allLists") .. "  ›")
+        self.journalCount:SetText(self:F("filteredCount", #entries))
         self.journalEmpty:SetShown(#entries == 0)
+        self.journalEmpty:SetText(self:T(self.journalQuery ~= "" and "noMatches" or personal and "listEmpty" or "emptyJournal"))
         self.journalOffset = math.max(0, math.min(self.journalOffset, math.max(0, math.floor((#entries - 1) / 12) * 12)))
         self.journalPrev:SetEnabled(self.journalOffset > 0)
         self.journalNext:SetEnabled(self.journalOffset + 12 < #entries)
@@ -667,18 +768,21 @@ function UI.New(app)
                 entry.id = entry.identity
                 entry.visible = false
                 entry.sources = { journal = true }
-                local epoch = time and time() or 0
-                local elapsed = math.max(0, M.Number(epoch, 0) - M.Number(entry.lastSeen, 0))
-                entry.lastSeen = self:Now() - elapsed
-                local list = entry.identity and app.db:GetList()[entry.identity]
-                if list then entry.note, entry.listKind = list.note, list.kind end
+                if not entry.savedOnly then
+                    local epoch = app.engine.epoch and app.engine.epoch() or (time and time() or 0)
+                    local elapsed = math.max(0, M.Number(epoch, 0) - M.Number(entry.lastSeen, 0))
+                    entry.lastSeen = self:Now() - elapsed
+                    local record = list[entry.identity]
+                    if record then entry.note, entry.listKind = record.note, record.kind end
+                end
             end
             row.contact = entry
             row:SetShown(entry ~= nil)
             if entry then
-                local name = M.Text(entry.name, self:T("unknownPlayer"))
-                if self:Profile().display.streamer then name = self:T("unknownPlayer") .. " " .. i end
-                row.label:SetText(name)
+                local name = M.Text(entry.name, self:T("nameUnavailable"))
+                if profile.display.streamer then name = self:T("unknownPlayer") .. " " .. (self.journalOffset + i) end
+                local tag = personal and self:T(LIST_KIND_KEYS[entry.listKind] or "unlisted") or M.State(entry, self:Now(), profile.locale)
+                row.label:SetText(name .. "  ·  " .. tag)
             end
         end
     end
@@ -741,7 +845,10 @@ function UI.New(app)
                 row.detailText:SetTextColor(unpack(profile.display.highContrast and C.text or C.muted))
                 row.icon:SetTexture(data.class and ("Interface\\Icons\\ClassIcon_" .. data.class) or "Interface\\Icons\\INV_Misc_QuestionMark")
                 row:SetAlpha(data.visible and 1 or profile.display.highContrast and 0.9 or 0.65)
-                row.mark:SetShown(data.contact.watched == true or data.contact.listKind == "avoid")
+                local currentTarget = data.visible and data.contact.currentTarget == true
+                local currentFocus = data.visible and data.contact.currentFocus == true
+                row.mark:SetText(currentTarget and "▼" or currentFocus and "◆" or "!")
+                row.mark:SetShown(data.contact.watched == true or data.contact.listKind == "avoid" or currentTarget or currentFocus)
             end
         end
         more:SetText(#rows > maxRows and self:F("moreContacts", #rows - maxRows) or self:T("noTarget"))
@@ -766,8 +873,10 @@ function UI.New(app)
         if self.dialogs then self.dialogs:Refresh() end
         if self.detailsFrame and self.detailsFrame:IsShown() and self.selected then
             local current
-            for _, contact in ipairs(snapshot) do if contact.id == self.selected.id then current = contact break end end
-            if current then self.selected = current end
+            for _, contact in ipairs(snapshot) do
+                if contact.id == self.selected.id or self.selected.identity and contact.identity == self.selected.identity then current = contact break end
+            end
+            if current and not self.selected.savedOnly then self.selected = current end
             self.selectedOutside = current == nil
             self:ShowDetails(true)
         end
@@ -775,6 +884,7 @@ function UI.New(app)
 
     function self:OpenSettings(page)
         page = self.pages[page] and page or self.currentPage or "overview"
+        if page ~= self.currentPage then self.clearJournalUntil = nil end
         self.currentPage = page
         self.controlsDirty = true
         self.dataPage = nil
@@ -898,6 +1008,7 @@ function UI.New(app)
 
     function self:Select(contact)
         self.selected = contact
+        self.removeEntryAt, self.removeEntryIdentity = nil, nil
         self.selectedOutside = contact.sources and contact.sources.journal == true or false
         self:ShowDetails()
     end
@@ -906,7 +1017,7 @@ function UI.New(app)
         if not self.detailsFrame then
             local detail = self:Window("RivalGuardDetails", UIParent)
             self.detailsFrame = detail
-            detail:SetSize(470, 450); detail:SetPoint("CENTER", 80, 0)
+            detail:SetSize(470, 500); detail:SetPoint("CENTER", 80, 0)
             detail:SetFrameStrata("DIALOG"); detail:SetClampedToScreen(true); detail:EnableMouse(true)
             fill(detail); outline(detail)
             detail.title = font(detail, 18, C.accent)
@@ -917,37 +1028,33 @@ function UI.New(app)
             detail.info:SetPoint("TOPLEFT", 18, -57); detail.info:SetWidth(432)
             detail.notice = label(detail, "noTarget", 11, C.muted)
             detail.notice:SetPoint("TOPLEFT", 18, -155); detail.notice:SetWidth(432)
-            local actions = { { "watch", "Watch" }, { "avoid", "Avoid" }, { "ignore", "Ignore" } }
+            local actions = { "watch", "avoid", "ignore" }
+            detail.listActions = {}
             for i, action in ipairs(actions) do
-                local method = action[2]
-                local b = localButton(detail, action[1], 130, function()
+                local kind = action
+                local b = localButton(detail, action, 130, function()
                     local contact = self.selected
                     if not contact then return end
                     if not contact.identity then notify("identityUnknown") return end
-                    if method == "Avoid" and app.db.SetList then
-                        local entry = app.db:GetList()[contact.identity]
-                        local kind = "avoid"
-                        if entry and entry.kind == "avoid" then kind = entry.note and "note" or nil end
-                        local ok = app.db:SetList(contact.identity, kind, entry and entry.note)
-                        if not ok then notify("saveFailed") return end
-                        app:ProfileChanged()
-                    elseif app[method] then
-                        local ok = app[method](app, contact)
-                        if not ok then notify("saveFailed") return end
-                    else notify("noListAPI") return end
-                    self:Refresh(); self:ShowDetails()
+                    local entry = app.db:GetList()[contact.identity]
+                    local ok = setList(contact, kind, entry and entry.note)
+                    if not ok then notify("saveFailed") return end
+                    self:SettingsChanged(); self:ShowDetails(true)
                 end)
                 b:SetPoint("TOPLEFT", 18 + (i - 1) * 142, -192)
+                detail.listActions[kind] = b
             end
             local remove = localButton(detail, "removeList", 150, function()
                 local contact = self.selected
                 if not contact or not contact.identity then notify("identityUnknown") return end
-                if not app.db.SetList then notify("noListAPI") return end
                 local entry = app.db:GetList()[contact.identity]
-                app.db:SetList(contact.identity, entry and entry.note and "note" or nil, entry and entry.note)
-                app:ProfileChanged(); self:Refresh(); self:ShowDetails()
+                if not entry then return end
+                local ok = setList(contact, entry.note and "note" or nil, entry.note)
+                if not ok then notify("saveFailed") return end
+                notify("confirmRemove"); self:SettingsChanged(); self:ShowDetails(true)
             end)
             remove:SetPoint("TOPLEFT", 18, -231)
+            detail.removeMembership = remove
             local why = localButton(detail, "why", 150, function() self:ShowExplanation() end)
             why:SetPoint("TOPLEFT", 185, -231)
             local noteTitle = label(detail, "note", 13)
@@ -968,18 +1075,40 @@ function UI.New(app)
             end)
             save:SetPoint("TOPLEFT", 18, -350)
             local help = label(detail, "identityUnknown", 11, C.muted)
-            help:SetPoint("TOPLEFT", 18, -393); help:SetWidth(432)
+            help:SetPoint("TOPLEFT", 18, -437); help:SetWidth(432)
             detail.identityHelp = help
+            detail.removeSaved = localButton(detail, "deleteRecord", 220, function()
+                local contact = self.selected
+                if not contact or not contact.identity or not contact.savedOnly then return end
+                if self.removeEntryIdentity ~= contact.identity or (self.removeEntryAt or 0) < self:Now() then
+                    self.removeEntryIdentity, self.removeEntryAt = contact.identity, self:Now() + 6
+                    detail.removeSaved.label:SetText(self:T("deleteRecordNow"))
+                    return
+                end
+                local ok = setList(contact, nil)
+                if not ok then notify("saveFailed") return end
+                self.removeEntryAt, self.removeEntryIdentity = nil, nil
+                detail:Hide(); self:SettingsChanged(); notify("recordDeleted")
+            end)
+            detail.removeSaved:SetPoint("TOPRIGHT", -16, -350)
             if UISpecialFrames then UISpecialFrames[#UISpecialFrames + 1] = "RivalGuardDetails" end
         end
         local detail, contact = self.detailsFrame, self.selected
         if not contact then detail:Hide() return end
-        local name = M.Text(contact.name, self:T("unknownPlayer"))
+        local name = M.Text(contact.name, self:T(contact.savedOnly and "nameUnavailable" or "unknownPlayer"))
         if self:Profile().display.streamer then name = self:T("unknownPlayer") end
         detail.title:SetText(name)
         local class = M.Text(contact.class, "")
         local lines = { RG.Defaults.classSet[class] and RG.Locale.Class(class, self:Profile().locale) or self:T("unknownClass") }
-        lines[#lines + 1] = self.selectedOutside and self:T("noCurrentEvidence") or M.State(contact, self:Now(), self:Profile().locale)
+        local entry = contact.identity and app.db:GetList()[contact.identity]
+        local state = contact
+        if self.selectedOutside and contact.visible then
+            state = { visible = false, lastSeen = contact.lastSeen }
+        end
+        lines[#lines + 1] = contact.savedOnly and self:T("noCurrentEvidence") or M.State(state, self:Now(), self:Profile().locale)
+        if entry then lines[#lines + 1] = self:F("currentList", self:T(LIST_KIND_KEYS[entry.kind] or "unlisted")) end
+        if not self.selectedOutside and contact.currentTarget == true then lines[#lines + 1] = self:T("yourTarget") end
+        if not self.selectedOutside and contact.currentFocus == true then lines[#lines + 1] = self:T("yourFocus") end
         local sourceNames = {}
         for source in pairs(contact.sources or {}) do
             local cleanSource = M.Text(source, "")
@@ -989,9 +1118,20 @@ function UI.New(app)
         table.sort(sourceNames)
         lines[#lines + 1] = self:T("reason") .. ": " .. (#sourceNames > 0 and table.concat(sourceNames, ", ") or self:T("observed"))
         detail.info:SetText(table.concat(lines, "\n"))
-        local entry = contact.identity and app.db:GetList()[contact.identity]
-        if not refreshOnly or not (detail.note.HasFocus and detail.note:HasFocus()) then detail.note:SetText(M.Text(entry and entry.note or contact.note, "", 160)) end
+        if not refreshOnly or not (detail.note.HasFocus and detail.note:HasFocus()) then
+            detail.note:SetText(M.Text(entry and entry.note, "", 160))
+        end
         detail.identityHelp:SetShown(not contact.identity)
+        detail.identityHelp:SetText(self:T(contact.preview and "noPreviewTarget" or "identityUnknown"))
+        for kind, buttonFrame in pairs(detail.listActions) do
+            buttonFrame:SetEnabled(contact.identity ~= nil and (not entry or entry.kind ~= kind))
+            buttonFrame.bg:SetColorTexture(unpack(entry and entry.kind == kind and { 0.10, 0.22, 0.28, 1 } or C.panel))
+        end
+        detail.removeMembership:SetEnabled(entry ~= nil and entry.kind ~= "note")
+        detail.removeSaved:SetShown(contact.savedOnly == true and entry ~= nil)
+        local confirming = self.removeEntryIdentity == contact.identity and (self.removeEntryAt or 0) >= self:Now()
+        detail.removeSaved.label:SetText(self:T(confirming and "deleteRecordNow" or "deleteRecord"))
+        self:FitWindow(detail, 470, 500, 1)
         detail:Show()
     end
 

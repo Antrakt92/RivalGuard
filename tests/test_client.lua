@@ -166,6 +166,24 @@ H.Test("client regular polling does not walk aura lists", function()
     H.Equal(queried, 1); H.True(obs.stealth); H.True(obs.stealthReadable)
 end)
 
+H.Test("client marks selected nameplates only using clean unit comparisons", function()
+    local client, api, _, secret = fixture()
+    api.UnitIsUnit = function(token, other)
+        if token == "nameplate1" and other == "target" then return true end
+        if token == "nameplate1" and other == "focus" then return false end
+        if token == "nameplate1target" and other == "player" then return secret end
+        error("unexpected comparison")
+    end
+    local obs = client:ReadUnit("nameplate1", "poll")
+    H.True(obs.currentTarget); H.False(obs.currentFocus); H.Nil(obs.targeting)
+    api.UnitIsUnit = function(_, other)
+        if other == "focus" then error("comparison unavailable") end
+        return secret
+    end
+    obs = client:ReadUnit("nameplate1", "poll")
+    H.Nil(obs.currentTarget); H.Nil(obs.currentFocus)
+end)
+
 H.Test("client never returns forbidden nameplate frames", function()
     local client, api = fixture()
     local includeForbidden

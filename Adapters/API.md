@@ -26,8 +26,11 @@ Spell usability, resource cost and cooldown are not used as range evidence.
 Metadata rebuilding is event-driven and coalesced, including spell, specialization,
 equipment and form changes. Each rebuild visits at most 1,024 slots and 128
 eligible spells, retains at most 16 bands and samples at most eight range API
-calls per unit. Samples are cached for half a second by current token identity;
-removal invalidates them. Missing APIs are not repeatedly rescanned per sample.
+calls per unit. Samples are cached for half a second when the current token has
+a readable GUID or complete name. Anonymous reads skip the sample cache. Token
+removal, world or zone changes, combat transitions, and addon restriction or
+shard events invalidate samples independently of spellbook metadata. Missing APIs
+are not repeatedly rescanned per sample.
 
 Available class controls can be populated from the client's
 `C_SpecializationInfo.GetAllClassIDs` and class information APIs. Failed or partial
@@ -38,6 +41,12 @@ failed reads cannot prove an aura disappeared. Regular identity polling does not
 walk aura lists. A disappearing nameplate does not establish stealth.
 
 Nameplates behind the camera have a separate state when the client exposes it.
+Target and focus preference comes from readable `UnitIsUnit` comparisons. The
+quarter-second sensor tick refreshes direct tokens and plates with a confirmed
+selection or targeting threat. It spreads ordinary plates across four ticks for
+a nominal one-second refresh. Unit events remain immediate, and selection changes
+refresh affected plates on the next tick. A completed shard transfer clears old
+bindings before reacquiring nameplates from the client.
 Decorations must respect forbidden frames and the client's protected-operation
 rules. Adapter checks and simulated tests do not verify in-game appearance or
 protected behavior.
@@ -51,6 +60,9 @@ The initial API review used these immutable upstream source revisions:
 - [Nameplate behind-camera handling](https://github.com/Gethe/wow-ui-source/blob/bebcb6bf309cf41b41bd74f8ca651e6a105b2676/Interface/AddOns/Blizzard_NamePlates/Blizzard_NamePlateUnitFrame.lua)
 - [Spellbook range contracts](https://github.com/Gethe/wow-ui-source/blob/bebcb6bf309cf41b41bd74f8ca651e6a105b2676/Interface/AddOns/Blizzard_APIDocumentationGenerated/SpellBookDocumentation.lua)
 - [Class enumeration used by the client](https://github.com/Gethe/wow-ui-source/blob/bebcb6bf309cf41b41bd74f8ca651e6a105b2676/Interface/AddOns/Blizzard_ClassMenu/Blizzard_ClassMenu.lua)
+- [Unit comparison and target event declarations](https://github.com/Gethe/wow-ui-source/blob/bebcb6bf309cf41b41bd74f8ca651e6a105b2676/Interface/AddOns/Blizzard_APIDocumentationGenerated/UnitDocumentation.lua)
+- [Restriction event sequencing](https://github.com/Gethe/wow-ui-source/blob/297d7aaaa736f346b3e036f38ee088eaf7f8c07f/Interface/AddOns/Blizzard_APIDocumentationGenerated/RestrictedActionsDocumentation.lua)
+- [Forever shard events](https://github.com/Gethe/wow-ui-source/blob/bebcb6bf309cf41b41bd74f8ca651e6a105b2676/Interface/AddOns/Blizzard_APIDocumentationGenerated/SystemDocumentation.lua)
 
 Future client builds require renewed compatibility checks. Function declarations
 describe contracts but do not establish availability in every game context.

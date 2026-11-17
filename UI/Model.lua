@@ -16,6 +16,23 @@ function M.Text(value, fallback, maximum)
     return RG.Util.Text(value, maximum or 256) or fallback or ""
 end
 
+function M.SearchText(value)
+    local cleanText = M.Text(value, "", 512)
+    -- Lua's lower handles Latin text only; fold Cyrillic for the Russian UI.
+    return (cleanText:lower():gsub("[\208\209][\128-\191]", function(char)
+        local lead, tail = char:byte(1, 2)
+        if lead == 208 and tail == 129 then return string.char(209, 145) end
+        if lead == 208 and tail >= 144 and tail <= 159 then return string.char(208, tail + 32) end
+        if lead == 208 and tail >= 160 and tail <= 175 then return string.char(209, tail - 32) end
+        return char
+    end))
+end
+
+function M.Matches(query, name, note)
+    if query == "" then return true end
+    return M.SearchText(name):find(query, 1, true) ~= nil or M.SearchText(note):find(query, 1, true) ~= nil
+end
+
 function M.Number(value, fallback)
     value = clean(value)
     if not RG.Util.IsFinite(value) then return fallback end

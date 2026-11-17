@@ -66,6 +66,22 @@ H.Test("strictly beyond a range threshold is never possibly within that threshol
     H.True(RG.Rules.RangeMatches(config, { rangeMin = 39, rangeMinExclusive = true }))
 end)
 
+H.Test("advanced rules apply only within selected context list and range conditions", function()
+    local RG = H.Addon({ "Core/Bootstrap.lua", "Core/Util.lua", "Core/Defaults.lua", "Core/Rules.lua" })
+    local p = RG.Defaults.NewProfile()
+    p.rules = { { name = "Quiet close duel", enabled = true, priority = 90, classes = {}, event = "sighting",
+        action = "suppress", context = "world", list = "unlisted", range = 30, rangePolicy = "confirmed", rangeUnknown = false } }
+    local player = { class = "ROGUE", hostile = true, isPlayer = true, rangeMin = 20, rangeMax = 30 }
+    local decision, reason = RG.Rules.Evaluate(p, player, "sighting", { kind = "world" })
+    H.Nil(decision); H.Equal(reason, "custom_suppressed")
+    H.Equal(assert(RG.Rules.Evaluate(p, player, "sighting", { kind = "battleground" })).kind, "sighting")
+    H.Equal(assert(RG.Rules.Evaluate(p, player, "sighting", { kind = "world" }, { kind = "watch" })).kind, "watch")
+    player.rangeMax = 35
+    H.Equal(assert(RG.Rules.Evaluate(p, player, "sighting", { kind = "world" })).kind, "sighting")
+    player.rangeMin, player.rangeMax = nil, nil
+    H.Equal(assert(RG.Rules.Evaluate(p, player, "sighting", { kind = "world" })).kind, "sighting")
+end)
+
 H.Test("watch entries bypass ordinary class whitelist but never ignores or context", function()
     local RG, p, contact = setup()
     p.alerts.classes = { MAGE = true }

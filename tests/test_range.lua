@@ -102,6 +102,32 @@ H.Test("range caches briefly by token and identity and forgets removed owners", 
     range:Forget("target"); range:Measure("target", "Player-B"); H.Equal(calls.checks, 4)
 end)
 
+H.Test("range never reuses an anonymous sample and drops a previously known owner's sample", function()
+    local range, _, _, answers, _, calls = fixture({ { id = 40, min = 0, max = 40 } })
+    answers[40] = true
+    local _, high = range:Measure("target", "Player-A")
+    H.Equal(high, 40)
+    answers[40] = false
+    local low = range:Measure("target")
+    H.Equal(low, 40)
+    answers[40] = true
+    low, high = range:Measure("target")
+    H.Equal(low, 0); H.Equal(high, 40)
+    answers[40] = false
+    low, high = range:Measure("target", "Player-A")
+    H.Equal(low, 40); H.Nil(high); H.Equal(calls.checks, 4)
+end)
+
+H.Test("range sample invalidation preserves spellbook metadata", function()
+    local range, client, _, answers, _, calls = fixture({ { id = 40, min = 0, max = 40 } })
+    answers[40] = true; range:Measure("target", "Player-A")
+    client:InvalidateRangeSamples()
+    answers[40] = false
+    local low, high, exclusive = range:Measure("target", "Player-A")
+    H.Equal(low, 40); H.Nil(high); H.True(exclusive)
+    H.Equal(calls.scan, 1); H.Equal(calls.checks, 2)
+end)
+
 H.Test("range metadata invalidation is coalesced and never rescans absent APIs per sample", function()
     local range, _, api, _, _, calls, setTime = fixture()
     H.True(range:Available())

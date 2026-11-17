@@ -59,8 +59,11 @@ function R.Evaluate(profile, contact, event, context, listEntry)
     local matched
     for _, rule in ipairs(profile.rules) do
         if rule.enabled and (rule.event == event or rule.event == "any")
+            and (not rule.context or rule.context == "any" or rule.context == ((context and context.kind) or "world"))
+            and (not rule.list or rule.list == "any" or (rule.list == "listed" and watched) or (rule.list == "unlisted" and not watched))
             and R.ClassMatches(rule.classes, contact.class, profile.alerts.unknownClass) then
-            if not matched or rule.priority > matched.priority then matched = rule end
+            local rangeMatches = not rule.range or rule.range == 0 or R.RangeMatches({ enabled = true, yards = rule.range, policy = rule.rangePolicy, unknown = rule.rangeUnknown }, contact)
+            if rangeMatches and (not matched or rule.priority > matched.priority) then matched = rule end
         end
     end
     if matched and matched.action == "suppress" then return nil, "custom_suppressed" end

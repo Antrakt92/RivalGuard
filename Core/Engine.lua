@@ -23,6 +23,7 @@ local function safeObservation(obs)
         level = U.IsFinite(obs.level) and math.floor(U.Clamp(obs.level, 1, 999, 1)) or nil,
         hostile = boolean(obs.hostile), isPlayer = boolean(obs.isPlayer),
         targeting = boolean(obs.targeting), stealth = boolean(obs.stealth),
+        currentTarget = boolean(obs.currentTarget), currentFocus = boolean(obs.currentFocus),
         dead = boolean(obs.dead),
         stealthReadable = obs.stealthReadable == true,
         behindCamera = boolean(obs.behindCamera),
@@ -52,7 +53,7 @@ function E.New(config)
         profile = config.profile or D.NewProfile(), context = config.context or { kind = "world" },
         lists = config.lists or {}, onAlert = config.onAlert or function() end,
         onEncounter = config.onEncounter, onChange = config.onChange,
-        contacts = {}, identities = {}, bindings = {}, tokenSerial = 0,
+        contacts = {}, identities = {}, nameOwners = {}, bindings = {}, tokenSerial = 0, contactCount = 0,
         pending = {}, history = {}, cooldowns = {}, serial = 0, sequence = 0,
         counters = { observations = 0, alerts = 0, suppressed = 0, evicted = 0 },
         pausedUntil = nil, lastSound = -math.huge, revision = 0,
@@ -66,23 +67,42 @@ function E:ListEntry(contact)
     if contact.nameIdentity and not contact.ambiguousIdentity then return self.lists[contact.nameIdentity] end
 end
 
-function E:Reindex()
-    local index = {}
-    for id, contact in pairs(self.contacts) do
-        if contact.guid then index["guid:" .. contact.guid] = id end
-        local name = contact.nameIdentity
-        if name then
-            if index[name] == nil then index[name] = id
-            elseif index[name] ~= id then index[name] = false end
+function E:IndexName(name, id, add)
+    if not name then return end
+    local owners = self.nameOwners[name]
+    if not owners then
+        if not add then return end
+        owners = {}
+        self.nameOwners[name] = owners
+    end
+    owners[id] = add and true or nil
+    local first = next(owners)
+    if not first then self.nameOwners[name], self.identities[name] = nil, nil return end
+    local ambiguous = next(owners, first) ~= nil
+    if ambiguous then self.identities[name] = false else self.identities[name] = first end
+    for owner in pairs(owners) do
+        local contact = self.contacts[owner]
+        if contact then
+            contact.ambiguousIdentity = ambiguous
+            contact.identity = contact.guid and ("guid:" .. contact.guid) or (not ambiguous and name or nil)
         end
     end
-    self.identities = index
-    for _, contact in pairs(self.contacts) do
-        contact.ambiguousIdentity = contact.nameIdentity ~= nil and index[contact.nameIdentity] == false
-        if contact.guid then contact.identity = "guid:" .. contact.guid
-        elseif contact.nameIdentity and not contact.ambiguousIdentity then contact.identity = contact.nameIdentity
-        else contact.identity = nil end
+end
+
+function E:IndexContact(contact, oldGuid, oldName)
+    if oldGuid and oldGuid ~= contact.guid and self.identities["guid:" .. oldGuid] == contact.id then self.identities["guid:" .. oldGuid] = nil end
+    if oldName and oldName ~= contact.nameIdentity then self:IndexName(oldName, contact.id, false) end
+    if contact.guid then self.identities["guid:" .. contact.guid] = contact.id end
+    if contact.nameIdentity then self:IndexName(contact.nameIdentity, contact.id, true)
+    else
+        contact.ambiguousIdentity = false
+        contact.identity = contact.guid and ("guid:" .. contact.guid) or nil
     end
+end
+
+function E:UnindexContact(contact)
+    if contact.guid and self.identities["guid:" .. contact.guid] == contact.id then self.identities["guid:" .. contact.guid] = nil end
+    self:IndexName(contact.nameIdentity, contact.id, false)
 end
 
 function E:View(contact)
@@ -104,6 +124,7 @@ function E:View(contact)
         behindCamera = contact.behindCamera,
         dead = contact.dead,
         ambiguousIdentity = contact.ambiguousIdentity,
+        currentTarget = contact.currentTarget, currentFocus = contact.currentFocus,
     }
 end
 
@@ -113,7 +134,7 @@ function E:Changed()
 end
 
 function E:Reconcile(contact)
-    local hostile, player, targeting, dead, behind
+    local hostile, player, targeting, dead, behind, currentTarget, currentFocus
     local selectedRange
     for token in pairs(contact.tokens) do
         local binding = self.bindings[token]
@@ -127,6 +148,10 @@ function E:Reconcile(contact)
             elseif obs.dead == false and dead == nil then dead = false end
             if obs.behindCamera == true then behind = true
             elseif obs.behindCamera == false and behind == nil then behind = false end
+            if obs.currentTarget == true or token == "target" then currentTarget = true
+            elseif obs.currentTarget == false and currentTarget == nil then currentTarget = false end
+            if obs.currentFocus == true or token == "focus" then currentFocus = true
+            elseif obs.currentFocus == false and currentFocus == nil then currentFocus = false end
             if obs.rangeMin or obs.rangeMax then
                 if not selectedRange or binding.at > selectedRange.at
                     or (binding.at == selectedRange.at and (obs.rangeMax or math.huge) < (selectedRange.observation.rangeMax or math.huge)) then selectedRange = binding end
@@ -135,6 +160,7 @@ function E:Reconcile(contact)
     end
     contact.hostile, contact.isPlayer = hostile, player
     contact.targeting, contact.dead, contact.behindCamera = targeting, dead, behind
+    contact.currentTarget, contact.currentFocus = currentTarget, currentFocus
     contact.rangeMin = selectedRange and selectedRange.observation.rangeMin
     contact.rangeMax = selectedRange and selectedRange.observation.rangeMax
     contact.rangeMinExclusive = selectedRange and selectedRange.observation.rangeMinExclusive or false
@@ -155,6 +181,17 @@ function E:ExplainView(id, event)
     local at = self.cooldowns[contact.id .. ":" .. (decision.dedupKey or decision.kind)]
     if at and self:Now() - at < decision.cooldown then return { allowed = false, reason = "cooldown", kind = decision.kind } end
     return { allowed = true, reason = decision.reason, priority = decision.priority, kind = decision.kind, ruleName = decision.ruleName }
+end
+
+function E:RecordEncounter(contact)
+    if contact.encounterRecorded or not self.onEncounter or not self.profile.enabled or contact.ambiguousIdentity
+        or not contact.identity or not contact.name or contact.hostile ~= true or contact.isPlayer ~= true
+        or contact.dead or not Rules.ContextMatches(self.profile.context, self.context) then return end
+    local entry = self:ListEntry(contact)
+    if entry and entry.kind == "ignore" then return end
+    -- A selective journal can decline the initial sighting. New evidence can
+    -- qualify that encounter later without counting every poll as a meeting.
+    if self.onEncounter(self:View(contact), self.epoch()) ~= false then contact.encounterRecorded = true end
 end
 
 function E:Queue(contact, event)
@@ -184,15 +221,15 @@ function E:Drop(id)
     local contact = self.contacts[id]
     if not contact then return end
     for token in pairs(contact.tokens) do self.bindings[token] = nil end
-    for identity, owner in pairs(self.identities) do if owner == id then self.identities[identity] = nil end end
+    self:UnindexContact(contact)
     self.contacts[id] = nil
-    self:Reindex()
+    self.contactCount = self.contactCount - 1
     for index = #self.pending, 1, -1 do if self.pending[index].id == id then table.remove(self.pending, index) end end
     for key in pairs(self.cooldowns) do if key:sub(1, #id + 1) == id .. ":" then self.cooldowns[key] = nil end end
 end
 
 function E:MakeRoom()
-    if U.Count(self.contacts) < self.profile.retention.maxContacts then return end
+    if self.contactCount < self.profile.retention.maxContacts then return end
     local candidate
     for _, contact in pairs(self.contacts) do
         if not candidate or (next(candidate.tokens) ~= nil and next(contact.tokens) == nil)
@@ -203,6 +240,8 @@ end
 
 function E:Merge(target, other)
     if target.id == other.id then return target end
+    local oldGuid, oldName = target.guid, target.nameIdentity
+    self:UnindexContact(other)
     for token in pairs(other.tokens) do
         target.tokens[token] = true
         if self.bindings[token] then self.bindings[token].id = target.id end
@@ -217,7 +256,6 @@ function E:Merge(target, other)
         if target[field] == nil then target[field] = other[field] end
     end
     if other.stealth and not target.stealth then target.stealth, target.stealthAt = other.stealth, other.stealthAt end
-    for identity, owner in pairs(self.identities) do if owner == other.id then self.identities[identity] = target.id end end
     for _, item in ipairs(self.pending) do if item.id == other.id then item.id = target.id end end
     for kind in pairs({ sighting = true, returning = true, watch = true, targeting = true, stealth = true, identified = true }) do
         local old = self.cooldowns[other.id .. ":" .. kind]
@@ -225,7 +263,8 @@ function E:Merge(target, other)
         self.cooldowns[other.id .. ":" .. kind] = nil
     end
     self.contacts[other.id] = nil
-    self:Reindex()
+    self.contactCount = self.contactCount - 1
+    self:IndexContact(target, oldGuid, oldName)
     return target
 end
 
@@ -263,6 +302,7 @@ function E:Observe(raw)
         self.serial = self.serial + 1
         contact = { id = "c" .. self.serial, tokens = {}, firstSeen = now, lastSeen = now }
         self.contacts[contact.id] = contact
+        self.contactCount = self.contactCount + 1
     end
     local wasVisible = next(contact.tokens) ~= nil
     local away = now - contact.lastSeen
@@ -274,11 +314,11 @@ function E:Observe(raw)
     local currentBinding = self.bindings[obs.token]
     currentBinding.observation, currentBinding.at = obs, now
     contact.lastSeen = now
-    local oldIdentity, oldNameIdentity = contact.identity, contact.nameIdentity
+    local oldGuid, oldNameIdentity = contact.guid, contact.nameIdentity
     if obs.guid then contact.guid, contact.identity = obs.guid, "guid:" .. obs.guid end
     if obs.name and (obs.nameComplete or not contact.name) then contact.name, contact.realm, contact.nameIdentity = obs.name, obs.realm, named end
     if not contact.identity then contact.identity = identity end
-    if oldIdentity ~= contact.identity or oldNameIdentity ~= contact.nameIdentity then self:Reindex() end
+    if oldGuid ~= contact.guid or oldNameIdentity ~= contact.nameIdentity then self:IndexContact(contact, oldGuid, oldNameIdentity) end
     local oldClass = contact.class
     if obs.class then contact.class = obs.class end
     if obs.level then contact.level = obs.level end
@@ -291,20 +331,13 @@ function E:Observe(raw)
         if obs.stealth == true then contact.stealth, contact.stealthAt = "confirmed", contact.stealthAt or now
         elseif obs.stealth == false then contact.stealth, contact.stealthAt = nil, nil end
     end
-    local listEntry = self:ListEntry(contact)
-    local canRecord = not contact.ambiguousIdentity and contact.identity and contact.name
-        and contact.hostile == true and contact.isPlayer == true and not contact.dead
-        and Rules.ContextMatches(self.profile.context, self.context)
-        and (not listEntry or listEntry.kind ~= "ignore")
-    if not contact.encounterRecorded and self.onEncounter and canRecord then
-        contact.encounterRecorded = true
-        self.onEncounter(self:View(contact), self.epoch())
-    end
+    local returning = not wasVisible and away >= self.profile.alerts.returnAfter
+    if returning then contact.encounterRecorded = false end
+    self:RecordEncounter(contact)
     if not contact.arrivalNotified and not contact.arrivalQueued then
         contact.arrivalQueued = self:Queue(contact, "sighting")
-    elseif not wasVisible and away >= self.profile.alerts.returnAfter then
+    elseif returning then
         self:Queue(contact, "returning")
-        if self.onEncounter and canRecord then self.onEncounter(self:View(contact), self.epoch()) end
     end
     if not oldClass and contact.class and contact.arrivalNotified and not contact.notifiedClass then self:Queue(contact, "identified") end
     if contact.stealth and not oldStealth then self:Queue(contact, "stealth") end
@@ -320,7 +353,9 @@ function E:Remove(token)
     self.bindings[token] = nil
     if contact then
         contact.tokens[token] = nil
-        if next(contact.tokens) == nil then contact.lastSeen = self:Now() contact.targeting = nil
+        if next(contact.tokens) == nil then
+            contact.lastSeen = self:Now()
+            contact.targeting, contact.currentTarget, contact.currentFocus = nil, nil, nil
         else self:Reconcile(contact) end
     end
     self:Changed()
@@ -334,6 +369,7 @@ function E:Cast(token, spellID)
     local now = self:Now()
     if contact.lastStealthCast and now - contact.lastStealthCast < 1 then return false end
     contact.lastStealthCast, contact.stealth, contact.stealthAt = now, "confirmed", now
+    self:RecordEncounter(contact)
     self:Queue(contact, "stealth")
     self:Changed()
     return true
@@ -422,6 +458,8 @@ function E:SetProfile(profile)
     if not profile.enabled then self:Clear() return end
     self.pending = {}
     for _, contact in pairs(self.contacts) do contact.arrivalQueued = false end
+    while self.contactCount > profile.retention.maxContacts do self:MakeRoom() end
+    while #self.history > profile.retention.maxHistory do table.remove(self.history, 1) end
     self:Changed()
 end
 
@@ -445,5 +483,7 @@ function E:Resume() self.pausedUntil = nil self:Changed() end
 
 function E:Clear()
     self.contacts, self.identities, self.bindings, self.pending, self.cooldowns = {}, {}, {}, {}, {}
+    self.nameOwners, self.contactCount = {}, 0
+    self.history = {}
     self:Changed()
 end

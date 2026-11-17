@@ -334,7 +334,69 @@ function D.Attach(ui, app, H)
         if self.rulesFrame and self.rulesFrame:IsShown() then self:RefreshRules() end
     end
 
+    local GUIDE_STEPS = {
+        { "guideWelcome", "guideWelcomeText" },
+        { "guideRules", "guideRulesText" },
+        { "guideTrust", "guideTrustText" },
+    }
+
+    function self:RenderGuide()
+        local f = self.guideFrame
+        local step = GUIDE_STEPS[self.guideStep]
+        f.stepText:SetText(ui:F("guideStep", self.guideStep, #GUIDE_STEPS))
+        f.heading:SetText(t(step[1])); f.body:SetText(t(step[2]))
+        f.back:SetEnabled(self.guideStep > 1)
+        f.next.label:SetText(t(self.guideStep == #GUIDE_STEPS and "guideDone" or "next"))
+    end
+
+    function self:FinishGuide()
+        if self.guideFrame then self.guideFrame:Hide() end
+    end
+
+    function self:BuildGuide()
+        local f = dialog("RivalGuardGuide", "guide", 600, 340)
+        self.guideFrame, ui.guideDialog = f, f
+        f.stepText = H.font(f, 12, H.C.muted)
+        f.stepText:SetPoint("TOPLEFT", 20, -64); f.stepText:SetWidth(550)
+        f.heading = H.font(f, 22, H.C.accent)
+        f.heading:SetPoint("TOPLEFT", 20, -95); f.heading:SetWidth(550)
+        f.body = H.font(f, 15, H.C.text)
+        f.body:SetPoint("TOPLEFT", 20, -150); f.body:SetWidth(550)
+        f.preview = H.localButton(f, "guidePreview", 210, function() app:Demo() end)
+        f.preview:SetPoint("BOTTOMLEFT", 20, 72)
+        f.skip = H.localButton(f, "guideSkip", 150, function() self:FinishGuide() end)
+        f.skip:SetPoint("BOTTOMLEFT", 20, 22)
+        f.next = H.button(f, t("next"), 150, function()
+            if self.guideStep >= #GUIDE_STEPS then self:FinishGuide() return end
+            self.guideStep = self.guideStep + 1; self:RenderGuide()
+        end)
+        f.next:SetPoint("BOTTOMRIGHT", -20, 22)
+        f.back = H.localButton(f, "back", 132, function()
+            self.guideStep = math.max(1, self.guideStep - 1); self:RenderGuide()
+        end)
+        f.back:SetPoint("RIGHT", f.next, "LEFT", -12, 0)
+        f:SetScript("OnHide", function()
+            if not self.guidePresented then return end
+            self.guidePresented = false
+            if not ui.destroyed and app.db.MarkGuideSeen then app.db:MarkGuideSeen() end
+        end)
+        return f
+    end
+
+    function self:ShowGuide(replay)
+        if not replay then
+            if app.db.writable == false then return false end
+            if app.db.HasSeenGuide and app.db:HasSeenGuide() then return false end
+        end
+        if not self.guideFrame then self:BuildGuide() end
+        self.guideStep, self.guidePresented = 1, true
+        self:RenderGuide()
+        self.guideFrame:Show()
+        return true
+    end
+
     function ui:OpenRules() self.dialogs:OpenRules() end
     function ui:OpenTransfer(mode) self.dialogs:OpenTransfer(mode) end
+    function ui:ShowGuide(replay) return self.dialogs:ShowGuide(replay) end
     return self
 end
