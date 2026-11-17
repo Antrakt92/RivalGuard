@@ -38,6 +38,7 @@ function D.Attach(ui, app, H)
     function self:RuleDraft(index)
         local profile = ui:Profile()
         self.ruleIndex, self.ruleProfile = index, profile
+        self.ruleAutoName = index == nil
         self.ruleOriginal = index and profile.rules[index] or nil
         self.ruleDraft = RG.Util.Copy(self.ruleOriginal or {
             name = t("ruleNewName"), enabled = true, priority = 50, classes = {},
@@ -145,7 +146,10 @@ function D.Attach(ui, app, H)
         f.nameInput = textInput(base, 495, 80)
         f.nameInput:SetPoint("TOPLEFT", 260, -174)
         f.nameInput:SetScript("OnTextChanged", function(box)
-            if not self.loadingRule and self.ruleDraft then self.ruleDraft.name = box:GetText() end
+            if not self.loadingRule and self.ruleDraft then
+                self.ruleDraft.name = box:GetText()
+                self.ruleAutoName = false
+            end
         end)
         f:SetScript("OnHide", function() f.nameInput:ClearFocus() end)
         f.enabled = draftCheck(base, "ruleEnabled", "enabled", 250, -209)
@@ -155,6 +159,8 @@ function D.Attach(ui, app, H)
         }, 253, -243, 495)
         local classesLabel = H.label(base, "ruleClasses", 12, H.C.muted)
         classesLabel:SetPoint("TOPLEFT", 253, -299)
+        local soloHint = H.label(base, "classSoloHint", 12, H.C.muted)
+        soloHint:SetPoint("TOPRIGHT", -52, -299); soloHint:SetWidth(240); soloHint:SetJustifyH("RIGHT")
         f.classes = {}
         for i, token in ipairs(RG.Defaults.classes) do
             local class = token
@@ -163,10 +169,24 @@ function D.Attach(ui, app, H)
             H.fill(b, H.C.panel); b.edges = H.outline(b)
             b.icon = b:CreateTexture(nil, "ARTWORK"); b.icon:SetPoint("TOPLEFT", 2, -2); b.icon:SetPoint("BOTTOMRIGHT", -2, 2)
             b.icon:SetTexture("Interface\\Icons\\ClassIcon_" .. class)
-            b:SetScript("OnClick", function()
-                if self.ruleDraft then self.ruleDraft.classes = M.ToggleClass(self.ruleDraft.classes, class); self:RefreshRules() end
+            b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+            b:SetScript("OnClick", function(_, mouseButton)
+                local draft = self.ruleDraft
+                if not draft then return end
+                if mouseButton == "RightButton" then
+                    draft.classes = { [class] = true }
+                    if self.ruleAutoName then
+                        draft.name = ui:F("classRuleName", RG.Locale.Class(class, ui:Profile().locale))
+                        self.loadingRule = true
+                        f.nameInput:SetText(draft.name)
+                        self.loadingRule = false
+                    end
+                else
+                    draft.classes = M.ToggleClass(draft.classes, class)
+                end
+                self:RefreshRules()
             end)
-            b:SetScript("OnEnter", function() H.tooltip(b, RG.Locale.Class(class, ui:Profile().locale), t("ruleClasses")) end)
+            b:SetScript("OnEnter", function() H.tooltip(b, RG.Locale.Class(class, ui:Profile().locale), t("ruleClassSoloTip")) end)
             b:SetScript("OnLeave", H.hideTooltip)
             f.classes[#f.classes + 1] = { class = class, frame = b }
         end

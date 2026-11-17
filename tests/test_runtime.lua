@@ -290,6 +290,84 @@ H.Test("advanced rule cue preview is detached and saving makes the cue survive r
     H.Equal(fresh.sounds[1].id, RULE_SOUND_KITS.RAID_WARNING)
 end)
 
+for _, locale in ipairs({ "enUS", "ruRU" }) do
+    H.Test("a single-class sound rule can be drafted and named from Alerts in " .. locale, function()
+        local state, app, profile = ruleSoundFixture()
+        local ui, L = app.ui, state.RG.Locale
+        profile.locale = locale
+        profile.alerts.classes, profile.alerts.banner = { MAGE = true }, false
+        app:OnSettingsChanged()
+        ui:OpenSettings("alerts")
+        local function buttonIn(frame, key)
+            for _, child in ipairs(frame.children) do
+                if child.label and child.label:GetText() == ui:T(key) then return child end
+            end
+            error("missing button " .. key)
+        end
+        local launcher = buttonIn(ui.pages.alerts, "rules")
+        launcher:Click()
+        local dialog = ui.rulesDialog
+        H.True(dialog:IsShown())
+        H.Equal(dialog.nameInput:GetText(), ui:T("ruleNewName"))
+        local chips = {}
+        for _, chip in ipairs(dialog.classes) do chips[chip.class] = chip.frame end
+        local function generated(class) return ui:F("classRuleName", L.Class(class, locale)) end
+        local function solo(class)
+            chips[class]:Click("RightButton")
+            local classes = ui.dialogs.ruleDraft.classes
+            H.Equal(state.RG.Util.Count(classes), 1)
+            H.True(classes[class])
+        end
+
+        solo("ROGUE")
+        H.Equal(dialog.nameInput:GetText(), generated("ROGUE"))
+        H.Equal(ui.advancedRulesButton, launcher)
+        H.Equal(chips.ROGUE.clickButtons[1], "LeftButtonUp")
+        H.Equal(chips.ROGUE.clickButtons[2], "RightButtonUp")
+        solo("ROGUE")
+        H.Equal(dialog.nameInput:GetText(), generated("ROGUE"))
+        chips.HUNTER:Click("LeftButton")
+        local classes = ui.dialogs.ruleDraft.classes
+        H.Equal(state.RG.Util.Count(classes), 2); H.True(classes.ROGUE); H.True(classes.HUNTER)
+        solo("HUNTER")
+        H.Equal(dialog.nameInput:GetText(), generated("HUNTER"))
+        solo("ROGUE")
+        H.Equal(dialog.nameInput:GetText(), generated("ROGUE"))
+        H.Equal(#profile.rules, 0)
+        H.Equal(state.RG.Util.Count(profile.alerts.classes), 1); H.True(profile.alerts.classes.MAGE)
+        H.True(profile.alerts.unknownClass)
+
+        for _ = 1, 5 do dialog.soundCue:Click() end
+        dialog.save:Click()
+        local saved = profile.rules[1]
+        H.Equal(saved.name, generated("ROGUE"))
+        H.Equal(saved.soundCue, "quest")
+        H.Equal(state.RG.Util.Count(saved.classes), 1); H.True(saved.classes.ROGUE)
+        seeSoundRuleRival(state, 1, "ROGUE")
+        seeSoundRuleRival(state, 2, "HUNTER")
+        state:Advance(1.5)
+        H.Equal(app.engine.counters.alerts, 1)
+        H.Equal(app.engine.history[1].reason, "custom_rule")
+        H.Equal(#state.sounds, 1)
+        H.Equal(state.sounds[1].id, RULE_SOUND_KITS.IG_QUEST_LIST_COMPLETE)
+
+        solo("HUNTER")
+        H.Equal(dialog.nameInput:GetText(), saved.name, "an existing rule keeps its saved name")
+        H.True(saved.classes.ROGUE); H.Nil(saved.classes.HUNTER)
+        buttonIn(dialog, "newRule"):Click()
+        local name = locale == "ruRU" and "Мой сигнал" or "My custom signal"
+        dialog.nameInput:SetText(name)
+        dialog.nameInput.scripts.OnTextChanged(dialog.nameInput, true)
+        solo("HUNTER")
+        H.Equal(dialog.nameInput:GetText(), name)
+        solo("MAGE")
+        H.Equal(dialog.nameInput:GetText(), name)
+        H.Equal(#profile.rules, 1)
+        H.Equal(state.RG.Util.Count(profile.alerts.classes), 1); H.True(profile.alerts.classes.MAGE)
+        H.True(profile.alerts.unknownClass)
+    end)
+end
+
 H.Test("hidden Nearby skips row production while minimap census and alerts stay live", function()
     local state, RG, app = setup(nil, function(fixture)
         local map = fixture.api.CreateFrame("Frame", "Minimap", fixture.api.UIParent)

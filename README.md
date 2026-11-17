@@ -31,7 +31,8 @@ current profile would handle that new sighting in the open world.
   a sound for each event, control repeat timing and add optional rules for
   particular classes, situations, lists or estimated distances.
   A rule can use a distinct sound, such as different cues for Hunters and
-  Rogues. Listen before saving the rule. Group warnings use the wave sound.
+  Rogues. Open **Advanced rules** at the top of Alerts and right-click a class
+  icon in a new rule. Listen before saving. Group warnings use the wave sound.
   Below the class buttons, see the active profile and any global setting
   currently blocking warnings for new sightings outside your personal lists.
   Turn on **Highlight opponents targeting you** to mark an available nameplate

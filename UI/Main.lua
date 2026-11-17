@@ -749,6 +749,8 @@ function UI.New(app)
 
     local alerts = CreateFrame("Frame", nil, content); self.pages.alerts = alerts; alerts:SetAllPoints()
     y = section(alerts, "alerts", 0, "classesTip")
+    self.advancedRulesButton = localButton(alerts, "rules", 200, function() if self.OpenRules then self:OpenRules() end end)
+    self.advancedRulesButton:SetPoint("TOPRIGHT", -20, 0)
     y = classSelector(alerts, "alerts", y)
     self.alertProfileStatus = font(alerts, 13, C.gold)
     self.alertProfileStatus:SetPoint("TOPLEFT", 0, y - 4); self.alertProfileStatus:SetWidth(550)
@@ -783,8 +785,6 @@ function UI.New(app)
     end
     local previewAlert = localButton(alerts, "previewBanner", 200, function() self:PreviewAlert() end)
     previewAlert:SetPoint("TOPLEFT", 0, y - 6)
-    local advancedRules = localButton(alerts, "rules", 240, function() if self.OpenRules then self:OpenRules() end end)
-    advancedRules:SetPoint("LEFT", previewAlert, "RIGHT", 12, 0)
     alerts.height = -y + 60
 
     local appearance = CreateFrame("Frame", nil, content); self.pages.appearance = appearance; appearance:SetAllPoints()
