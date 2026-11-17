@@ -22,11 +22,13 @@ your journal and lists untouched.
 
 - **Nearby:** view current sightings and distinguish them from recently seen
   players. Click a row for evidence, personal notes or a temporary alert pause.
+  **Why?** checks what the current settings would do for a new sighting.
 - **Alerts:** choose audible classes independently from display classes. Set
   a sound for each event, control repeat timing and add optional rules for
   particular classes, situations, lists or estimated distances.
-- **Profiles:** start with a preset or export/import settings. Imports require
-  a preview and a new name. They do not include personal lists or history.
+- **Profiles:** choose a preset, create a profile, then select **Use** to apply
+  it. Imports require a preview and a new name. They do not include personal
+  lists or history.
 - **Journal:** search recent encounters or open your watch, avoid and ignore
   lists. Retain all eligible encounters, listed players or observed threats.
 - **Support:** see available sensors and copy a report with player identities
