@@ -133,6 +133,31 @@ function App:HasTargetingEvidence(id)
         and contact.isPlayer == true and contact.dead ~= true
 end
 
+function App:HighlightFrame(id, token)
+    local contact = self.engine.contacts[id]
+    local binding = self.engine.bindings[token]
+    if not self.db:GetProfile().enabled or not contact or not contact.guid or not binding or binding.id ~= id
+        or not contact.tokens[token] then return nil end
+    local entry = self.engine:ListEntry(contact)
+    if entry and entry.kind == "ignore" then return nil end
+    return self.client:VisibleEnemyPlate(token, contact.guid)
+end
+
+function App:HighlightContact(selection)
+    self.ui.badges:ClearHighlight()
+    if not selection or selection.preview or selection.savedOnly
+        or (selection.sources and selection.sources.journal) then return false end
+    local contact = self.engine.contacts[selection.id]
+    if not contact or not contact.guid or selection.identity ~= "guid:" .. contact.guid then return false end
+    for _, token in ipairs(RG.Util.SortedKeys(contact.tokens)) do
+        if token:match("^nameplate%d+$") then
+            local frame = self:HighlightFrame(contact.id, token)
+            if frame and self.ui.badges:Highlight(token, frame, contact.id, self.engine:Now()) then return true end
+        end
+    end
+    return false
+end
+
 function App:Snooze(contact, seconds)
     if not contact or not contact.id then return nil, "not_observed" end
     local ok, untilTime = self.engine:ToggleContactSnooze(contact.id, seconds)
@@ -151,10 +176,18 @@ function App:ExportDiagnostics()
     })
 end
 
-function App:UIContactUpdated(token, _, contact)
+function App:UIContactUpdated(token, observation, contact)
     if not self.ui or not self.ui.SetNameplate then return end
     if type(token) ~= "string" or not token:match("^nameplate%d+$") then return end
     if not contact then self.ui:RemoveNameplate(token) return end
+    local highlight = self.ui.badges.highlight
+    if highlight and highlight.unit == token then
+        local owner = self.engine.contacts[highlight.id]
+        if not owner or not observation or not observation.guid or observation.guid ~= owner.guid or observation.hostile ~= true
+            or observation.isPlayer ~= true or observation.dead ~= false or observation.behindCamera == true then
+            self.ui.badges:ClearHighlight()
+        end
+    end
     local frame = self.client:Nameplate(token)
     if frame then self.ui:SetNameplate(token, frame, contact)
     else self.ui:RemoveNameplate(token) end
@@ -166,6 +199,7 @@ end
 
 function App:OnWorldChanged()
     self.engine:Clear()
+    if self.ui and self.ui.badges then self.ui.badges:ClearHighlight() end
     if self.ui and self.ui.ClearBanners then self.ui:ClearBanners() end
 end
 

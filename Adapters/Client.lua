@@ -95,6 +95,29 @@ function Client:UnitMatch(token, other)
     return self:Boolean(self:Safe(self.api.UnitIsUnit, token, other))
 end
 
+function Client:Hostile(token)
+    local api = self.api
+    local hostile = self:Boolean(self:Safe(api.UnitIsEnemy, "player", token))
+    if hostile == nil then hostile = self:Boolean(self:Safe(api.UnitCanAttack, "player", token)) end
+    return hostile
+end
+
+function Client:VisibleEnemyPlate(token, guid)
+    token, guid = self:IsToken(token), self:Text(guid, 128)
+    if not token or not token:match("^nameplate%d+$") or not guid then return nil end
+    local api = self.api
+    local manager = api.C_NamePlateManager
+    if type(manager) == "table" and type(manager.IsNamePlateUnitBehindCamera) == "function"
+        and self:Boolean(self:Safe(manager.IsNamePlateUnitBehindCamera, token)) ~= false then return nil end
+    local frame = self:Nameplate(token)
+    if not frame or self:Boolean(self:Safe(frame.IsVisible, frame)) ~= true
+        or self:Boolean(self:Safe(frame.IsProtected, frame)) ~= false then return nil end
+    if self:Boolean(self:Safe(api.UnitExists, token)) ~= true or self:Text(self:Safe(api.UnitGUID, token), 128) ~= guid
+        or self:Boolean(self:Safe(api.UnitIsPlayer, token)) ~= true or self:Hostile(token) ~= true
+        or self:Boolean(self:Safe(api.UnitIsDeadOrGhost, token)) ~= false then return nil end
+    return frame
+end
+
 function Client:Names(token)
     local api = self.api
     local regional = self:Boolean(self:Safe(api.RegionalUniqueNamesEnabled))
@@ -214,8 +237,7 @@ function Client:ReadUnit(token, source, checkRequalifiedAura)
     local guid = self:Text(self:Safe(api.UnitGUID, token), 128)
     local player = self:Boolean(self:Safe(api.UnitIsPlayer, token))
     if exists ~= true and not name and not guid and player ~= true then return nil end
-    local hostile = self:Boolean(self:Safe(api.UnitIsEnemy, "player", token))
-    if hostile == nil then hostile = self:Boolean(self:Safe(api.UnitCanAttack, "player", token)) end
+    local hostile = self:Hostile(token)
     local observation = {
         token = token, guid = guid, name = name, nameComplete = nameComplete, realm = realm,
         hostile = hostile, isPlayer = player, source = source or "unit", stealthReadable = false,

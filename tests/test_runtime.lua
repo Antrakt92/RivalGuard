@@ -846,6 +846,147 @@ H.Test("simulated combat UI refresh never mutates protected action attributes", 
     state:Fire("PLAYER_REGEN_ENABLED")
 end)
 
+local function locatorFixture()
+    local state, _, app = setup()
+    app.db:GetProfile().display.showBadges = false
+    app:ProfileChanged()
+    local unit = { guid = "Player-LocatorOwner", name = "Rival to locate", class = "ROGUE", hostile = true, isPlayer = true }
+    state:Unit("nameplate1", unit)
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    state:Advance(0.5)
+    local ui = app.ui
+    ui.rows[1]:Click()
+    H.Equal(ui.selected.identity, "guid:" .. unit.guid)
+    H.True(ui.detailsFrame:IsShown())
+    H.True(assert(ui.detailsFrame.locate, "missing nameplate highlight action"):IsShown())
+    return state, app, ui, unit
+end
+
+local function locatorVisible(ui, token)
+    local badge = ui.badges.active[token]
+    return badge ~= nil and badge.locator ~= nil and badge.locator:IsVisible()
+end
+
+H.Test("nameplate highlight works on an already anchored badge in combat and expires", function()
+    local state, app, ui = locatorFixture()
+    local badge = assert(ui.badges.active.nameplate1)
+    H.Equal(badge:GetParent(), state.plates.nameplate1)
+    H.False(locatorVisible(ui, "nameplate1"))
+    state.combat = true
+    state:Fire("PLAYER_REGEN_DISABLED")
+    local before = #state.mutations
+    ui.detailsFrame.locate:Click()
+    H.True(locatorVisible(ui, "nameplate1"))
+    H.False(ui.detailsFrame:IsShown())
+    H.False(app.db:GetProfile().display.showBadges)
+    H.Equal(ui.badges.active.nameplate1, badge)
+    H.Equal(badge:GetParent(), state.plates.nameplate1)
+    local geometry = { SetParent = true, SetPoint = true, ClearAllPoints = true, SetAllPoints = true, SetSize = true, SetWidth = true, SetHeight = true }
+    for index = before + 1, #state.mutations do
+        local mutation = state.mutations[index]
+        if mutation.frame == badge or mutation.frame == badge.locator then H.Nil(geometry[mutation.action]) end
+    end
+    H.Equal(#state.blocked, 0)
+    state:Advance(2.2)
+    H.True(locatorVisible(ui, "nameplate1"))
+    state:Advance(1.4)
+    H.False(locatorVisible(ui, "nameplate1"))
+end)
+
+H.Test("nameplate highlight validates the current GUID and never follows a recycled plate", function()
+    local state, _, ui, owner = locatorFixture()
+    local readGUID, secret = state.api.UnitGUID, H.Secret("unreadable locator owner")
+    state.api.UnitGUID = function(token)
+        if token == "nameplate1" then return secret end
+        return readGUID(token)
+    end
+    ui.detailsFrame.locate:Click()
+    H.False(locatorVisible(ui, "nameplate1"))
+    state.api.UnitGUID = readGUID
+
+    local replacement = { guid = "Player-LocatorReplacement", name = "Other rival", class = "HUNTER", hostile = true, isPlayer = true }
+    state:Unit("nameplate1", replacement)
+    ui.detailsFrame.locate:Click()
+    H.False(locatorVisible(ui, "nameplate1"))
+
+    state:Unit("nameplate1", owner)
+    ui:Refresh()
+    ui.detailsFrame.locate:Click()
+    H.True(locatorVisible(ui, "nameplate1"))
+    state:Unit("nameplate1", replacement)
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    H.False(locatorVisible(ui, "nameplate1"))
+    state:Advance(0.5)
+    H.False(locatorVisible(ui, "nameplate1"))
+
+    ui.rows[1]:Click()
+    ui.detailsFrame.locate:Click()
+    H.True(locatorVisible(ui, "nameplate1"))
+    state:Unit("nameplate1", owner)
+    state:Advance(0.2)
+    H.False(locatorVisible(ui, "nameplate1"))
+end)
+
+H.Test("nameplate highlight clears on removal and is unavailable in journal and sample details", function()
+    local state, app, ui = locatorFixture()
+    ui.detailsFrame.locate:Click()
+    H.True(locatorVisible(ui, "nameplate1"))
+    ui:OpenSettings("journal")
+    H.True(ui.journalRows[1]:IsShown())
+    ui.journalRows[1]:Click()
+    ui:Refresh()
+    H.False(ui.detailsFrame.locate:IsShown())
+
+    ui.settings:Hide()
+    ui.rows[1]:Click()
+    ui.detailsFrame.locate:Click()
+    H.True(locatorVisible(ui, "nameplate1"))
+    state.units.nameplate1 = nil
+    state:Fire("NAME_PLATE_UNIT_REMOVED", "nameplate1")
+    H.False(locatorVisible(ui, "nameplate1"))
+    app:Demo()
+    ui.rows[1]:Click()
+    H.True(ui.selected.preview)
+    H.False(ui.detailsFrame.locate:IsShown())
+end)
+
+H.Test("nameplate highlight fails closed when visibility or camera state is restricted", function()
+    local state, _, ui = locatorFixture()
+    local plate, secret = state.plates.nameplate1, H.Secret("restricted frame evidence")
+    local isVisible = plate.IsVisible
+    plate.IsVisible = function() return secret end
+    ui.detailsFrame.locate:Click()
+    H.Nil(ui.badges.highlight)
+    H.True(ui.detailsFrame.identityHelp:IsShown())
+    H.Equal(ui.detailsFrame.identityHelp:GetText(), ui:T("locateUnavailable"))
+    plate.IsVisible = isVisible
+
+    local behind = false
+    state.api.C_NamePlateManager = { IsNamePlateUnitBehindCamera = function() return behind end }
+    ui.detailsFrame.locate:Click()
+    H.True(locatorVisible(ui, "nameplate1"))
+    behind = secret
+    state:Advance(0.2)
+    H.False(locatorVisible(ui, "nameplate1"))
+    behind = true
+    ui.rows[1]:Click()
+    ui.detailsFrame.locate:Click()
+    H.False(locatorVisible(ui, "nameplate1"))
+end)
+
+H.Test("nameplate highlight leaves a note draft intact", function()
+    local _, app, ui = locatorFixture()
+    local detail = ui.detailsFrame
+    detail.note:SetFocus()
+    detail.note:SetText("Unsaved draft")
+    detail.note.scripts.OnTextChanged(detail.note, true)
+    detail.locate:Click()
+    H.True(locatorVisible(ui, "nameplate1"))
+    H.True(detail:IsShown())
+    H.Equal(detail.note:GetText(), "Unsaved draft")
+    H.Nil(app.db:GetList()[ui.selected.identity])
+end)
+
 H.Test("fail once before UI creation preserves saved data and allows clean retry", function()
     local state = W.New()
     local raw = { schemaVersion = 1, activeProfile = "Default", profiles = {} }

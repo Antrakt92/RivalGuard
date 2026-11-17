@@ -53,6 +53,10 @@ function B.New(getProfile)
         badge.focus = badge:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
         badge.focus:SetPoint("TOP", badge, "BOTTOM", 0, 0)
         badge.focus:SetText("◆"); badge.focus:SetTextColor(0.91, 0.62, 1)
+        badge.locator = badge:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        badge.locator:SetFont(STANDARD_TEXT_FONT or "Fonts\\ARIALN.TTF", 26, "OUTLINE")
+        badge.locator:SetText("▼"); badge.locator:SetTextColor(1, 0.85, 0.38)
+        badge.locator:Hide()
         return badge
     end
 
@@ -60,16 +64,21 @@ function B.New(getProfile)
         local profile = getProfile()
         local contact = badge.contact
         local class = contact and RG.UIModel.Text(contact.class, "")
-        if not profile.enabled or not profile.display.showBadges or not contact or contact.hostile ~= true or contact.isPlayer ~= true
-            or contact.dead == true or contact.behindCamera == true or contact.listKind == "ignore" or not RG.Defaults.classSet[class] then
+        local observed = profile.enabled and contact and contact.hostile == true and contact.isPlayer == true
+            and contact.dead ~= true and contact.behindCamera ~= true and contact.listKind ~= "ignore"
+        local showLocator = observed and self.highlight and self.highlight.badge == badge and self.highlight.id == contact.id
+        local showClass = observed and profile.display.showBadges and RG.Defaults.classSet[class]
+            and RG.UIModel.ClassEnabled(profile.display.classes, class)
+        badge.locator:SetShown(showLocator == true)
+        if not showClass and not showLocator then
             badge:Hide()
-            return
+            return false
         end
-        if not RG.UIModel.ClassEnabled(profile.display.classes, class) then badge:Hide() return end
-        badge.icon:SetTexture("Interface\\Icons\\ClassIcon_" .. class)
-        badge.marker:SetShown(contact.watched == true or contact.listKind == "avoid")
-        badge.target:SetShown(profile.display.badgeTarget == true and contact.currentTarget == true)
-        badge.focus:SetShown(profile.display.badgeFocus == true and contact.currentFocus == true)
+        badge.bg:SetShown(showClass == true); badge.icon:SetShown(showClass == true)
+        if showClass then badge.icon:SetTexture("Interface\\Icons\\ClassIcon_" .. class) end
+        badge.marker:SetShown(showClass and (contact.watched == true or contact.listKind == "avoid") or false)
+        badge.target:SetShown(showClass and profile.display.badgeTarget == true and contact.currentTarget == true or false)
+        badge.focus:SetShown(showClass and profile.display.badgeFocus == true and contact.currentFocus == true or false)
         if not locked() then
             local size = RG.Util.Clamp(profile.display.badgeSize, 16, 40, 24)
             local offset = RG.Util.Clamp(profile.display.badgeOffset, 0, 30, 6)
@@ -79,6 +88,25 @@ function B.New(getProfile)
             end
         end
         badge:Show()
+        return showLocator == true
+    end
+
+    function self:ClearHighlight()
+        local highlight = self.highlight
+        if not highlight then return end
+        self.highlight = nil
+        highlight.badge.locator:Hide()
+        if available(highlight.frame) then paint(highlight.badge) else highlight.badge:Hide() end
+    end
+
+    function self:Highlight(unit, frame, id, now)
+        local badge = self.active[unit]
+        if not badge or badge.parent ~= frame or not badge.contact or badge.contact.id ~= id then return false end
+        self:ClearHighlight()
+        self.highlight = { unit = unit, frame = frame, badge = badge, id = id, expires = now + 3, checkAt = now }
+        if paint(badge) then return true end
+        self.highlight = nil
+        return false
     end
 
     function self:Set(unit, frame, contact)
@@ -94,10 +122,14 @@ function B.New(getProfile)
             if not badge then return end
             self.active[unit] = badge
         end
+        if self.highlight and self.highlight.unit == unit and (self.highlight.id ~= contact.id or self.highlight.frame ~= frame
+            or contact.behindCamera == true) then self:ClearHighlight() end
         badge.contact = contact
         if badge.parent ~= frame then
             badge:ClearAllPoints()
             badge:SetParent(frame)
+            badge.locator:ClearAllPoints()
+            badge.locator:SetPoint("BOTTOM", frame, "TOP", 0, 5)
             badge.parent = frame
             badge.styleOffset = nil
         end
@@ -107,11 +139,16 @@ function B.New(getProfile)
     function self:Remove(unit)
         local badge = self.active[unit]
         if not badge then return end
+        if self.highlight and self.highlight.unit == unit then
+            self.highlight = nil
+            badge.locator:Hide()
+        end
         self.active[unit] = nil
         badge:Hide()
         badge.contact = nil
         if not locked() then
             badge:ClearAllPoints()
+            badge.locator:ClearAllPoints()
             badge:SetParent(UIParent)
             badge.parent = nil
             badge.styleOffset = nil

@@ -48,6 +48,23 @@ elseif view == "explanation" then
     app.ui:Select(app.engine:Snapshot()[1])
     app.ui:ShowExplanation()
 elseif view == "banner" then app.ui:PreviewAlert()
+elseif view == "locator" then
+    local token = "nameplate80"
+    local name = locale == "ruRU" and "Пример противника" or "Example opponent"
+    state:Unit(token, { guid = "Player-LocatorPreview", name = name, class = "ROGUE", hostile = true, isPlayer = true })
+    local plate = state.plates[token]
+    plate:SetSize(155, 18); plate:SetPoint("CENTER", state.api.UIParent, "CENTER", 0, 60)
+    local bar = plate:CreateTexture(nil, "BACKGROUND")
+    bar:SetAllPoints(); bar:SetColorTexture(0.66, 0.14, 0.18, 1)
+    local plateName = plate:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    plateName:SetPoint("CENTER"); plateName:SetText(name)
+    state:Fire("NAME_PLATE_UNIT_ADDED", token)
+    local id = assert(app.sensors.active[token].contactID)
+    for _, contact in ipairs(app.engine:Snapshot()) do
+        if contact.id == id then app.ui:Select(contact); break end
+    end
+    app.ui.detailsFrame.locate:Click()
+    assert(app.ui.badges.highlight, "locator preview did not attach")
 elseif view == "wave" then
     app.ui:Alert({ kind = "wave", count = 38, classes = { ROGUE = 12, HUNTER = 10, MAGE = 8, WARRIOR = 8 }, banner = true })
 elseif view ~= "main" and view ~= "launcher" then error("unknown preview view") end

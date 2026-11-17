@@ -214,6 +214,7 @@ function UI.New(app)
     function self:SettingsChanged()
         self.controlsDirty = true
         self.dataPage = nil
+        if self.badges then self.badges:ClearHighlight() end
         local profile = self:Profile()
         if profile.display.streamer then
             if self.journalSearch then self.journalSearch:SetText(""); self.journalSearch:ClearFocus() end
@@ -1288,10 +1289,13 @@ function UI.New(app)
 
     function self:Select(contact)
         if self.explanationFrame then self.explanationFrame:Hide() end
+        self.badges:ClearHighlight()
         self.selected = contact
         self.noteDraft = nil
+        self.locateFailed = nil
         self.removeEntryAt, self.removeEntryIdentity = nil, nil
-        self.selectedOutside = contact.sources and contact.sources.journal == true or false
+        self.selectedFromJournal = contact.sources and contact.sources.journal == true or false
+        self.selectedOutside = self.selectedFromJournal
         self:ShowDetails()
     end
 
@@ -1345,6 +1349,14 @@ function UI.New(app)
             remove:SetPoint("TOPLEFT", 18, -261)
             detail.removeMembership = remove
             detail.why = localButton(detail, "why", 150, function() self:ShowExplanation() end)
+            detail.locate = localButton(detail, "locate", 109, function()
+                self.locateFailed = not app:HighlightContact(self.selected)
+                if self.locateFailed or self.noteDraft or detail.note:HasFocus() then self:ShowDetails(true)
+                else detail:Hide() end
+            end)
+            detail.locate:SetPoint("TOPLEFT", 345, -261)
+            detail.locate:SetScript("OnEnter", function() tooltip(detail.locate, self:T("locate"), self:T("locateHelp")) end)
+            detail.locate:SetScript("OnLeave", hideTooltip)
             local noteTitle = label(detail, "note", 13)
             noteTitle:SetPoint("TOPLEFT", 18, -305)
             detail.note = CreateFrame("EditBox", nil, detail, "InputBoxTemplate")
@@ -1362,6 +1374,7 @@ function UI.New(app)
             end)
             detail:SetScript("OnHide", function()
                 self.noteDraft = nil; detail.note:ClearFocus()
+                self.locateFailed = nil
                 if self.explanationFrame then self.explanationFrame:Hide() end
             end)
             local save = localButton(detail, "saveNote", 160, function()
@@ -1474,8 +1487,13 @@ function UI.New(app)
         detail.saveNote:SetShown(showNote)
         detail.saveNote:SetEnabled(identity ~= nil)
         detail.privateNote:SetShown(not preview and profile.display.streamer)
-        detail.identityHelp:SetShown(not preview and identity == nil)
-        detail.identityHelp:SetText(self:T(contact.savedOnly and "legacyIdentity" or "identityUnknown"))
+        local canRequestLocate = type(app.HighlightContact) == "function" and not preview
+            and not contact.savedOnly and not self.selectedFromJournal
+        detail.locate:SetShown(canRequestLocate)
+        detail.locate:SetEnabled(canRequestLocate)
+        local locateFailed = canRequestLocate and self.locateFailed
+        detail.identityHelp:SetShown(not preview and (identity == nil or locateFailed == true))
+        detail.identityHelp:SetText(self:T(locateFailed and "locateUnavailable" or contact.savedOnly and "legacyIdentity" or "identityUnknown"))
         for kind, buttonFrame in pairs(detail.listActions) do
             buttonFrame:SetShown(not preview)
             buttonFrame:SetEnabled(identity ~= nil and (not entry or entry.kind ~= kind))
@@ -1582,7 +1600,15 @@ function UI.New(app)
     ticker:SetScript("OnUpdate", function(_, elapsed)
         self.updateAcc = (self.updateAcc or 0) + elapsed
         local bannersActive = self.activeBanner or #self.bannerQueue > 0
-        local now = (bannersActive or self.previewUntil) and self:Now()
+        local highlight = self.badges.highlight
+        local now = (bannersActive or self.previewUntil or highlight) and self:Now()
+        if highlight and (now >= highlight.checkAt or now >= highlight.expires) then
+            if now >= highlight.expires or app:HighlightFrame(highlight.id, highlight.unit) ~= highlight.frame then
+                self.badges:ClearHighlight()
+            else
+                highlight.checkAt = now + 0.125
+            end
+        end
         if bannersActive then self:AdvanceBanner(now) end
         if self.updateAcc >= 1 or self.previewUntil and now >= self.previewUntil then
             self.updateAcc = 0; self:Refresh()
