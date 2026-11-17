@@ -58,7 +58,9 @@ see how your current profile would handle that new sighting in the open world.
 - **Profiles:** choose a ready-made setup and enter a name. **Create and use**
   applies the new profile immediately. **Save without switching** adds it to
   the list for later. Imports require a preview and a new name and can be applied
-  immediately. They do not include personal lists or history. Right-click
+  immediately. Preview shows alert restrictions, range policy and selected
+  classes the current client reports as unavailable. Imports do not include
+  personal lists or history. Right-click
   **…** on Nearby or use `/rg profile` to switch
   quickly. `/rg profile NAME` activates an exact saved profile name.
   **Rename** updates the name of a custom profile in place.

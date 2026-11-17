@@ -170,9 +170,15 @@ elseif view == "conditions" then app.ui:OpenRules(); app.ui.rulesDialog.conditio
 elseif view == "appearance" then app.ui:OpenSettings("appearance")
 elseif view == "import" then
     app.ui:OpenTransfer("import")
-    if page == "validated" then
+    if page == "validated" or page == "restricted" then
         local profile = assert(RG.Defaults.NewProfile("farming"))
         profile.alerts.sound = false
+        if page == "restricted" then
+            app.SupportedClasses = function() return { "HUNTER", "ROGUE" }, true end
+            for _, class in ipairs(RG.Defaults.classes) do profile.alerts.classes[class] = true end
+            profile.alerts.unknownClass, profile.alerts.watchedOnly, profile.alerts.muteOrdinary = false, true, true
+            profile.range.enabled, profile.range.yards, profile.range.policy, profile.range.unknown = true, 25, "confirmed", false
+        end
         local transfer = app.ui.transferDialog
         transfer.nameInput:SetText(locale == "ruRU" and "Патруль" or "Patrol")
         transfer.edit:SetText(assert(RG.Codec.Encode({ format = "RivalGuardProfile", schemaVersion = RG.schemaVersion, profile = profile })))

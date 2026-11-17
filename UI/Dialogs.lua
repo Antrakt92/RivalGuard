@@ -761,7 +761,6 @@ function D.Attach(ui, app, H)
         f.nameInput = textInput(f, 510, 64)
         f.nameInput:SetPoint("TOPLEFT", 25, -145)
         local scroll = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
-        scroll:SetPoint("TOPLEFT", 18, -191); scroll:SetPoint("BOTTOMRIGHT", -40, 169)
         local edit = CreateFrame("EditBox", nil, scroll)
         edit:SetMultiLine(true); edit:SetAutoFocus(false); edit:SetWidth(665); edit:SetHeight(280)
         edit:SetFontObject(ChatFontNormal or GameFontNormal)
@@ -774,7 +773,7 @@ function D.Attach(ui, app, H)
         end)
         scroll:SetScrollChild(edit); f.edit, f.scroll = edit, scroll
         f.summary = H.font(f, 12, H.C.accent)
-        f.summary:SetPoint("BOTTOMLEFT", 18, 74); f.summary:SetWidth(690); f.summary:SetHeight(82)
+        f.summary:SetPoint("BOTTOMLEFT", 18, 74); f.summary:SetWidth(690); f.summary:SetHeight(152)
         f.preview = H.localButton(f, "validateImport", 190, function() self:PreviewImport() end)
         f.preview:SetPoint("BOTTOMLEFT", 18, 25)
         f.applyAndUse = H.localButton(f, "importAndUse", 205, function() self:ApplyImport(true) end)
@@ -798,6 +797,9 @@ function D.Attach(ui, app, H)
         f.nameLabel:SetShown(self.transferMode == "import"); f.nameInput:SetShown(self.transferMode == "import")
         f.preview:SetShown(self.transferMode == "import"); f.apply:SetShown(self.transferMode == "import")
         f.applyAndUse:SetShown(self.transferMode == "import")
+        f.scroll:ClearAllPoints()
+        f.scroll:SetPoint("TOPLEFT", 18, self.transferMode == "import" and -191 or -112)
+        f.scroll:SetPoint("BOTTOMRIGHT", -40, self.transferMode == "import" and 239 or 24)
         f.nameInput:SetText("")
         self.loadingTransfer = true
         local text = ""
@@ -826,15 +828,31 @@ function D.Attach(ui, app, H)
         for _, kind in ipairs({ "world", "battleground", "arena", "instance" }) do
             if clean.context[kind] then areas[#areas + 1] = t(kind) end
         end
-        local classes = {}
+        ui:UpdateClasses()
+        local classes, unavailable = {}, {}
         for _, class in ipairs(RG.Defaults.classes) do
-            if clean.alerts.classes[class] then classes[#classes + 1] = RG.Locale.Class(class, ui:Profile().locale) end
+            if clean.alerts.classes[class] then
+                local name = RG.Locale.Class(class, ui:Profile().locale)
+                classes[#classes + 1] = name
+                if ui.classAvailability and not ui.classAvailability[class] then unavailable[#unavailable + 1] = name end
+            end
         end
-        f.summary:SetText(table.concat({
+        local lines = {
             ui:F("importPreview", state(clean.enabled), state(clean.alerts.enabled), #clean.rules),
             ui:F("importPreviewOutput", state(clean.alerts.sound), state(clean.alerts.banner), #classes > 0 and table.concat(classes, ", ") or t("all")),
             ui:F("importPreviewAreas", #areas > 0 and table.concat(areas, ", ") or t("importNone")),
-        }, "\n"))
+        }
+        local filters = {}
+        if clean.alerts.watchedOnly then filters[#filters + 1] = t("watchedOnly") end
+        if clean.alerts.muteOrdinary then filters[#filters + 1] = t("muteOrdinary") end
+        if not clean.alerts.unknownClass then filters[#filters + 1] = t("importKnownOnly") end
+        if #filters > 0 then lines[#lines + 1] = ui:F("importPreviewFilters", table.concat(filters, " · ")) end
+        if clean.range.enabled then
+            local yards = tostring(clean.range.yards):gsub("%.", t("decimalSeparator"))
+            lines[#lines + 1] = ui:F("importPreviewRange", yards, t(clean.range.policy), state(clean.range.unknown))
+        end
+        if #unavailable > 0 then lines[#lines + 1] = ui:F("importPreviewUnavailable", table.concat(unavailable, ", ")) end
+        f.summary:SetText(table.concat(lines, "\n"))
         f.apply:SetEnabled(true); f.applyAndUse:SetEnabled(true)
     end
 

@@ -3436,6 +3436,42 @@ H.Test("validated inactive import reveals the normalized profile without replaci
     H.Equal(RG.Codec.Encode(db:GetJournal()), historyBefore)
 end)
 
+for _, locale in ipairs({ "enUS", "ruRU" }) do
+    H.Test("profile import preview discloses alert restrictions in " .. locale, function()
+        local _, RG, app = setup(nil, function(mock)
+            mock.locale = locale
+            mock.api.C_SpecializationInfo = { GetAllClassIDs = function() return { 3, 4 } end }
+            mock.api.C_CreatureInfo = { GetClassInfo = function(id)
+                return { classFile = id == 3 and "HUNTER" or "ROGUE" }
+            end }
+        end)
+        local profile = RG.Defaults.NewProfile()
+        profile.alerts.unknownClass, profile.alerts.watchedOnly, profile.alerts.muteOrdinary = false, true, true
+        profile.alerts.classes = { ROGUE = true, EVOKER = true }
+        profile.range.enabled, profile.range.yards, profile.range.policy, profile.range.unknown = true, 25.5, "confirmed", false
+        local payload = assert(RG.Codec.Encode({ format = "RivalGuardProfile", schemaVersion = RG.schemaVersion, profile = profile }))
+        local ui = app.ui
+        ui:OpenTransfer("import")
+        local dialog = ui.transferDialog
+        dialog.edit:SetText(payload)
+        dialog.preview:Click()
+        local summary = dialog.summary:GetText()
+        for _, line in ipairs({ ui:F("importPreviewFilters", table.concat({ ui:T("watchedOnly"), ui:T("muteOrdinary"), ui:T("importKnownOnly") }, " · ")),
+            ui:F("importPreviewRange", locale == "ruRU" and "25,5" or "25.5", ui:T("confirmed"), ui:T("importOff")),
+            ui:F("importPreviewUnavailable", RG.Locale.Class("EVOKER", locale)) }) do
+            H.True(summary:find(line, 1, true) ~= nil, line)
+        end
+        H.Equal(app.db:GetActiveProfileName(), "Default")
+        dialog.nameInput:SetText("Restricted imported profile")
+        dialog.apply:Click()
+        local imported = assert(app.db:GetProfile("Restricted imported profile"))
+        H.True(imported.alerts.classes.EVOKER)
+        H.True(imported.alerts.watchedOnly)
+        H.False(imported.range.unknown)
+        H.Equal(imported.range.yards, 25.5)
+    end)
+end
+
 H.Test("explicitly activating an imported profile updates detection and the profile picker", function()
     local state, RG, app = setup()
     local db, ui = app.db, app.ui
