@@ -40,13 +40,18 @@ end
 
 local PRIORITY = { sighting = 20, returning = 30, watch = 90, targeting = 70, stealth = 100 }
 
+function R.ContactBlock(contact)
+    if not contact or contact.hostile ~= true or contact.isPlayer ~= true then return "identity_unconfirmed" end
+    if contact.dead == true then return "dead" end
+end
+
 function R.Evaluate(profile, contact, event, context, listEntry, rangeFresh)
     local identified = event == "identified"
     if identified then event = "sighting" end
     if not profile.enabled or not profile.alerts.enabled then return nil, "disabled" end
     if listEntry and listEntry.kind == "ignore" then return nil, "ignored" end
-    if contact.hostile ~= true or contact.isPlayer ~= true then return nil, "identity_unconfirmed" end
-    if contact.dead == true then return nil, "dead" end
+    local blocked = R.ContactBlock(contact)
+    if blocked then return nil, blocked end
     local allowed, reason = R.ContextMatches(profile.context, context or {})
     if not allowed then return nil, reason end
     local inRange, rangeReason = R.RangeMatches(profile.range, contact, rangeFresh)

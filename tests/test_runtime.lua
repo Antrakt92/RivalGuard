@@ -1223,6 +1223,100 @@ H.Test("a queued player now outside strict range does not accelerate a later wav
     H.Equal(app.ui.activeBanner.count, 2)
 end)
 
+local function pendingEligibilityFixture()
+    local unreadable = {}
+    local state, _, app = setup(nil, function(mock)
+        local read, secret = mock.api.UnitIsEnemy, H.Secret("unreadable unit hostility")
+        mock.api.UnitIsEnemy = function(player, token)
+            if unreadable[token] then return secret end
+            return read(player, token)
+        end
+    end)
+    app.db:GetProfile().alerts.waveThreshold = 2
+    app:OnSettingsChanged()
+    local function add(index, class)
+        local token = "nameplate" .. index
+        local unit = { guid = "Player-Eligibility" .. index, name = "Rival " .. index,
+            class = class, hostile = true, isPlayer = true }
+        state:Unit(token, unit)
+        state:Fire("NAME_PLATE_UNIT_ADDED", token)
+        return unit
+    end
+    return state, app, add, unreadable
+end
+
+for _, reason in ipairs({ "dead", "identity_unconfirmed", "contact_snoozed" }) do
+    H.Test("a no-range wave never anchors to a queued player now " .. reason, function()
+        local state, app, add, unreadable = pendingEligibilityFixture()
+        local unit = add(1, "ROGUE")
+        local leader = app.engine:Snapshot()[1]
+        if reason == "identity_unconfirmed" then
+            state:Unit("focus", unit)
+            state:Fire("PLAYER_FOCUS_CHANGED")
+        end
+        state.clock.Advance(0.3)
+        add(2, "HUNTER"); add(3, "MAGE")
+        state.clock.Advance(0.1)
+        if reason == "dead" then
+            unit.dead = true
+            state:Fire("UNIT_FLAGS", "nameplate1")
+        elseif reason == "identity_unconfirmed" then
+            unreadable.nameplate1 = true
+            state:Fire("UNIT_FLAGS", "nameplate1")
+            H.True(app.engine:SelectedContact(leader.id, leader.identity).hostile)
+            unreadable.focus = true
+            state:Fire("UNIT_FLAGS", "focus")
+            H.Nil(app.engine:SelectedContact(leader.id, leader.identity).hostile)
+        else
+            assert(app:Snooze(leader, 10))
+        end
+        H.Equal(app:Explain(app.engine:SelectedContact(leader.id, leader.identity)).reason, reason)
+        state.clock.Advance(0.45)
+        app.engine:Tick()
+        H.Equal(app.engine.counters.alerts, 0)
+        H.Equal(#state.sounds, 0)
+        state.clock.Advance(0.3)
+        app.engine:Tick()
+        H.Equal(app.engine.counters.alerts, 1)
+        H.Equal(app.engine.history[1].kind, "wave")
+        H.Equal(app.ui.activeBanner.count, 2)
+        H.Equal(app.ui.activeBanner.classes.HUNTER, 1)
+        H.Equal(app.ui.activeBanner.classes.MAGE, 1)
+        H.Nil(app.ui.activeBanner.classes.ROGUE)
+    end)
+end
+
+for _, tickWhileDead in ipairs({ false, true }) do
+    H.Test("clear alive evidence restores a sighting " .. (tickWhileDead and "after a blocked tick" or "before its first tick"), function()
+        local state, app, add = pendingEligibilityFixture()
+        local arrival = state.clock.Now()
+        local unit = add(1, "ROGUE")
+        local original = app.engine:Snapshot()[1]
+        state.clock.Advance(0.2)
+        unit.dead = true
+        state:Fire("UNIT_FLAGS", "nameplate1")
+        H.Equal(app:Explain(app.engine:Snapshot()[1]).reason, "dead")
+        if tickWhileDead then
+            state.clock.Advance(0.65)
+            app.engine:Tick()
+            H.Equal(#app.engine.pending, 0)
+            H.Equal(app.engine.counters.alerts, 0)
+        end
+        state.clock.Advance(0.1)
+        unit.dead = false
+        state:Fire("UNIT_FLAGS", "nameplate1")
+        H.Equal(app.engine.pending[1].at, tickWhileDead and state.clock.Now() or arrival)
+        state.clock.Advance(0.56)
+        app.engine:Tick()
+        H.Equal(app.engine.counters.alerts, tickWhileDead and 0 or 1)
+        state.clock.Advance(0.3)
+        app.engine:Tick()
+        H.Equal(app.engine.counters.alerts, 1)
+        H.Equal(app.engine.history[1].id, original.id)
+        H.Equal(app.engine.history[1].kind, "sighting")
+    end)
+end
+
 H.Test("unchanged exact measurements do not reschedule sightings when no range filter is in use", function()
     local state, app, see, move, RG, reads = pendingRangeFixture()
     local arrival = state.clock.Now()

@@ -290,7 +290,8 @@ local function ordinaryAlert(decision)
 end
 
 local function pendingDecision(engine, item, contact, now, scheduled)
-    if not contact or (item.event == "targeting" and (contact.targeting ~= true or contact.targetingNotified == true))
+    if not contact or (scheduled and Rules.ContactBlock(contact))
+        or (item.event == "targeting" and (contact.targeting ~= true or contact.targetingNotified == true))
         or (engine.pausedUntil and now < engine.pausedUntil) or engine:SnoozedUntil(contact) then return end
     local decision = scheduled or engine:Explain(contact, item.event, now)
     if not decision then return end
@@ -820,7 +821,8 @@ function E:Tick()
     for _, item in ipairs(self.pending) do
         local age = now - item.at
         local contact = self.contacts[item.id]
-        if age > MAX_PENDING_AGE or (refreshRange and not refreshPendingDecision(self, item, contact, now)) then
+        if age > MAX_PENDING_AGE or Rules.ContactBlock(contact)
+            or (refreshRange and not refreshPendingDecision(self, item, contact, now)) then
             if contact and item.event == "sighting" then contact.arrivalQueued = false end
         else
             if ordinaryAlert(item.decision) then
