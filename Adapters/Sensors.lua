@@ -76,10 +76,23 @@ function Sensors:Record(obs, behindCamera, event)
     self.plateRetries[token] = nil
     local state = self.active[token]
     local name = obs.nameComplete and obs.name or nil
-    if state and ((state.guid and obs.guid and state.guid ~= obs.guid)
-        or ((not state.guid or not obs.guid) and state.name and name and state.name ~= name)) then
-        self:Remove(token)
-        state = nil
+    local unverifiedName = state and state.unverifiedName
+    if state then
+        local guidChanged = state.guid and obs.guid and state.guid ~= obs.guid
+        local nameChanged = (not state.guid or not obs.guid) and state.name and name and state.name ~= name
+        -- Without plate lifecycle events, a token or pooled frame can silently change owners.
+        local lostOwner = not DIRECT[token] and self.nameplateEvents == false
+            and ((state.guid and not obs.guid) or (not state.guid and state.name and not name))
+        if lostOwner and state.guid then unverifiedName = state.name end
+        if guidChanged or nameChanged or lostOwner then
+            self:Remove(token)
+            state = nil
+        end
+    end
+    if unverifiedName and (obs.guid or (name and name ~= unverifiedName)) then unverifiedName = nil end
+    if unverifiedName and name == unverifiedName then
+        -- Keep the readable label without rejoining the unverified previous GUID.
+        name, obs.nameComplete = nil, false
     end
     if not state then
         self.generation = self.generation + 1
@@ -90,6 +103,7 @@ function Sensors:Record(obs, behindCamera, event)
     obs.generation = state.generation
     if behindCamera ~= nil then obs.behindCamera = behindCamera end
     state.guid, state.name = obs.guid or state.guid, name or state.name
+    state.unverifiedName = unverifiedName
     state.awaitingEligibility = obs.isPlayer == false or obs.hostile == false
         or (state.awaitingEligibility and (obs.isPlayer ~= true or obs.hostile ~= true))
     local contact = self:Call("Observe", obs)

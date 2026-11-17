@@ -4084,6 +4084,92 @@ local function badgeEvidenceFixture()
     return state, app, updateVisibility
 end
 
+for _, scenario in ipairs({ "pooled frame", "replacement frame", "healthy events" }) do
+    H.Test("unreadable nameplate ownership respects lifecycle evidence with " .. scenario, function()
+        local healthy = scenario == "healthy events"
+        local state, app
+        if healthy then
+            local _
+            state, _, app = setup()
+        else
+            state, app = eventRegistrationFixture("NAME_PLATE_UNIT_REMOVED", "false")
+        end
+        H.Equal(app:Status().capabilities.nameplateEvents, healthy)
+        local api, secret = state.api, H.Secret("new plate owner identity")
+        local readGuid, readName = api.UnitGUID, api.UnitName
+        local restricted = false
+        function api.UnitGUID(token)
+            if restricted and token == "nameplate1" then return secret end
+            return readGuid(token)
+        end
+        function api.UnitName(token)
+            if restricted and token == "nameplate1" then return secret, secret end
+            return readName(token)
+        end
+        api.UnitFullName = api.UnitName
+
+        local oldRogue = { guid = "Player-OldLifecycleOwner", name = "Old Rogue",
+            realm = "FixtureRealm", class = "ROGUE", hostile = true, isPlayer = true }
+        local oldKey = "guid:" .. oldRogue.guid
+        assert(app.db:SetList(oldKey, "watch", "Old personal note", { name = "Old Rogue-FixtureRealm", class = "ROGUE" }))
+        state:Unit("player", { guid = "Player-LifecycleSelf" })
+        state:Unit("nameplate1", oldRogue)
+        state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+        state:Unit("focus", oldRogue)
+        state:Fire("PLAYER_FOCUS_CHANGED")
+        local initial = assert(app.engine:Snapshot()[1])
+        local generation = app.sensors.active.nameplate1.generation
+        state:Advance(5)
+        local old = assert(app.engine:SelectedContact(initial.id, oldKey))
+        H.Equal(app.sensors.active.nameplate1.generation, generation)
+        H.True(old.sources.nameplate); H.True(old.sources.focus)
+        H.Equal(old.class, "ROGUE"); H.Equal(old.listKind, "watch")
+        H.Nil(app.ui.activeBanner)
+        local historyCount = #app.engine.history
+        local newHunter = { guid = "Player-NewLifecycleOwner", name = "New Hunter",
+            realm = "FixtureRealm", class = "HUNTER", hostile = true, isPlayer = true }
+        if scenario == "replacement frame" then
+            state.plates.nameplate1 = state.api.CreateFrame("Frame", nil, api.UIParent)
+            state.plates.nameplate1.unitToken = "nameplate1"
+        end
+        restricted = true
+        state:Unit("nameplate1", healthy and oldRogue or newHunter)
+        state:Unit("nameplate1target", state.units.player)
+        state:Advance(1.25)
+
+        local binding = assert(app.sensors.active.nameplate1)
+        local current = assert(app.engine:SelectedContact(binding.contactID))
+        old = assert(app.engine:SelectedContact(initial.id, oldKey))
+        H.True(old.sources.focus)
+        H.Equal(old.class, "ROGUE"); H.Equal(old.listKind, "watch")
+        H.Equal(app.db:GetList()[oldKey].note, "Old personal note")
+        H.True(current.targeting)
+        H.Equal(#app.engine.history, historyCount + 1)
+        local warning = app.engine.history[historyCount + 1]
+        H.Equal(warning.kind, "targeting")
+        H.Equal(warning.id, current.id)
+        local banner = assert(app.ui.activeBanner)
+        H.Equal(banner.kind, "targeting")
+        if healthy then
+            H.Equal(current.id, old.id)
+            H.Equal(binding.generation, generation)
+            H.True(old.sources.nameplate)
+            H.Equal(banner.name, old.name)
+        else
+            H.True(current.id ~= old.id)
+            H.True(binding.generation > generation)
+            H.Nil(old.sources.nameplate)
+            H.True(old.targeting ~= true)
+            H.Equal(current.class, "HUNTER")
+            H.Nil(current.identity); H.Nil(current.name); H.Nil(current.listKind)
+            H.Equal(banner.name, app.ui:T("unknownPlayer"))
+            H.Equal(banner.class, "HUNTER")
+            H.Equal(#app.db:GetJournal(), 1)
+            H.Equal(app.db:GetJournal()[1].identity, oldKey)
+        end
+    end)
+end
+
 for _, restricted in ipairs({ "all", "identity" }) do
     local title = restricted == "all" and "a badge hides when only a different alias has readable evidence"
         or "a badge with fresh class evidence drops markers for an unreadable owner"

@@ -190,6 +190,43 @@ H.Test("sensors retain ownership when equal GUIDs accompany a changed complete n
     H.Equal(#casts, 1)
 end)
 
+H.Test("fallback cannot rejoin an unreadable previous GUID through its old full name", function()
+    local sensors, units, _, _, casts, _, _, api, _, secret, engine = fixture(true)
+    local create = api.CreateFrame
+    api.CreateFrame = function()
+        local frame = create()
+        local register = frame.RegisterEvent
+        frame.RegisterEvent = function(self, event)
+            if event == "NAME_PLATE_UNIT_REMOVED" then return false end
+            return register(self, event)
+        end
+        return frame
+    end
+    units.nameplate1 = { name = "Named", realm = "Realm", guid = "Player-Original", class = "ROGUE" }
+    sensors:Start()
+    H.False(sensors.nameplateEvents)
+    sensors:OnEvent("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    local original = engine.bindings.nameplate1.id
+    units.nameplate1.guid, units.nameplate1.class = secret, "HUNTER"
+    sensors:Poll()
+    local anonymous = engine.bindings.nameplate1.id
+    H.True(anonymous ~= original)
+    H.Equal(engine.contacts[anonymous].name, "Named-Realm")
+    H.Nil(engine.contacts[anonymous].identity)
+    H.Nil(next(engine.contacts[original].tokens))
+    sensors:Poll()
+    H.Equal(engine.bindings.nameplate1.id, anonymous)
+    H.Nil(engine.contacts[anonymous].identity)
+    sensors:OnEvent("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "no-owner", 1856)
+    H.Nil(engine.contacts[anonymous].stealth)
+
+    units.nameplate1.guid = "Player-Replacement"
+    sensors:Poll()
+    H.Equal(engine.bindings.nameplate1.id, anonymous)
+    H.Equal(engine.contacts[anonymous].identity, "guid:Player-Replacement")
+    H.Equal(engine.contacts[original].identity, "guid:Player-Original")
+end)
+
 H.Test("a proven name discontinuity excludes a non-player replacement without inheriting the old GUID", function()
     local sensors, units, _, _, _, _, _, api, _, secret, engine = fixture(true)
     api.UnitIsPlayer = function(token) return units[token] and units[token].isPlayer ~= false end
