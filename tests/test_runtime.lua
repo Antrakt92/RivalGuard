@@ -6092,6 +6092,84 @@ H.Test("a normal long return still alerts and records a second encounter", funct
     H.Equal(app.db:GetJournal()[1].encounters, 2)
 end)
 
+local function prunedRivalFixture()
+    local state, app, profile = ruleSoundFixture()
+    profile.alerts.returnAfter = 180
+    profile.alerts.sounds.sighting = "ping"
+    profile.alerts.sounds.returning = "ready"
+    H.Equal(profile.retention.contactSeconds, 120)
+    app:OnSettingsChanged()
+    seeSoundRuleRival(state, 1)
+    state:Advance(1.25)
+    H.Equal(app.engine.history[1].kind, "sighting")
+    H.Equal(state.sounds[1].id, RULE_SOUND_KITS.MAP_PING)
+    local token, absentAt = "nameplate1", math.ceil(state.clock.Now())
+    local unit = assert(state.units[token])
+    state.clock.Advance(absentAt - state.clock.Now())
+    state.units[token] = nil
+    state:Fire("NAME_PLATE_UNIT_REMOVED", token)
+    local recent = assert(app.engine:Snapshot()[1])
+    H.False(recent.visible)
+    H.Equal(recent.lastSeen, absentAt)
+    state.clock.Advance(121)
+    state:Advance(0.5)
+    H.Equal(#app.engine:Snapshot(), 0)
+    local journal = app.db:GetJournal()
+    H.Equal(#journal, 1)
+    H.Equal(journal[1].encounters, 1)
+    return state, app, function(absence)
+        state.clock.Advance(absentAt + absence - state.clock.Now())
+        state:Unit(token, unit)
+        state:Fire("NAME_PLATE_UNIT_ADDED", token)
+        state:Advance(1.25)
+        local current = assert(app.engine:Snapshot()[1])
+        H.True(current.visible)
+        H.Equal(current.identity, recent.identity)
+    end
+end
+
+for _, absence in ipairs({ 130, 180, 181, 299, 300 }) do
+    H.Test("a pruned rival reappearing after " .. absence .. "s respects the encounter threshold and horizon", function()
+        local state, app, reappear = prunedRivalFixture()
+        reappear(absence)
+        if absence < 180 then
+            H.Equal(#state.sounds, 1)
+            H.Equal(#app.engine.history, 1)
+        else
+            local nextKind = absence < 300 and "returning" or "sighting"
+            H.Equal(#state.sounds, 2)
+            H.Equal(#app.engine.history, 2)
+            H.Equal(app.engine.history[2].kind, nextKind)
+            H.Equal(state.sounds[2].id, nextKind == "returning" and RULE_SOUND_KITS.READY_CHECK or RULE_SOUND_KITS.MAP_PING)
+        end
+        local journal = app.db:GetJournal()
+        H.Equal(#journal, 1)
+        H.Equal(journal[1].encounters, absence < 180 and 1 or 2)
+        state:Advance(2)
+        H.Equal(#state.sounds, absence < 180 and 1 or 2)
+    end)
+end
+
+for _, reset in ipairs({ "explicit clear", "world load" }) do
+    H.Test("a pruned rival starts a fresh encounter after " .. reset, function()
+        local state, app, reappear = prunedRivalFixture()
+        if reset == "explicit clear" then
+            state.api.SlashCmdList.RIVALGUARD("clear")
+        else
+            state:Fire("PLAYER_LEAVING_WORLD")
+            state:Fire("PLAYER_ENTERING_WORLD")
+        end
+        H.Equal(#app.engine.history, 0)
+        H.Equal(app.db:GetJournal()[1].encounters, 1)
+        reappear(130)
+        H.Equal(#app.engine.history, 1)
+        H.Equal(app.engine.history[1].kind, "sighting")
+        H.Equal(#state.sounds, 2)
+        H.Equal(state.sounds[2].id, RULE_SOUND_KITS.MAP_PING)
+        H.Equal(app.db:GetJournal()[1].encounters, 2)
+    end)
+end
+
 for _, newEncounter in ipairs({ false, true }) do
     H.Test("a previously queued Vanish " .. (newEncounter and "expires at the exact return boundary" or "survives a brief departure"), function()
         local state, _, app = setup()

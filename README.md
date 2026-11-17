@@ -83,6 +83,11 @@ Range estimates depend on what the client can measure for observed units and
 may be a bracket or unavailable.
 You can control whether uncertain distances qualify for alerts.
 
+**New encounter after** controls how long a recently seen player must stay
+out of view before returning counts as a new encounter. The Nearby row can
+expire sooner. RivalGuard remembers recent encounters with a verified player
+ID for this purpose during the current session.
+
 Personal lists and notes remain local. The current profile's positive retention
 period applies to saved encounters. Zero stops new records and keeps the
 previous expiry period for existing ones. Use **Clear recent history** to

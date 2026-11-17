@@ -390,19 +390,22 @@ function E:Queue(contact, event)
     return true
 end
 
-function E:RememberEvictedEncounter(contact, now)
-    if not contact.guid or now - contact.lastSeen >= self.profile.alerts.returnAfter then return nil end
+function E:RememberEvictedEncounter(contact, now, expiredRow)
+    local age = now - contact.lastSeen
+    local returnAfter = self.profile.alerts.returnAfter
+    local rememberFor = expiredRow and (self.profile.retention.contactSeconds + returnAfter) or returnAfter
+    if not contact.guid or age >= rememberFor then return nil end
     if not (contact.encounterRecorded or contact.arrivalNotified or contact.hasReturned or contact.lastStealthCast
         or contact.targetingNotified ~= nil or contact.stealth) then return nil end
-    -- Capacity eviction cannot end an encounter on its own. Keep bounded
-    -- session evidence keyed by GUID and leave live state to fresh unit reads.
+    -- Row cleanup cannot end an encounter on its own. Keep bounded session
+    -- evidence keyed by GUID and leave live state to fresh unit reads.
     local cursor = self.evictionCursor % EVICTED_ENCOUNTER_LIMIT + 1
     local overwritten = self.evictionSlots[cursor]
     if overwritten and self.evictedEncounters[overwritten.guid] == overwritten then
         self.evictedEncounters[overwritten.guid] = nil
     end
     local record = {
-        guid = contact.guid, slot = cursor, lastSeen = contact.lastSeen,
+        guid = contact.guid, slot = cursor, lastSeen = contact.lastSeen, expiredRow = expiredRow,
         encounterRecorded = contact.encounterRecorded, arrivalNotified = contact.arrivalNotified, hasReturned = contact.hasReturned,
         notifiedClass = contact.notifiedClass, lastStealthCast = contact.lastStealthCast,
         targetingNotified = contact.targetingNotified, stealth = contact.stealth,
@@ -417,16 +420,25 @@ function E:RestoreEvictedEncounter(contact, now)
     local record = contact.guid and self.evictedEncounters[contact.guid]
     if not record then return nil end
     self.evictedEncounters[contact.guid], self.evictionSlots[record.slot] = nil, nil
-    if now - record.lastSeen >= self.profile.alerts.returnAfter then return nil end
-    contact.hasReturned = contact.hasReturned or record.hasReturned
-    contact.encounterRecorded = contact.encounterRecorded or record.encounterRecorded
-    contact.arrivalNotified = contact.arrivalNotified or record.arrivalNotified
-    contact.notifiedClass = contact.notifiedClass or record.notifiedClass
-    contact.lastStealthCast = contact.lastStealthCast or record.lastStealthCast
-    if contact.targetingNotified ~= true and record.targetingNotified ~= nil then
-        contact.targetingNotified = record.targetingNotified
+    local age = now - record.lastSeen
+    local returnAfter = self.profile.alerts.returnAfter
+    local returning = age >= returnAfter
+    if returning then
+        if not record.expiredRow or age >= self.profile.retention.contactSeconds + returnAfter then return nil end
+        -- A live anonymous alias may have already announced this arrival.
+        if contact.arrivalNotified or contact.encounterRecorded or contact.hasReturned then return nil end
+        contact.hasReturned = true
+    else
+        contact.hasReturned = contact.hasReturned or record.hasReturned
+        contact.encounterRecorded = contact.encounterRecorded or record.encounterRecorded
+        contact.arrivalNotified = contact.arrivalNotified or record.arrivalNotified
+        contact.notifiedClass = contact.notifiedClass or record.notifiedClass
+        contact.lastStealthCast = contact.lastStealthCast or record.lastStealthCast
+        if contact.targetingNotified ~= true and record.targetingNotified ~= nil then
+            contact.targetingNotified = record.targetingNotified
+        end
     end
-    if (record.arrivalNotified or record.hasReturned) and contact.arrivalQueued then
+    if (returning or record.arrivalNotified or record.hasReturned) and contact.arrivalQueued then
         for index = #self.pending, 1, -1 do
             local item = self.pending[index]
             if item.id == contact.id and item.event == "sighting" then table.remove(self.pending, index) end
@@ -439,13 +451,14 @@ function E:RestoreEvictedEncounter(contact, now)
             self.cooldowns[key] = math.max(at, self.cooldowns[key] or -math.huge)
         end
     end
+    if returning then return nil, true end
     return record
 end
 
-function E:Drop(id, evictionAt)
+function E:Drop(id, rememberAt, expiredRow)
     local contact = self.contacts[id]
     if not contact then return end
-    local record = evictionAt and self:RememberEvictedEncounter(contact, evictionAt)
+    local record = rememberAt and self:RememberEvictedEncounter(contact, rememberAt, expiredRow)
     for token in pairs(contact.tokens) do self.bindings[token] = nil end
     self:UnindexContact(contact)
     self.contacts[id] = nil
@@ -672,7 +685,9 @@ function E:Observe(raw)
     if obs.name and (obs.nameComplete or not contact.name) then contact.name, contact.realm, contact.nameIdentity = obs.name, obs.realm, named end
     if not contact.identity then contact.identity = identity end
     if oldGuid ~= contact.guid or oldNameIdentity ~= contact.nameIdentity then self:IndexContact(contact, oldGuid, oldNameIdentity) end
-    local previous = oldGuid ~= contact.guid and self:RestoreEvictedEncounter(contact, now)
+    local previous, rememberedReturn
+    if oldGuid ~= contact.guid then previous, rememberedReturn = self:RestoreEvictedEncounter(contact, now) end
+    returning = returning or rememberedReturn
     local oldClass = contact.class
     if obs.class then contact.class = obs.class end
     if obs.level then contact.level = obs.level end
@@ -930,7 +945,7 @@ function E:Tick()
     for id, contact in pairs(self.contacts) do
         if next(contact.tokens) == nil and now - contact.lastSeen > self.profile.retention.contactSeconds then expired[#expired + 1] = id end
     end
-    for _, id in ipairs(expired) do self:Drop(id) end
+    for _, id in ipairs(expired) do self:Drop(id, now, true) end
     for key, at in pairs(self.cooldowns) do if now - at > 1800 then self.cooldowns[key] = nil end end
     for identity, at in pairs(self.snoozes) do if at <= now then self.snoozes[identity] = nil end end
     if resumed or #expired > 0 then self:Changed() end

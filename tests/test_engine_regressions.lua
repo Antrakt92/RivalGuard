@@ -738,3 +738,28 @@ H.Test("capacity continuity preserves the repeat delay for a recent cast", funct
     for _, alert in ipairs(alerts) do if alert.kind == "stealth" then casts = casts + 1 end end
     H.Equal(casts, 1)
 end)
+
+for _, alreadyAnnounced in ipairs({ false, true }) do
+    local suffix = alreadyAnnounced and "after notification" or "before notification"
+    H.Test("an expired row handles late GUID discovery " .. suffix, function()
+        local engine, observe, clock, alerts = fixture()
+        engine.profile.alerts.returnAfter = 180
+        local known = { guid = "Player-ReturningAlias", class = "ROGUE" }
+        observe("target", known)
+        clock.Advance(1)
+        engine:Tick()
+        H.Equal(alerts[1].kind, "sighting")
+        engine:Remove("target")
+        clock.Advance(180)
+        engine:Tick()
+        H.Equal(engine.contactCount, 0)
+
+        observe("nameplate1", { class = "ROGUE" })
+        if alreadyAnnounced then clock.Advance(1); engine:Tick() end
+        observe("nameplate1", known)
+        clock.Advance(1)
+        engine:Tick()
+        H.Equal(#alerts, 2)
+        H.Equal(alerts[2].kind, alreadyAnnounced and "sighting" or "returning")
+    end)
+end
