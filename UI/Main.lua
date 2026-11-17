@@ -15,7 +15,6 @@ local SOUND_STATUS_KEYS = { not_requested = "lastSoundNotRequested", sound_gap =
     playback_requested = "lastSoundRequested", playback_unconfirmed = "lastSoundUnconfirmed" }
 local SOUND_CHANNEL_KEYS = { Master = "master", SFX = "sfx", Music = "music", Ambience = "ambience", Dialog = "dialog" }
 local WINDOW_MARGIN = 12
-local NEARBY_DEFAULT_X, NEARBY_DEFAULT_Y = -70, 20
 local nativeSettings = {}
 
 UI.layout = { width = 348, header = 88, footer = 58, rowPadding = 20, settingsWidth = 800, settingsHeight = 610 }
@@ -450,35 +449,57 @@ function UI.New(app)
     main:EnableMouseWheel(true)
     local mainBackground = fill(main); local mainBorder = outline(main)
     local nearbyMoveProfile, nearbyDefaultX, nearbyDefaultY
+    local function savedNearby(profile)
+        local saved = profile.positions.nearby
+        -- Old builds sometimes saved their automatic right-side anchor.
+        if saved and saved.point == "RIGHT" and (saved.relativePoint or saved.relative) == "RIGHT"
+            and saved.x == -70 and saved.y == 20 then return nil end
+        return saved
+    end
     local function restoreNearby()
         if nearbyMoveProfile then main:StopMovingOrSizing(); nearbyMoveProfile = nil end
-        restorePosition(main, "nearby", "RIGHT", NEARBY_DEFAULT_X, NEARBY_DEFAULT_Y)
-        nearbyDefaultX, nearbyDefaultY = NEARBY_DEFAULT_X, NEARBY_DEFAULT_Y
+        if savedNearby(self:Profile()) then restorePosition(main, "nearby", "BOTTOMLEFT", 0, 0) end
+        nearbyDefaultX, nearbyDefaultY = nil, nil
     end
 
     local function fitNearby(height, profile)
         if nearbyMoveProfile then return end
         local width = UI.layout.width
         local scale, screenWidth, screenHeight = self:FitWindow(main, width, height, profile.display.scale)
-        local saved = profile.positions.nearby
-        -- Older builds saved the stock anchor on logout. Fit it like a default.
-        if saved and not (saved.point == "RIGHT" and (saved.relativePoint or saved.relative) == "RIGHT"
-            and saved.x == NEARBY_DEFAULT_X and saved.y == NEARBY_DEFAULT_Y) then return end
-        local x = math.max(NEARBY_DEFAULT_X, -math.max(0, (screenWidth - WINDOW_MARGIN) / scale - width))
-        local y = fitCenterOffset(NEARBY_DEFAULT_Y, screenHeight, height, scale)
+        if savedNearby(profile) then return end
+        local x = math.min(screenWidth * 0.08, screenWidth - WINDOW_MARGIN - width * scale) / scale
+        local y = math.min(screenHeight * 0.43, screenHeight - WINDOW_MARGIN - height * scale) / scale
         if x == nearbyDefaultX and y == nearbyDefaultY then return end
         main:ClearAllPoints()
-        main:SetPoint("RIGHT", UIParent, "RIGHT", x, y)
+        main:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", x, y)
+        main:SetUserPlaced(true)
         nearbyDefaultX, nearbyDefaultY = x, y
     end
     restoreNearby()
 
     local header = CreateFrame("Button", nil, main)
     header:SetPoint("TOPLEFT", 0, 0); header:SetPoint("TOPRIGHT", -34, 0); header:SetHeight(28)
+    header:EnableMouse(true)
     header:RegisterForDrag("LeftButton")
+    header:SetScript("OnEnter", function()
+        local profile = self:Profile()
+        tooltip(header, self:T("addon"), self:T(profile.display.locked and self.nearbyMoveMode ~= profile and "nearbyMoveHelp" or "nearbyDragHelp"))
+    end)
+    header:SetScript("OnLeave", function() hideOwnedTooltip(header) end)
+    main:SetScript("OnHide", function() hideOwnedTooltip(header) end)
+    function self:ToggleNearbyMove()
+        local profile = self:Profile()
+        if self.nearbyMoveMode == profile then
+            self.nearbyMoveMode = nil
+            restoreNearby()
+        else
+            self.nearbyMoveMode = profile
+        end
+        self:Refresh()
+    end
     header:SetScript("OnDragStart", function()
         local profile = self:Profile()
-        if profile.display.locked then return end
+        if profile.display.locked and self.nearbyMoveMode ~= profile then return end
         nearbyMoveProfile = profile
         main:StartMoving()
     end)
@@ -488,6 +509,8 @@ function UI.New(app)
         local moveProfile = nearbyMoveProfile
         nearbyMoveProfile = nil
         if moveProfile == self:Profile() and not savePosition(main, "nearby") then restoreNearby() end
+        if self.nearbyMoveMode == moveProfile then self.nearbyMoveMode = nil end
+        self:Refresh()
     end)
     local title = label(header, "addon", 15, C.accent)
     title:SetPoint("LEFT", 12, 0); title:SetJustifyV("MIDDLE")
@@ -814,6 +837,7 @@ function UI.New(app)
     local y = section(overview, "overview", 0, "statusHelp")
     y = check(overview, "enabled", "enabled", y, "enabledTip")
     y = check(overview, "showList", "display.showList", y, "showListTip")
+    y = check(overview, "showEmptyNearby", "display.showEmpty", y)
     y = check(overview, "showUnknown", "display.showUnknown", y, "showUnknownTip")
     y = classSelector(overview, "display", y - 14)
     y = section(overview, "contexts", y - 6)
@@ -903,6 +927,11 @@ function UI.New(app)
         self:Refresh()
     end)
     resetPos:SetPoint("TOPLEFT", 0, y - 45)
+    local moveNearby = localButton(appearance, "moveNearby", 240, function()
+        settings:Hide()
+        self:ToggleNearbyMove()
+    end)
+    moveNearby:SetPoint("LEFT", resetPos, "RIGHT", 12, 0)
     appearance.height = -y + 100
 
     local profiles = CreateFrame("Frame", nil, content); self.pages.profiles = profiles; profiles:SetAllPoints()
@@ -1317,6 +1346,7 @@ function UI.New(app)
         end
         self:UpdateClasses()
         if self.lastProfile ~= profile then
+            self.nearbyMoveMode = nil
             restoreNearby()
             cancelBannerMove(); restoreBanner()
             self.lastProfile = profile
@@ -1331,15 +1361,17 @@ function UI.New(app)
             self.previewContacts, self.previewUntil = nil, nil
             self:ClosePreviewDetails()
         end
-        local nearbyShown = profile.display.showList or preview == true
+        local moving = self.nearbyMoveMode == profile or nearbyMoveProfile == profile
         local detailsShown = self.detailsFrame and self.detailsFrame:IsShown() and self.selected
         local liveDetailsShown = detailsShown and not self.selected.preview and not self.selected.recentDraft
         local maxRows = math.floor(RG.Util.Clamp(profile.display.maxRows, 3, 20, 8))
         local livePage, nearbyCount, nearbyVisible, nearbyIds
-        local paged = nearbyShown and not preview
+        local paged = (profile.display.showList or moving) and not preview
         if paged then
             livePage, nearbyCount, nearbyVisible, self.offset, nearbyIds = app.engine:NearbyPage(self.offset, maxRows, profile.display.streamer)
         end
+        local nearbyShown = preview == true or moving
+            or (profile.display.showList and (profile.display.showEmpty or (nearbyVisible or 0) > 0))
         local untilTime = M.Number(app.engine.pausedUntil)
         local paused = untilTime ~= nil and untilTime > now
         local supportShown = settings:IsShown() and self.currentPage == "support"
@@ -1356,13 +1388,16 @@ function UI.New(app)
         if type(appStatus) ~= "table" then appStatus = { detail = appStatus } end
         local detection = self:DetectionKey(appStatus)
         local alertBlock = (nearbyShown and not preview or supportShown) and self:AlertBlock()
+        paintText(self.pauseButton.label, self:T(paused and "resume" or "pause"))
+        paintText(self.muteButton.label, self:T(profile.alerts.sound and "mute" or "unmute"))
         if nearbyShown then
             local snapshot = preview and self.previewContacts or livePage
             local rows = M.Rows(snapshot, profile, now, preview and self.previewAliases or self.aliases, nearbyIds, paged and self.offset or nil)
             local rowCount = nearbyCount or #rows
             self.renderedCount = rowCount
             local rowHeight = profile.display.textSize + UI.layout.rowPadding
-            local mainHeight = UI.layout.header + math.max(3, math.min(maxRows, rowCount)) * rowHeight + UI.layout.footer
+            local shownRows = rowCount > 0 and math.min(maxRows, rowCount) or 3
+            local mainHeight = UI.layout.header + shownRows * rowHeight + UI.layout.footer
             if self.nearbyHeight ~= mainHeight then
                 main:SetHeight(mainHeight)
                 self.nearbyHeight = mainHeight
@@ -1378,15 +1413,14 @@ function UI.New(app)
             local status = self:T(preview and "demoLabel" or detection) .. " · " .. self:F("inViewCount", visibleCount)
             if not preview and detection ~= "disabled" and alertBlock then status = status .. " · " .. self:T("alertsQuiet") end
             paintText(statusText, status)
-            paintText(self.pauseButton.label, self:T(paused and "resume" or "pause"))
-            paintText(self.muteButton.label, self:T(profile.alerts.sound and "mute" or "unmute"))
             paintShown(empty, rowCount == 0); paintShown(emptyHelp, rowCount == 0)
             local rowOffset = paged and 0 or self.offset
             for i, row in ipairs(self.rows) do
                 local data = i <= maxRows and rows[rowOffset + i] or nil
                 paintNearbyRow(row, data, i, profile)
             end
-            paintText(more, rowCount > maxRows and self:F("moreContacts", rowCount - maxRows) or self:T("noTarget"))
+            paintText(more, self.nearbyMoveMode == profile and self:T("nearbyDragHelp")
+                or rowCount > maxRows and self:F("moreContacts", rowCount - maxRows) or self:T("noTarget"))
             if rowCount == 0 then
                 local titleKey, helpKey = "noEnemies", "noEnemiesHelp"
                 if not profile.enabled and not preview then titleKey, helpKey = "noDisabled", "noDisabledHelp"

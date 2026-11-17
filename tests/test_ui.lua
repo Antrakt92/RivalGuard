@@ -81,7 +81,7 @@ end
 
 H.Test("actual UI initializes through strict frame methods and accessible controls", function()
     local state, _, app, ui = setup()
-    H.True(ui.frame:IsShown()); H.False(ui.settings:IsShown())
+    H.False(ui.frame:IsShown()); H.False(ui.settings:IsShown())
     H.Equal(ui.settings.strata, "DIALOG")
     H.True(#ui.controls > 20)
     ui:OpenSettings("alerts")
@@ -290,19 +290,16 @@ H.Test("automatic Nearby anchor keeps tall rows on a compact scaled viewport and
 
     local function checkBounds(visibleRows)
         local point, relative, anchor, x, y = frame:GetPoint(1)
-        H.Equal(point, "RIGHT"); H.Equal(relative, parent); H.Equal(anchor, "RIGHT")
+        H.Equal(point, "BOTTOMLEFT"); H.Equal(relative, parent); H.Equal(anchor, "BOTTOMLEFT")
         H.True(frame.clamped)
         H.Nil(frame:GetPoint(2))
         H.True(ui.rows[visibleRows]:IsShown())
         if ui.rows[visibleRows + 1] then H.False(ui.rows[visibleRows + 1]:IsShown()) end
         local scale = frame:GetEffectiveScale() / parent:GetEffectiveScale()
-        local right = parent:GetWidth() + x * scale
-        local center = parent:GetHeight() / 2 + y * scale
-        local halfHeight = frame:GetHeight() * scale / 2
-        H.True(right <= parent:GetWidth(), "Nearby right edge exceeds the viewport")
-        H.True(right - frame:GetWidth() * scale >= 0, "Nearby left edge exceeds the viewport")
-        H.True(center + halfHeight <= parent:GetHeight(), "Nearby top edge exceeds the viewport")
-        H.True(center - halfHeight >= 0, "Nearby bottom edge exceeds the viewport")
+        H.True(x * scale + frame:GetWidth() * scale <= parent:GetWidth(), "Nearby right edge exceeds the viewport")
+        H.True(x >= 0, "Nearby left edge exceeds the viewport")
+        H.True(y * scale + frame:GetHeight() * scale <= parent:GetHeight(), "Nearby top edge exceeds the viewport")
+        H.True(y >= 0, "Nearby bottom edge exceeds the viewport")
         return x, y
     end
 
@@ -322,7 +319,9 @@ H.Test("automatic Nearby anchor keeps tall rows on a compact scaled viewport and
         parent:SetSize(2560 / uiScale, 1920 / uiScale)
         ui:Refresh()
         local wideX, wideY = checkBounds(rowCount)
-        H.Equal(wideX, -70); H.Equal(wideY, 20)
+        H.True(wideX > 0)
+        H.Equal(wideY, math.min(parent:GetHeight() * 0.43,
+            parent:GetHeight() - 12 - frame:GetHeight() * frame:GetScale()) / frame:GetScale())
 
         parent:SetSize(physicalWidth / uiScale, physicalHeight / uiScale)
         ui:Refresh()
@@ -353,13 +352,14 @@ end)
 H.Test("legacy stock Nearby position adapts on load while logout preserves the stored tuple", function()
     local _, _, original = setup()
     original.db:GetProfile().positions.nearby = { point = "RIGHT", relativePoint = "RIGHT", x = -70, y = 20 }
+    original.db:GetProfile().display.showEmpty = true
     original.db:GetProfile().display.scale = 1.5
     local state, _, app, ui = setup(original.db.root, function(mock)
         mock.api.UIParent:SetSize(640 / 1.35, 480 / 1.35)
         mock.api.UIParent:SetScale(1.35)
     end)
-    local _, _, _, x = ui.frame:GetPoint(1)
-    H.True(x > -70, "legacy stock offset still clips the compact horizontal placement")
+    local point, _, relative = ui.frame:GetPoint(1)
+    H.Equal(point, "BOTTOMLEFT"); H.Equal(relative, "BOTTOMLEFT")
     state:Fire("PLAYER_LOGOUT")
     local saved = app.db:GetProfile().positions.nearby
     H.Equal(saved.point, "RIGHT"); H.Equal(saved.relativePoint, "RIGHT")
@@ -644,6 +644,7 @@ end
 
 H.Test("UI teardown detaches ticker while hidden main window does not stop refreshes", function()
     local state, _, app, ui = setup()
+    app.db:GetProfile().display.showEmpty = true
     app.db:GetProfile().display.showList = false
     ui:Refresh(); H.False(ui.frame:IsShown())
     app.db:GetProfile().display.showList = true
@@ -1250,6 +1251,8 @@ end)
 
 H.Test("minimap launcher toggles nearby from left click and opens settings from right click", function()
     local state, _, app, ui = setup(nil, minimap)
+    app.db:GetProfile().display.showEmpty = true
+    ui:Refresh()
     local launcher = assert(ui.launcher)
     H.Equal(launcher.frame:GetParent(), state.api.Minimap)
     H.True(launcher.frame:IsShown()); H.True(ui.frame:IsShown())

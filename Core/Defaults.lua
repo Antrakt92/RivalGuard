@@ -42,7 +42,7 @@ D.profile = {
     enabled = true,
     preset = "balanced",
     locale = "auto",
-    display = { classes = {}, showUnknown = true, maxRows = 8, scale = 1, textSize = 13, locked = true, showList = true, minimap = true, minimapAngle = 135, showBadges = true, badgeSize = 24, badgeOffset = 6, badgeTarget = true, badgeFocus = true, highlightTargeting = false, highContrast = false, reducedMotion = false, streamer = false },
+    display = { classes = {}, showUnknown = true, maxRows = 8, scale = 1, textSize = 13, locked = true, showList = true, showEmpty = false, minimap = true, minimapAngle = 135, showBadges = true, badgeSize = 24, badgeOffset = 6, badgeTarget = true, badgeFocus = true, highlightTargeting = false, highContrast = false, reducedMotion = false, streamer = false },
     alerts = { enabled = true, sound = true, banner = true, channel = "Master", sounds = { sighting = "ping", returning = "ping", watch = "warning", targeting = "ready", stealth = "warning", wave = "ready" }, classes = {}, unknownClass = true, cooldown = 30, returnAfter = 45, soundGap = 1.5, waveWindow = 0.8, waveThreshold = 3, stealth = true, targeting = true, watchedOnly = false, muteOrdinary = false },
     context = { world = true, battleground = true, arena = false, instance = false, sanctuary = false, resting = false, flight = false },
     range = { enabled = false, yards = 40, policy = "possible", unknown = true },

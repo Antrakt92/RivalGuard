@@ -81,8 +81,11 @@ see how your current profile would handle that new sighting in the open world.
   `/rg diagnostics` opens the report with its text selected. Player identities,
   rule names and notes stay private. You can also replay the first-run guide.
 
-Click the minimap button to show or hide Nearby. Right-click it to open
-settings, or drag it around the minimap to move it.
+Nearby opens on the left when a tracked opponent is in view. Use `/rg move`
+or **Appearance → Move Nearby**, then drag the RivalGuard title to place it.
+**Overview → Keep Nearby open without opponents** leaves it visible between encounters.
+Click the minimap button to toggle Nearby, right-click it to open settings,
+or drag it around the minimap to move the button.
 Open **Options → Keybindings → RivalGuard** to assign shortcuts for Nearby,
 pausing or resuming alerts, muting sound, and highlighting the opponent in the
 current alert. The highlight works with Nearby closed when a live individual

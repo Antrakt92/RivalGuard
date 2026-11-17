@@ -274,6 +274,8 @@ for _, fixture in ipairs({
         H.Equal(state.api.BINDING_NAME_RIVALGUARD_TOGGLE_NEARBY, fixture[2])
         H.Equal(state.api.BINDING_NAME_RIVALGUARD_TOGGLE_PAUSE, fixture[3])
         H.Equal(state.api.BINDING_NAME_RIVALGUARD_TOGGLE_MUTE, fixture[4])
+        app.db:GetProfile().display.showEmpty = true
+        app:ProfileChanged()
 
         state.combat = true
         state:Fire("PLAYER_REGEN_DISABLED")
@@ -2934,6 +2936,8 @@ H.Test("Nearby right-click opens the profile chooser and existing Settings and m
         mock.api.CreateFrame("Frame", "Minimap", mock.api.UIParent):SetSize(160, 160)
     end)
     local ui = app.ui
+    app.db:GetProfile().display.showEmpty = true
+    app:ProfileChanged()
     local settingsButton
     for _, child in ipairs(ui.frame.children) do
         if child.label and child.label:GetText() == "…" then settingsButton = child; break end
@@ -2973,6 +2977,7 @@ H.Test("slash profile selects the exact Unicode name, rechecks queued alerts, an
     local hunter = assert(db:CreateProfile(name))
     hunter.alerts.classes = { HUNTER = true }
     seeSoundRuleRival(state, 1, "ROGUE")
+    ui:Refresh()
     local slash = state.api.SlashCmdList.RIVALGUARD
     slash("profile боевой профиль")
     H.Equal(db:GetActiveProfileName(), "Default")
@@ -3657,6 +3662,48 @@ H.Test("explicitly activating an imported profile updates detection and the prof
     H.False(ui.profilePicker:IsShown())
     H.Equal(db:GetProfile(), original); H.Equal(app.engine.profile, original)
     H.True(app.sensors.running)
+end)
+
+H.Test("Nearby appears above the chat area only for visible rivals and can be placed while empty", function()
+    local state, _, app = setup()
+    local ui, profile = app.ui, app.db:GetProfile()
+    H.False(ui.frame:IsShown())
+    H.True(profile.display.locked)
+    seeSoundRuleRival(state, 1)
+    ui:Refresh()
+    H.True(ui.frame:IsShown())
+    H.Equal(ui.frame:GetHeight(), 179)
+    local point, parent, relative, x, y = ui.frame:GetPoint(1)
+    H.Equal(point, "BOTTOMLEFT"); H.Equal(relative, "BOTTOMLEFT")
+    H.Equal(parent, state.api.UIParent)
+    H.Equal(x, parent:GetWidth() * 0.08)
+    H.Equal(y, parent:GetHeight() * 0.43)
+    state.units.nameplate1, state.plates.nameplate1 = nil, nil
+    state:Fire("NAME_PLATE_UNIT_REMOVED", "nameplate1")
+    ui:Refresh()
+    H.False(ui.frame:IsShown())
+    H.Equal(#app.engine:Snapshot(), 1)
+
+    local slash = state.api.SlashCmdList.RIVALGUARD
+    slash("move")
+    H.True(ui.frame:IsShown())
+    local header
+    for _, child in ipairs(ui.frame.children) do
+        if child.scripts.OnDragStart then header = child; break end
+    end
+    header.scripts.OnDragStart(header)
+    H.True(ui.frame.moving)
+    ui.frame:ClearAllPoints()
+    ui.frame:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", 75, 460)
+    header.scripts.OnDragStop(header)
+    H.Equal(profile.positions.nearby.x, 75)
+    H.Equal(profile.positions.nearby.y, 460)
+    H.True(profile.display.locked)
+    H.False(ui.frame:IsShown())
+    seeSoundRuleRival(state, 2)
+    ui:Refresh()
+    local _, _, _, savedX, savedY = ui.frame:GetPoint(1)
+    H.Equal(savedX, 75); H.Equal(savedY, 460)
 end)
 
 H.Test("pause control resumes immediately and expires in an otherwise idle world", function()
