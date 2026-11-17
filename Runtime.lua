@@ -233,6 +233,16 @@ function App:HighlightContact(selection, automatic, fromAlert)
     return false, failure
 end
 
+function App:NearbyTarget(selection)
+    if not selection or selection.preview or not selection.visible then return end
+    local contact = self.engine.contacts[selection.id]
+    if not contact or not contact.guid or selection.identity ~= "guid:" .. contact.guid then return end
+    for _, token in ipairs(RG.Util.SortedKeys(contact.tokens)) do
+        local frame = self:HighlightFrame(contact.id, token)
+        if frame then return token, frame, contact.guid end
+    end
+end
+
 function App:HighlightCurrentAlert()
     local now = self.engine:Now()
     local profile = self.db:GetProfile()

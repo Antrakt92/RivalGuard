@@ -25,5 +25,6 @@ UI/Model.lua
 UI/Launcher.lua
 UI/Dialogs.lua
 UI/Badges.lua
+UI/NearbyTarget.lua
 UI/Main.lua
 Runtime.lua

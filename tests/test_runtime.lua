@@ -3816,6 +3816,54 @@ H.Test("Nearby edits a note inline without opening Details or changing watch mem
     H.False(row.noteButton:IsVisible())
 end)
 
+H.Test("Nearby click aims at a verified live player and marks only a matching target", function()
+    local driver, marks = nil, 0
+    local state, _, app = setup(nil, function(mock)
+        mock.api.GetBuildInfo = function() return "1.60.1", "", "", 16001 end
+        mock.api.RegisterStateDriver = function(_, key, condition)
+            driver = key .. " " .. condition
+        end
+        mock.api.GetRaidTargetIndex = function() return marks > 0 and 8 or nil end
+        mock.api.SetRaidTarget = function(unit, marker)
+            H.Equal(unit, "target"); H.Equal(marker, 8)
+            marks = marks + 1
+        end
+    end)
+    local ui, target = app.ui, app.ui.nearbyTarget
+    state:Unit("nameplate1", { guid = "Player-Click1", name = "Matifox", realm = "Forever", hostile = true })
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    local row = ui.rows[1]
+    row.left, row.top = 80, 280
+    state.plates.nameplate1.centerX, state.plates.nameplate1.centerY = 500, 460
+    target.pointer.centerX, target.pointer.centerY = 160, 400
+    ui:Refresh()
+    local button = assert(target.buttons[1])
+    H.Equal(driver, "visibility [combat] hide; show")
+    H.Equal(button:GetAttribute("macrotext"), nil)
+    button.scripts.PreClick(button, "LeftButton")
+    H.Equal(button:GetAttribute("macrotext"), "/targetexact Matifox-Forever")
+    button.scripts.PostClick(button, "LeftButton", false)
+    H.True(target.pointer:IsShown())
+    H.Equal(marks, 0)
+    state:Unit("target", state.units.nameplate1)
+    button.scripts.PreClick(button, "LeftButton")
+    button.scripts.PostClick(button, "LeftButton", false)
+    H.Equal(marks, 1)
+    button.scripts.PreClick(button, "LeftButton")
+    button.scripts.PostClick(button, "LeftButton", false)
+    H.Equal(marks, 1)
+    state.combat = true
+    button.scripts.PreClick(button, "LeftButton")
+    H.Nil(button:GetAttribute("macrotext"))
+    H.Equal(#state.blocked, 0)
+    state.combat = false
+    state.units.nameplate1.guid = "Player-Recycled"
+    button.scripts.PreClick(button, "LeftButton")
+    H.Nil(button:GetAttribute("macrotext"))
+    target:UpdatePointer()
+    H.False(target.pointer:IsShown())
+end)
+
 H.Test("Nearby details require a right click on a live player", function()
     local state, _, app = setup()
     local ui = app.ui
@@ -3826,8 +3874,8 @@ H.Test("Nearby details require a right click on a live player", function()
     local row = ui.rows[1]
     H.True(row:IsVisible())
     H.Nil(ui.detailsFrame)
-    H.Equal(#row.clickButtons, 1)
-    H.Equal(row.clickButtons[1], "RightButtonUp")
+    H.Equal(#row.clickButtons, 2)
+    H.Equal(row.clickButtons[2], "RightButtonUp")
     row:Click("LeftButton")
     H.Nil(ui.detailsFrame)
     row:Click("RightButton")

@@ -84,6 +84,11 @@ function W.New()
     function methods:GetScale() return self.scale end
     function methods:GetEffectiveScale() return self.scale * (self.parent and self.parent:GetEffectiveScale() or 1) end
     function methods:GetCenter() return self.centerX, self.centerY end
+    function methods:GetLeft() return self.left end
+    function methods:GetTop() return self.top end
+    function methods:GetFrameLevel() return self.frameLevel or 1 end
+    function methods:SetFrameLevel(level) self.frameLevel = level end
+    function methods:SetRotation(angle) self.rotation = angle end
     function methods:SetAlpha(value) assert(finite(value) and value >= 0 and value <= 1, "invalid alpha"); self.alpha = value end
     function methods:GetAlpha() return self.alpha end
     function methods:Show()

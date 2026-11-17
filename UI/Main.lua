@@ -210,6 +210,7 @@ function UI.New(app)
         if self.ticker then self.ticker:SetScript("OnUpdate", nil); self.ticker:UnregisterAllEvents() end
         if self.badges then self.badges:Destroy() end
         if self.launcher then self.launcher:Destroy() end
+        if self.nearbyTarget and self.nearbyTarget.Destroy then self.nearbyTarget:Destroy() end
         if nativeSettings.owner == self then
             nativeSettings.owner = nil
             if nativeSettings.panel and nativeSettings.panel.open then nativeSettings.panel.open:SetEnabled(false) end
@@ -671,6 +672,13 @@ function UI.New(app)
     inlineNote.input, inlineNote.save, inlineNote.cancel = inlineInput, inlineSave, inlineCancel
     self.nearbyNote = inlineNote
 
+    local function hoverNearbyRow(row, entering)
+        if entering and row.contact then tooltip(row, row.nameText:GetText(), self:T("rowHint"))
+        else hideOwnedTooltip(row) end
+    end
+    if RG.NearbyTarget and app.NearbyTarget then
+        self.nearbyTarget = RG.NearbyTarget.New(app, main, function(contact) self:Select(contact) end, hoverNearbyRow)
+    end
     for i = 1, 20 do
         local row = CreateFrame("Button", nil, body)
         row:SetPoint("TOPLEFT", 8, -UI.layout.header - (i - 1) * 33)
@@ -704,15 +712,13 @@ function UI.New(app)
         row.noteButton:SetScript("OnLeave", hideOwnedTooltip)
         row.noteButton:SetScript("OnHide", hideOwnedTooltip)
         paintShown(row.noteButton, false)
-        row:RegisterForClicks("RightButtonUp")
+        row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         row:SetScript("OnClick", function(_, mouseButton)
             if mouseButton == "RightButton" and row.contact then self:Select(row.contact) end
+            if mouseButton == "LeftButton" and self.nearbyTarget then self.nearbyTarget:PointAt(row.contact) end
         end)
-        row:SetScript("OnEnter", function()
-            if not row.contact then return end
-            tooltip(row, row.nameText:GetText(), self:T("rowHint"))
-        end)
-        row:SetScript("OnLeave", function() hideOwnedTooltip(row) end)
+        row:SetScript("OnEnter", function() hoverNearbyRow(row, true) end)
+        row:SetScript("OnLeave", function() hoverNearbyRow(row, false) end)
         paintShown(row, false)
         self.rows[i] = row
     end
@@ -1580,6 +1586,10 @@ function UI.New(app)
         paintShown(expandButton, compact)
         local nearbyShown = expanded or compact
         if main:IsShown() ~= nearbyShown then main:SetShown(nearbyShown) end
+        if self.nearbyTarget then
+            if self.nearbyTarget.Sync then self.nearbyTarget:Sync(self.rows, moving) end
+            if self.nearbyTarget.contact then self.nearbyTarget:UpdatePointer() end
+        end
         if self.controlsDirty then self:RefreshControls(); self.controlsDirty = false end
         self.badges:Refresh()
         if self.launcher then self.launcher:Refresh() end
@@ -2311,6 +2321,7 @@ function UI.New(app)
     self.ticker = ticker
     ticker:SetScript("OnUpdate", function(_, elapsed)
         self.updateAcc = (self.updateAcc or 0) + elapsed
+        if self.nearbyTarget and self.nearbyTarget.contact then self.nearbyTarget:UpdatePointer(elapsed) end
         local bannersActive = self.activeBanner or #self.bannerQueue > 0
         local highlight = self.badges.highlight
         local now = (bannersActive or self.previewUntil or highlight) and self:Now()
