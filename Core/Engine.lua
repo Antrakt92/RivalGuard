@@ -157,6 +157,7 @@ function E:View(contact, now)
         id = contact.id, identity = contact.identity, name = contact.name, realm = contact.realm,
         class = contact.class, level = contact.level, hostile = contact.hostile, isPlayer = contact.isPlayer,
         visible = next(contact.tokens) ~= nil, firstSeen = contact.firstSeen, lastSeen = contact.lastSeen,
+        encounterAt = contact.encounterAt,
         sources = sources, stealth = hasRecentStealth and contact.stealth or nil,
         stealthAt = hasRecentStealth and contact.stealthAt or nil,
         stealthEvidence = hasRecentStealth and contact.stealthEvidence or nil,
@@ -547,6 +548,9 @@ function E:Merge(target, other)
     end
     target.firstSeen = math.min(target.firstSeen, other.firstSeen)
     target.lastSeen = math.max(target.lastSeen, other.lastSeen)
+    if other.encounterAt and (not target.encounterAt or other.encounterAt > target.encounterAt) then
+        target.encounterAt = other.encounterAt
+    end
     target.hasReturned = target.hasReturned or other.hasReturned
     target.arrivalNotified = target.arrivalNotified or other.arrivalNotified
     target.arrivalQueued = target.arrivalQueued or other.arrivalQueued
@@ -627,6 +631,7 @@ function E:ResetReturningEncounter(contact, now)
     -- Returning is a new encounter even if the previous sighting was silent.
     self:DiscardContactPending(contact)
     contact.hasReturned = true
+    contact.encounterAt = now
     contact.encounterRecorded = false
     contact.targetingNotified = nil
     contact.soundOutcome = nil
@@ -1035,9 +1040,16 @@ local function recentContactBefore(a, b)
     return a.id < b.id
 end
 
+local function visibleContactBefore(a, b)
+    local aAt, bAt = a.encounterAt or a.firstSeen, b.encounterAt or b.firstSeen
+    if aAt ~= bAt then return aAt > bAt end
+    return a.id < b.id
+end
+
 local function contactBefore(a, b)
     if a.watched ~= b.watched then return a.watched end
     if a.visible ~= b.visible then return a.visible end
+    if a.visible then return visibleContactBefore(a, b) end
     return recentContactBefore(a, b)
 end
 
@@ -1086,6 +1098,7 @@ function E:NearbyPage(offset, limit, includeIds)
     end
     table.sort(candidates, function(a, b)
         if ranks[a] ~= ranks[b] then return ranks[a] > ranks[b] end
+        if next(a.tokens) ~= nil then return visibleContactBefore(a, b) end
         return recentContactBefore(a, b)
     end)
     local count, now, page = #candidates, self:Now(), {}

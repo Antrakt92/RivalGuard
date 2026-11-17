@@ -105,6 +105,12 @@ local function hideTooltip()
     if GameTooltip then GameTooltip:Hide() end
 end
 
+local function hideOwnedTooltip(frame)
+    if not GameTooltip or type(GameTooltip.GetOwner) ~= "function" then return end
+    local owner = GameTooltip:GetOwner()
+    if (not issecretvalue or not issecretvalue(owner)) and rawequal(owner, frame) then hideTooltip() end
+end
+
 local function classColor(token)
     local color = (RAID_CLASS_COLORS or {})[token]
     if color then return color.r, color.g, color.b end
@@ -112,6 +118,9 @@ local function classColor(token)
 end
 
 local function paintNearbyRow(row, data, index, profile)
+    if row.contact and (not data or row.contact.id ~= data.contact.id or row.nameText.paintedText ~= data.name) then
+        hideOwnedTooltip(row)
+    end
     row.contact = data and data.contact or nil
     if not data then paintShown(row, false); return end
 
@@ -1365,10 +1374,7 @@ function UI.New(app)
             self.visibleCount = app.engine:CountVisible()
             self.renderedCount = 0
             if main:IsShown() then
-                for _, row in ipairs(self.rows) do
-                    row.contact = nil
-                    paintShown(row, false)
-                end
+                for _, row in ipairs(self.rows) do paintNearbyRow(row) end
             end
         end
         if main:IsShown() ~= nearbyShown then main:SetShown(nearbyShown) end

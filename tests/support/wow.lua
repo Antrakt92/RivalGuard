@@ -174,6 +174,7 @@ function W.New()
     function methods:StartMoving() guard(self, "StartMoving"); assert(self.movable, "frame not movable"); self.moving = true end
     function methods:StopMovingOrSizing() self.moving = false end
     function methods:SetOwner(owner, anchor) self.owner, self.ownerAnchor = owner, anchor end
+    function methods:GetOwner() return self.owner end
     function methods:AddLine(text) self.lines = self.lines or {}; self.lines[#self.lines + 1] = text end
     function methods:Click(button)
         if not self.enabled then return end

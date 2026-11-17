@@ -1265,6 +1265,64 @@ H.Test("hidden Nearby skips row production while minimap census and alerts stay 
     H.Equal(ui.rows[1].contact.identity, "guid:Player-Count-1")
 end)
 
+H.Test("Nearby stays stable across sensor phases and drops a tooltip when its row changes", function()
+    local state, _, app = setup()
+    local ui = app.ui
+    local function arrive(index)
+        local token = "nameplate" .. index
+        state:Unit(token, { guid = "Player-StableNearby-" .. index, name = "Rival " .. index,
+            class = "ROGUE", hostile = true, isPlayer = true })
+        state:Fire("NAME_PLATE_UNIT_ADDED", token)
+    end
+    local function identity(index) return "guid:Player-StableNearby-" .. index end
+    local function page()
+        local seen = {}
+        for index = 1, 8 do seen[index] = assert(ui.rows[index].contact).identity end
+        return table.concat(seen, ",")
+    end
+    for index = 1, 12 do arrive(index); state.clock.Advance(0.01) end
+    state:Advance(1)
+    local row, tooltip = ui.rows[1], state.api.GameTooltip
+    row.scripts.OnEnter(row)
+    H.True(tooltip:IsShown())
+    local firstPage = page()
+    H.Equal(row.contact.identity, identity(12))
+    for _ = 1, 5 do state:Advance(0.25); H.Equal(page(), firstPage) end
+    H.True(tooltip:IsShown())
+    row:Click()
+    H.Equal(ui.selected.identity, identity(12))
+
+    ui.frame.scripts.OnMouseWheel(ui.frame, -1)
+    H.Equal(ui.offset, 1)
+    H.False(tooltip:IsShown())
+    local scrolled = page()
+    for _ = 1, 5 do state:Advance(0.25); H.Equal(page(), scrolled) end
+    ui.frame.scripts.OnMouseWheel(ui.frame, 20)
+    row.scripts.OnEnter(row)
+    state.units.nameplate12, state.plates.nameplate12 = nil, nil
+    state:Fire("NAME_PLATE_UNIT_REMOVED", "nameplate12")
+    ui:Refresh()
+    H.Equal(row.contact.identity, identity(11))
+    H.False(tooltip:IsShown())
+    arrive(13)
+    ui:Refresh()
+    H.Equal(row.contact.identity, identity(13))
+    arrive(12)
+    ui:Refresh()
+    H.Equal(row.contact.identity, identity(13))
+    state.units.nameplate12, state.plates.nameplate12 = nil, nil
+    state:Fire("NAME_PLATE_UNIT_REMOVED", "nameplate12")
+    state.clock.Advance(46)
+    arrive(12)
+    ui:Refresh()
+    H.Equal(row.contact.identity, identity(12))
+    tooltip:SetOwner(ui.pauseButton, "ANCHOR_RIGHT"); tooltip:Show()
+    assert(app:Watch(ui.rows[2].contact))
+    H.Equal(row.contact.identity, identity(13))
+    H.True(tooltip:IsShown())
+    H.Equal(tooltip:GetOwner(), ui.pauseButton)
+end)
+
 H.Test("a live Nearby refresh builds only the visible page in a mixed crowd", function()
     local state, RG, app = setup(nil, function(mock)
         mock.api.C_NamePlateManager = { IsNamePlateUnitBehindCamera = function(token)
