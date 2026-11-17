@@ -207,6 +207,12 @@ function E:RecordEncounter(contact)
     if self.onEncounter(self:View(contact), self.epoch()) ~= false then contact.encounterRecorded = true end
 end
 
+local function upgradeStealthEvidence(item, evidence, spell)
+    if item.event == "stealth" and item.stealthEvidence == "aura" and evidence == "cast" then
+        item.stealthEvidence, item.stealthSpell = evidence, spell
+    end
+end
+
 function E:Queue(contact, event)
     local now = self:Now()
     if self:SnoozedUntil(contact) then return false end
@@ -218,7 +224,10 @@ function E:Queue(contact, event)
     local cooldown = self.cooldowns[key]
     if cooldown and now - cooldown < decision.cooldown then contact.lastReason = "cooldown" return false end
     for _, item in ipairs(self.pending) do
-        if item.id == contact.id and (item.decision.dedupKey or item.decision.kind) == (decision.dedupKey or decision.kind) then return false end
+        if item.id == contact.id and (item.decision.dedupKey or item.decision.kind) == (decision.dedupKey or decision.kind) then
+            if event == "stealth" then upgradeStealthEvidence(item, contact.stealthEvidence, contact.stealthSpell) end
+            return false
+        end
         if item.id == contact.id and now - item.at <= self.profile.alerts.waveWindow and item.decision.priority >= decision.priority then return false end
     end
     for index = #self.pending, 1, -1 do
@@ -229,7 +238,11 @@ function E:Queue(contact, event)
         end
     end
     self.sequence = self.sequence + 1
-    self.pending[#self.pending + 1] = { id = contact.id, event = event, decision = decision, at = now, sequence = self.sequence, revision = self.revision }
+    local item = { id = contact.id, event = event, decision = decision, at = now, sequence = self.sequence, revision = self.revision }
+    if event == "stealth" then
+        item.stealthEvidence, item.stealthSpell = contact.stealthEvidence, contact.stealthSpell
+    end
+    self.pending[#self.pending + 1] = item
     if #self.pending > self.profile.retention.maxContacts then
         local dropped = table.remove(self.pending, 1)
         local owner = self.contacts[dropped.id]
@@ -293,7 +306,11 @@ function E:Merge(target, other)
         local kept, discard = {}, {}
         for _, item in ipairs(mergedPending) do
             for _, strongest in ipairs(kept) do
-                if math.abs(item.at - strongest.at) <= self.profile.alerts.waveWindow then discard[item] = true break end
+                if math.abs(item.at - strongest.at) <= self.profile.alerts.waveWindow then
+                    upgradeStealthEvidence(strongest, item.stealthEvidence, item.stealthSpell)
+                    discard[item] = true
+                    break
+                end
             end
             if not discard[item] then kept[#kept + 1] = item end
         end
@@ -312,6 +329,13 @@ function E:Merge(target, other)
     self.contactCount = self.contactCount - 1
     self:IndexContact(target, oldGuid, oldName)
     return target
+end
+
+function E:ResetReturningEncounter(contact, now)
+    if next(contact.tokens) ~= nil or now - contact.lastSeen < self.profile.alerts.returnAfter then return false end
+    contact.encounterRecorded = false
+    contact.stealth, contact.stealthAt, contact.stealthEvidence, contact.stealthSpell = nil, nil, nil, nil
+    return true
 end
 
 function E:Observe(raw)
@@ -347,9 +371,17 @@ function E:Observe(raw)
         local namedContact = nameOwner and self.contacts[nameOwner]
         if namedContact and (not obs.guid or not namedContact.guid or namedContact.guid == obs.guid) then known = nameOwner end
     end
-    if known and self.contacts[known] then
-        if contact and contact.id ~= known then contact = self:Merge(self.contacts[known], contact)
-        else contact = self.contacts[known] end
+    local returning
+    local matched = known and self.contacts[known]
+    if matched then
+        if contact and contact.id ~= known then
+            -- The anonymous live alias is part of the new encounter. Clear
+            -- stale evidence on the old identity before inheriting any of it.
+            returning = self:ResetReturningEncounter(matched, now)
+            contact = self:Merge(matched, contact)
+        else
+            contact = matched
+        end
     end
     if not contact then
         self:MakeRoom()
@@ -358,8 +390,7 @@ function E:Observe(raw)
         self.contacts[contact.id] = contact
         self.contactCount = self.contactCount + 1
     end
-    local wasVisible = next(contact.tokens) ~= nil
-    local away = now - contact.lastSeen
+    returning = returning or self:ResetReturningEncounter(contact, now)
     if not binding or binding.id ~= contact.id then
         self.tokenSerial = self.tokenSerial + 1
         self.bindings[obs.token] = { id = contact.id, generation = self.tokenSerial, source = obs.source }
@@ -383,14 +414,12 @@ function E:Observe(raw)
     local oldStealth = contact.stealth
     if obs.stealthReadable then
         if obs.stealth == true then
-            if not oldStealth then contact.stealthEvidence, contact.stealthSpell = "aura", nil end
-            contact.stealth, contact.stealthAt = "confirmed", contact.stealthAt or now
+            if contact.stealthEvidence ~= "aura" then contact.stealthAt = now end
+            contact.stealth, contact.stealthEvidence, contact.stealthSpell = "confirmed", "aura", nil
         elseif obs.stealth == false then
             contact.stealth, contact.stealthAt, contact.stealthEvidence, contact.stealthSpell = nil, nil, nil, nil
         end
     end
-    local returning = not wasVisible and away >= self.profile.alerts.returnAfter
-    if returning then contact.encounterRecorded = false end
     self:RecordEncounter(contact)
     if not contact.arrivalNotified and not contact.arrivalQueued then
         contact.arrivalQueued = self:Queue(contact, "sighting")
@@ -486,6 +515,7 @@ function E:Tick()
                 accepted[key] = true
                 self.cooldowns[key] = now
                 decision.contact = self:View(contact)
+                decision.stealthEvidence, decision.stealthSpell = item.stealthEvidence, item.stealthSpell
                 contact.arrivalNotified, contact.arrivalQueued = true, false
                 if contact.class then contact.notifiedClass = contact.class end
                 if decision.priority < 70 and (decision.kind == "sighting" or decision.kind == "returning") then ordinary[#ordinary + 1] = decision

@@ -788,6 +788,78 @@ H.Test("threat journal records confirmed cast and does not regenerate cleared en
     H.Equal(app.db:GetJournal()[1].encounters, 1)
 end)
 
+local function stealthFixture(readable)
+    local unit = { guid = "Player-StealthLifecycle", name = "Fixture Rival", class = "ROGUE", hostile = true, isPlayer = true }
+    local state, _, app = setup(nil, function(fixture)
+        if not readable then return end
+        fixture.api.C_Secrets = { ShouldAurasBeSecret = function() return false end }
+        fixture.api.C_UnitAuras = { GetAuraDataByIndex = function(token, index)
+            if token == "nameplate1" and index == 1 and unit.aura then return { spellId = unit.aura } end
+        end }
+    end)
+    app.db:GetProfile().retention.journalMode = "threats"
+    app:ProfileChanged()
+    state:Unit("nameplate1", unit)
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    H.Equal(#app.db:GetJournal(), 0)
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-Lifecycle", 1856)
+    return state, app, unit
+end
+
+local function returnStealthFixture(state, app, unit)
+    state:Advance(0.5)
+    local first = app.db:GetJournal()[1]
+    H.Equal(first.encounters, 1)
+    H.Equal(app.ui.banner.title:GetText(), app.ui:F("stealthCast", app.ui:T("spellVanish")))
+    state.units.nameplate1 = nil
+    state:Fire("NAME_PLATE_UNIT_REMOVED", "nameplate1")
+    state.clock.Advance(app.db:GetProfile().alerts.returnAfter + 1)
+    state:Unit("nameplate1", unit)
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    return first
+end
+
+H.Test("a long return with unreadable aura does not inherit an old cast or add a threat", function()
+    local state, app, unit = stealthFixture(false)
+    local first = returnStealthFixture(state, app, unit)
+    local current = app.engine:Snapshot()[1]
+    H.True(current.visible)
+    H.Nil(current.stealth)
+    H.Nil(current.stealthAt)
+    H.Nil(current.stealthSpell)
+    H.Equal(app.db:GetJournal()[1].lastSeen, first.lastSeen)
+    H.Equal(app.db:GetJournal()[1].encounters, 1)
+end)
+
+H.Test("a readable stealth aura on long return provides new threat evidence", function()
+    local state, app, unit = stealthFixture(true)
+    unit.aura = 1784
+    local first = returnStealthFixture(state, app, unit)
+    local current, journal = app.engine:Snapshot()[1], app.db:GetJournal()
+    H.True(current.visible)
+    H.Equal(current.stealth, "confirmed")
+    H.Equal(current.stealthEvidence, "aura")
+    H.Equal(current.stealthAt, state.clock.Now())
+    H.Nil(current.stealthSpell)
+    H.Equal(journal[1].encounters, 2)
+    H.True(journal[1].lastSeen > first.lastSeen)
+    state:Advance(0.5)
+    H.Equal(app.ui.banner.title:GetText(), app.ui:T("stealthAura"))
+end)
+
+H.Test("a queued Vanish banner preserves its spell when the aura is seen and then gone", function()
+    local state, app, unit = stealthFixture(true)
+    unit.aura = 1784
+    state:Fire("UNIT_AURA", "nameplate1")
+    unit.aura = nil
+    state:Fire("UNIT_AURA", "nameplate1")
+    H.Nil(app.engine:Snapshot()[1].stealth)
+    H.False(app.ui.banner:IsShown())
+    state:Advance(0.5)
+    H.Equal(app.ui.activeBanner.kind, "stealth")
+    H.Equal(app.ui.banner.title:GetText(), app.ui:F("stealthCast", app.ui:T("spellVanish")))
+end)
+
 H.Test("journal entries expire online and refresh the open journal without new sightings", function()
     local state, _, app = setup()
     local now = state.api.time()

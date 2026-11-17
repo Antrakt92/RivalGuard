@@ -1203,7 +1203,8 @@ function UI.New(app)
         local now = self:Now()
         local item = { kind = kind, class = M.Text(contact.class, ""), name = M.Text(contact.name, self:T("unknownPlayer")),
             count = M.Number(decision.count), classes = type(decision.classes) == "table" and RG.Util.Copy(decision.classes) or nil,
-            stealthEvidence = M.Text(contact.stealthEvidence, ""), stealthSpell = M.Text(contact.stealthSpell, ""),
+            stealthEvidence = M.Text(decision.stealthEvidence or contact.stealthEvidence, ""),
+            stealthSpell = M.Text(decision.stealthSpell or contact.stealthSpell, ""),
             id = id, identity = M.Text(contact.identity, "", 256), preview = preview, priority = priority, at = now,
             key = id ~= "" and (kind .. ":" .. id) or nil }
         self:AdvanceBanner(now)
