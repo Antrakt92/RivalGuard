@@ -2,8 +2,10 @@ local _, RG = ...
 local UI = RG.Register("UI", {})
 local M = RG.UIModel
 local BANNER_PRIORITY = { sighting = 20, returning = 30, wave = 35, targeting = 70, watch = 90, stealth = 100 }
-local BANNER_CATEGORIES = { watch = "watchTitle", watched = "watchTitle", avoid = "watchTitle", stealth = "stealthTitle", targeting = "targetingTitle", wave = "waveTitle" }
-local BANNER_QUEUE_LIMIT, BANNER_MAX_AGE = 8, 5
+local BANNER_CATEGORIES = { returning = "returningTitle", watch = "watchTitle", watched = "watchTitle", avoid = "watchTitle",
+    stealth = "stealthTitle", targeting = "targetingTitle", wave = "waveTitle" }
+local BANNER_QUEUE_LIMIT, BANNER_URGENT_PRIORITY = 8, 70
+local BANNER_ORDINARY_MAX_AGE, BANNER_URGENT_MAX_AGE = 2, 5
 local LIST_KIND_KEYS = { watch = "watched", avoid = "avoided", ignore = "ignored", note = "notesOnly" }
 local LIST_FILTERS = { "all", "watch", "avoid", "ignore", "note" }
 local nativeSettings = {}
@@ -1183,6 +1185,11 @@ function UI.New(app)
         return app:HasTargetingEvidence(item.id)
     end
 
+    local function bannerFresh(item, now)
+        local maximumAge = item.priority >= BANNER_URGENT_PRIORITY and BANNER_URGENT_MAX_AGE or BANNER_ORDINARY_MAX_AGE
+        return now - item.at <= maximumAge
+    end
+
     function self:AdvanceBanner(now)
         local active = self.activeBanner
         local pausedUntil = M.Number(app.engine.pausedUntil)
@@ -1201,7 +1208,7 @@ function UI.New(app)
         local queue = self.bannerQueue
         while #queue > 0 do
             local item = table.remove(queue, 1)
-            if now - item.at <= BANNER_MAX_AGE and bannerHasEvidence(item) then self:ShowBanner(item, now); return end
+            if bannerFresh(item, now) and bannerHasEvidence(item) then self:ShowBanner(item, now); return end
         end
     end
 
@@ -1228,11 +1235,16 @@ function UI.New(app)
         if not active or active.preview or item.priority > active.priority then self:ShowBanner(item, now); return end
         for i = #self.bannerQueue, 1, -1 do
             local queued = self.bannerQueue[i]
-            if now - queued.at > BANNER_MAX_AGE then table.remove(self.bannerQueue, i)
+            if not bannerFresh(queued, now) then table.remove(self.bannerQueue, i)
             elseif item.key and item.key == queued.key then return end
         end
         local index = #self.bannerQueue + 1
-        for i, queued in ipairs(self.bannerQueue) do if item.priority > queued.priority then index = i break end end
+        for i, queued in ipairs(self.bannerQueue) do
+            if item.priority > queued.priority or (item.priority == queued.priority and item.priority < BANNER_URGENT_PRIORITY) then
+                index = i
+                break
+            end
+        end
         table.insert(self.bannerQueue, index, item)
         if #self.bannerQueue > BANNER_QUEUE_LIMIT then table.remove(self.bannerQueue) end
     end

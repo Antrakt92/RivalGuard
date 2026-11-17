@@ -5,6 +5,7 @@ E.__index = E
 local MAX_PENDING_AGE = 5
 local EVICTED_ENCOUNTER_LIMIT = 512
 local MAX_RANGE_AGE = 2
+local URGENT_PRIORITY, SOUND_ESCALATION_GAP = 70, 0.25
 local RANGE_EVIDENCE = { exact = true, spell = true, interaction = true, combined = true, conflict = true, unknown = true }
 
 local SPELLS = {
@@ -68,7 +69,7 @@ function E.New(config)
         pending = {}, history = {}, cooldowns = {}, snoozes = {}, serial = 0, sequence = 0,
         evictedEncounters = {}, evictionSlots = {}, evictionCursor = 0,
         counters = { observations = 0, alerts = 0, suppressed = 0, evicted = 0, queueOverflow = 0, rangeAliasConflicts = 0 },
-        pausedUntil = nil, lastSound = -math.huge, revision = 0,
+        pausedUntil = nil, lastSound = -math.huge, lastSoundPriority = 0, revision = 0,
     }, E)
 end
 
@@ -268,7 +269,7 @@ local function strongerAlert(a, b)
 end
 
 local function ordinaryAlert(decision)
-    return decision.priority < 70 and (decision.kind == "sighting" or decision.kind == "returning")
+    return decision.priority < URGENT_PRIORITY and (decision.kind == "sighting" or decision.kind == "returning")
 end
 
 function E:CancelTargeting(contact)
@@ -418,7 +419,7 @@ function E:MakeRoom()
     for _, item in ipairs(self.pending) do
         local contact = self.contacts[item.id]
         local priority = item.decision.priority
-        if contact and priority >= 70 and now - item.at <= MAX_PENDING_AGE
+        if contact and priority >= URGENT_PRIORITY and now - item.at <= MAX_PENDING_AGE
             and (item.event ~= "targeting" or contact.targeting == true) then
             urgent[item.id] = math.max(urgent[item.id] or 0, priority)
         end
@@ -654,9 +655,16 @@ end
 
 function E:Emit(decision, now)
     if decision.sound then
-        if self.profile.alerts.sounds[decision.kind] == "none"
-            or now - self.lastSound < self.profile.alerts.soundGap then decision.sound = false
-        else self.lastSound = now end
+        local gapReady = now >= self.lastSound + self.profile.alerts.soundGap
+        -- An urgent cue may interrupt the ordinary cooldown once. Recording
+        -- its priority closes the exception until the full gap passes again.
+        local escalation = decision.priority >= URGENT_PRIORITY and self.lastSoundPriority < URGENT_PRIORITY
+            and now >= self.lastSound + SOUND_ESCALATION_GAP
+        if self.profile.alerts.sounds[decision.kind] == "none" or not (gapReady or escalation) then
+            decision.sound = false
+        else
+            self.lastSound, self.lastSoundPriority = now, decision.priority
+        end
     end
     if not decision.sound and not decision.banner then return false end
     self.counters.alerts = self.counters.alerts + 1
@@ -700,7 +708,7 @@ function E:Tick()
                 if not firstOrdinaryAt or item.at - firstOrdinaryAt > waveWindow then firstOrdinaryAt = item.at end
                 age = now - firstOrdinaryAt
             end
-            local nextQueue = (item.decision.priority >= 70 or age >= waveWindow) and ready or waiting
+            local nextQueue = (item.decision.priority >= URGENT_PRIORITY or age >= waveWindow) and ready or waiting
             nextQueue[#nextQueue + 1] = item
         end
     end

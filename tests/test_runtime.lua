@@ -263,6 +263,25 @@ H.Test("integrated sensors engine and UI deliver one alert with configured sound
     H.Nil(app.diagnostics.counts.errors)
 end)
 
+H.Test("default sighting sound leaves room for a nearby targeting escalation", function()
+    local state, _, app = setup()
+    state:Unit("player", { guid = "Player-Self" })
+    state:Unit("nameplate1", { guid = "Player-Hunter", name = "Hunter", class = "HUNTER", hostile = true, isPlayer = true })
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    state:Advance(1.1)
+    H.Equal(#state.sounds, 1)
+    H.Equal(app.ui.activeBanner.kind, "sighting")
+
+    state:Unit("nameplate1target", { guid = "Player-Self" })
+    state:Fire("UNIT_TARGET", "nameplate1")
+    state:Advance(0.4)
+    H.Equal(app.ui.activeBanner.kind, "targeting")
+    H.Equal(#state.sounds, 2)
+    state:Advance(1.6)
+    H.Equal(#state.sounds, 2)
+    H.Nil(app.diagnostics.counts.errors)
+end)
+
 H.Test("contradictory current range probes stay quiet until a fresh in-range reading agrees", function()
     local distances = { nameplate1 = 10, target = 45 }
     local state, _, app = setup(nil, function(fixture)
