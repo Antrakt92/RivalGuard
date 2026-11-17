@@ -37,6 +37,36 @@ function Range:Available()
         and (type(book.IsSpellBookItemInRange) == "function" or type(spells.IsSpellInRange) == "function")
 end
 
+local function selectBands(catalog)
+    local size = math.min(#catalog, MAX_BANDS)
+    if size < 2 then return catalog end
+    table.sort(catalog, function(a, b)
+        if a.maximum == b.maximum then return a.minimum < b.minimum end
+        return a.maximum > b.maximum
+    end)
+
+    local retained = {}
+    for index = 1, size do
+        local fraction = (index - 1) / (size - 1)
+        retained[index] = catalog[math.floor(fraction * (#catalog - 1) + 0.5) + 1]
+    end
+
+    -- Sample both endpoints first, then subdivide gaps from broad to narrow.
+    local ordered, gaps, cursor = { retained[1], retained[size] }, { { 1, size } }, 1
+    while cursor <= #gaps do
+        local gap = gaps[cursor]
+        local first, last = gap[1], gap[2]
+        if last - first > 1 then
+            local middle = math.floor((first + last) / 2)
+            ordered[#ordered + 1] = retained[middle]
+            gaps[#gaps + 1] = { first, middle }
+            gaps[#gaps + 1] = { middle, last }
+        end
+        cursor = cursor + 1
+    end
+    return ordered
+end
+
 function Range:Rebuild(now)
     if not self.dirty then return true end
     if now and self.lastBuild and now >= self.lastBuild and now - self.lastBuild < 1 then return false end
@@ -56,10 +86,7 @@ function Range:Rebuild(now)
     local lines = read:Number(read:Safe(book.GetNumSpellBookSkillLines))
     if not lines or lines < 0 or lines > 128 then return true end
     local visited, candidates, seen = 0, 0, {}
-    local function rank(a, b)
-        if a.maximum == b.maximum then return a.minimum < b.minimum end
-        return a.maximum > b.maximum
-    end
+    local catalog, byMaximum = {}, {}
     for lineIndex = 1, math.floor(lines) do
         local line = read:Safe(book.GetSpellBookSkillLineInfo, lineIndex)
         local offset = read:Number(self:Field(line, "itemIndexOffset"))
@@ -82,15 +109,13 @@ function Range:Rebuild(now)
                     local minimum = read:Number(self:Field(info, "minRange"))
                     local maximum = read:Number(self:Field(info, "maxRange"))
                     if minimum and maximum and minimum >= 0 and maximum > minimum and maximum <= 100 then
-                        local band
-                        for _, existing in ipairs(self.bands) do
-                            if existing.minimum == minimum and existing.maximum == maximum then band = existing; break end
-                        end
+                        local byMinimum = byMaximum[maximum]
+                        if not byMinimum then byMinimum = {}; byMaximum[maximum] = byMinimum end
+                        local band = byMinimum[minimum]
                         if not band then
                             band = { minimum = minimum, maximum = maximum, spells = {} }
-                            self.bands[#self.bands + 1] = band
-                            table.sort(self.bands, rank)
-                            if #self.bands > MAX_BANDS then table.remove(self.bands) end
+                            byMinimum[minimum] = band
+                            catalog[#catalog + 1] = band
                         end
                         if #band.spells < 2 then band.spells[#band.spells + 1] = { id = id, slot = slot } end
                     end
@@ -100,6 +125,7 @@ function Range:Rebuild(now)
         end
         if visited >= MAX_SLOTS or candidates >= MAX_SPELLS then break end
     end
+    self.bands = selectBands(catalog)
     self.slotCount, self.spellCount = visited, candidates
     return true
 end
@@ -114,29 +140,33 @@ function Range:Measure(token, identity)
     if not self:Rebuild(now) then return nil, nil, false, false end
     local cached = self.cache[token]
     if now and cached and cached.identity == identity and now >= cached.at and now - cached.at < 0.5 then
-        return cached.minimum, cached.maximum, cached.minimumExclusive, cached.conflict
+        return cached.minimum, cached.maximum, cached.minimumExclusive, cached.conflict, cached.sampledAt
     end
     local book, spells = api.C_SpellBook, api.C_Spell
     local lower, upper, lowerExclusive, checks = nil, nil, false, 0
-    for _, band in ipairs(self.bands) do
-        for _, spell in ipairs(band.spells) do
-            local result
-            if type(book.IsSpellBookItemInRange) == "function" and checks < MAX_CHECKS then
-                checks = checks + 1
-                result = read:Boolean(read:Safe(book.IsSpellBookItemInRange, spell.slot, self.bank, token))
-            end
-            if result == nil and type(spells.IsSpellInRange) == "function" and checks < MAX_CHECKS then
-                checks = checks + 1
-                result = read:Boolean(read:Safe(spells.IsSpellInRange, spell.id, token))
-            end
-            if result ~= nil then
-                if result then
-                    if not lower or band.minimum > lower then lower, lowerExclusive = band.minimum, false end
-                    upper = math.min(upper or math.huge, band.maximum)
-                elseif band.minimum == 0 and (not lower or band.maximum >= lower) then
-                    lower, lowerExclusive = band.maximum, true
+    local resolved = {}
+    for spellIndex = 1, 2 do
+        for bandIndex, band in ipairs(self.bands) do
+            local spell = band.spells[spellIndex]
+            if spell and not resolved[bandIndex] then
+                local result
+                if type(book.IsSpellBookItemInRange) == "function" and checks < MAX_CHECKS then
+                    checks = checks + 1
+                    result = read:Boolean(read:Safe(book.IsSpellBookItemInRange, spell.slot, self.bank, token))
                 end
-                break
+                if result == nil and type(spells.IsSpellInRange) == "function" and checks < MAX_CHECKS then
+                    checks = checks + 1
+                    result = read:Boolean(read:Safe(spells.IsSpellInRange, spell.id, token))
+                end
+                if result ~= nil then
+                    resolved[bandIndex] = true
+                    if result then
+                        if not lower or band.minimum > lower then lower, lowerExclusive = band.minimum, false end
+                        upper = math.min(upper or math.huge, band.maximum)
+                    elseif band.minimum == 0 and (not lower or band.maximum >= lower) then
+                        lower, lowerExclusive = band.maximum, true
+                    end
+                end
             end
             if checks >= MAX_CHECKS then break end
         end
@@ -149,13 +179,15 @@ function Range:Measure(token, identity)
         lower, upper, lowerExclusive = nil, nil, false
         read:Count("range_conflicts")
     end
+    local sampledAt
+    if lower ~= nil or upper ~= nil or conflict then sampledAt = now end
     if now and identity then
         if not self.cache[token] then
             if self.cacheCount >= 128 then self.cache, self.cacheCount = {}, 0 end
             self.cacheCount = self.cacheCount + 1
         end
         self.cache[token] = { identity = identity, at = now, minimum = lower, maximum = upper,
-            minimumExclusive = lowerExclusive, conflict = conflict }
+            minimumExclusive = lowerExclusive, conflict = conflict, sampledAt = sampledAt }
     end
-    return lower, upper, lowerExclusive, conflict
+    return lower, upper, lowerExclusive, conflict, sampledAt
 end

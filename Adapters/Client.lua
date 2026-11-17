@@ -161,9 +161,9 @@ function Client:Range(token, identity)
         return distance, distance, false, "exact"
     end
     -- A failed interaction check does not establish an enemy's lower distance bound.
-    local lower, upper, exclusive, conflict
-    if self.range then lower, upper, exclusive, conflict = self.range:Measure(token, identity) end
-    if conflict then return nil, nil, false, "conflict" end
+    local lower, upper, exclusive, conflict, sampledAt
+    if self.range then lower, upper, exclusive, conflict, sampledAt = self.range:Measure(token, identity) end
+    if conflict then return nil, nil, false, "conflict", sampledAt end
     local evidence = (lower ~= nil or upper ~= nil) and "spell" or "unknown"
     local interaction
     if self:Boolean(self:Safe(self.api.CheckInteractDistance, token, 3)) == true then interaction = 10
@@ -174,9 +174,10 @@ function Client:Range(token, identity)
     end
     if lower and upper and (lower > upper or (lower == upper and exclusive)) then
         self:Count("range_conflicts")
-        return nil, nil, false, "conflict"
+        return nil, nil, false, "conflict", sampledAt
     end
-    return lower, upper, exclusive == true, evidence
+    if evidence ~= "spell" and evidence ~= "combined" then sampledAt = nil end
+    return lower, upper, exclusive == true, evidence, sampledAt
 end
 
 function Client:Stealth(token)
@@ -232,7 +233,7 @@ function Client:ReadUnit(token, source, checkRequalifiedAura)
     if level and (level <= 0 or level > 1000) then level = nil end
     local rangeOwner = guid and ("guid:" .. guid) or (nameComplete and ("name:" .. name))
     observation.class, observation.level = class, level
-    observation.rangeMin, observation.rangeMax, observation.rangeMinExclusive, observation.rangeEvidence =
+    observation.rangeMin, observation.rangeMax, observation.rangeMinExclusive, observation.rangeEvidence, observation.rangeAt =
         self:Range(token, rangeOwner)
     -- Acquisition, aura events and the first clean return to eligibility may
     -- reveal an aura that will not emit a separate update for this token.

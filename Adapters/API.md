@@ -32,12 +32,19 @@ still provide an upper bound.
 
 Metadata rebuilding is event-driven and coalesced, including spell, specialization,
 equipment and form changes. Each rebuild visits at most 1,024 slots and 128
-eligible spells, retains at most 16 bands and samples at most eight range API
-calls per unit. Samples are cached for half a second when the current token has
+eligible spells and retains up to 16 bands distributed across the available
+distances. Samples start with the shortest and longest bands, then cover the
+middle. Alternate spells in a band use any remaining budget, with at most eight
+combined range API calls per unit. Samples are cached for half a second when the current token has
 a readable GUID or complete name. Anonymous reads skip the sample cache. Token
 removal, world or zone changes, combat transitions, and addon restriction or
 shard events invalidate samples independently of spellbook metadata. Missing APIs
 are not repeatedly rescanned per sample.
+
+Cached spell evidence keeps its original sample time, including when an
+interaction check contributed a bound or the sample found conflicting readings.
+The contact model reconciles equally timed observations and uses newer evidence
+when it exists.
 
 Available class controls can be populated from the client's
 `C_SpecializationInfo.GetAllClassIDs` and class information APIs. Failed or partial

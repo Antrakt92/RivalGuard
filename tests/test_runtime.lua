@@ -293,6 +293,44 @@ H.Test("contradictory current range probes stay quiet until a fresh in-range rea
     H.Equal(app.ui.banner.body:GetText(), unit.name)
 end)
 
+H.Test("a cached spell sample does not conflict with a later exact measurement", function()
+    local probes = 0
+    local state, _, app = setup(nil, function(fixture)
+        local api = fixture.api
+        api.UnitDistanceSquared = function(token) if token == "target" then return 45 * 45, true end end
+        api.Enum = { SpellBookSpellBank = { Player = 0 }, SpellBookItemType = { Spell = 1 } }
+        api.C_SpellBook = {
+            GetNumSpellBookSkillLines = function() return 1 end,
+            GetSpellBookSkillLineInfo = function() return { itemIndexOffset = 0, numSpellBookItems = 1 } end,
+            GetSpellBookItemInfo = function() return { spellID = 123, itemType = 1, isPassive = false, isOffSpec = false } end,
+            IsSpellKnown = function() return true end,
+            IsSpellBookItemInRange = function() probes = probes + 1; return true end,
+        }
+        api.C_Spell = {
+            GetSpellInfo = function() return { minRange = 0, maxRange = 20 } end,
+            IsSpellHarmful = function() return true end,
+        }
+    end)
+    local range = app.db:GetProfile().range
+    range.enabled, range.yards, range.policy, range.unknown = true, 25, "confirmed", false
+    app:ProfileChanged()
+    local unit = { guid = "Player-CachedRange", name = "Moving rival", class = "ROGUE", hostile = true, isPlayer = true }
+    state:Unit("nameplate1", unit)
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    H.Equal(app.engine:Snapshot()[1].rangeMax, 20)
+    H.Equal(probes, 1)
+    state.clock.Advance(0.1)
+    state:Unit("target", unit)
+    state:Fire("PLAYER_TARGET_CHANGED")
+    state:Fire("UNIT_FLAGS", "nameplate1")
+    H.Equal(probes, 1)
+    local contact = app.engine:Snapshot()[1]
+    H.Equal(contact.rangeMin, 45)
+    H.Equal(contact.rangeMax, 45)
+    H.Equal(contact.rangeEvidence, "exact")
+    H.Equal(app:Explain(contact).reason, "range_outside")
+end)
+
 for _, queued in ipairs({ false, true }) do
     H.Test("targeting banner retires when evidence ends " .. (queued and "in the queue" or "while shown"), function()
         local state, _, app = setup()

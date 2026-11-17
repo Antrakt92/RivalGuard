@@ -202,3 +202,56 @@ H.Test("range bounds candidate metadata bands and total probes", function()
     range:Measure("target")
     H.Equal(range.slotCount, 1024); H.Equal(calls.info, 0)
 end)
+
+H.Test("a large spellbook keeps both the shortest and widest readable range bands", function()
+    local entries = {}
+    for index = 1, 25 do entries[index] = { id = index, min = 0, max = 4 + index * 3 } end
+    local range, _, _, answers, _, calls = fixture(entries)
+    answers[1] = true
+    local low, high, exclusive, conflict = range:Measure("target", "Player-A")
+    H.Equal(low, 0)
+    H.Equal(high, entries[1].max)
+    H.False(exclusive)
+    H.False(conflict)
+    H.True(calls.checks <= 8)
+
+    answers[1], answers[#entries] = nil, false
+    range:Forget("target")
+    local before = calls.checks
+    low, high, exclusive, conflict = range:Measure("target", "Player-A")
+    H.Equal(low, entries[#entries].max)
+    H.Nil(high)
+    H.True(exclusive)
+    H.False(conflict)
+    H.True(calls.checks - before <= 8)
+end)
+
+H.Test("unreadable spells at the longest bands leave room to confirm shorter and middle bounds", function()
+    local range, _, _, answers, _, calls, _, secret = fixture({
+        { id = 101, min = 0, max = 48 }, { id = 102, min = 0, max = 48 },
+        { id = 103, min = 0, max = 42 }, { id = 104, min = 0, max = 42 },
+        { id = 105, min = 0, max = 25 }, { id = 106, min = 0, max = 6 },
+    })
+    answers[101], answers[103] = secret, secret
+    answers[105], answers[106] = true, false
+    local low, high, exclusive, conflict = range:Measure("target", "Player-A")
+    H.Equal(low, 6)
+    H.Equal(high, 25)
+    H.True(exclusive)
+    H.False(conflict)
+    H.True(calls.checks <= 8)
+end)
+
+H.Test("range probes in a large spellbook narrow a middle-distance estimate within the same budget", function()
+    local entries = {}
+    for index = 1, 25 do entries[index] = { id = index, min = 0, max = 4 + index * 3 } end
+    local range, _, _, answers, _, calls = fixture(entries)
+    local distance = 40
+    for _, entry in ipairs(entries) do answers[entry.id] = distance <= entry.max end
+    local low, high, exclusive, conflict = range:Measure("target", "Player-A")
+    H.True(type(low) == "number" and low > entries[1].max and low < distance)
+    H.True(type(high) == "number" and high >= distance and high <= 52)
+    H.True(exclusive)
+    H.False(conflict)
+    H.True(calls.checks <= 8)
+end)

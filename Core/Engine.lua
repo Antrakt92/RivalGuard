@@ -33,6 +33,7 @@ local function safeObservation(obs)
         behindCamera = boolean(obs.behindCamera),
         rangeMinExclusive = obs.rangeMinExclusive == true,
         rangeEvidence = RANGE_EVIDENCE[obs.rangeEvidence] and obs.rangeEvidence or nil,
+        rangeAt = U.IsFinite(obs.rangeAt) and obs.rangeAt >= 0 and obs.rangeAt or nil,
     }
     if clean.source == "poll" or clean.source == "cast" or clean.source == "aura" or clean.source == "unit" then
         clean.source = token:match("^nameplate%d+$") and "nameplate" or token
@@ -179,13 +180,14 @@ function E:Reconcile(contact, now)
             elseif obs.currentTarget == false and currentTarget == nil then currentTarget = false end
             if obs.currentFocus == true or token == "focus" then currentFocus = true
             elseif obs.currentFocus == false and currentFocus == nil then currentFocus = false end
-            if now >= binding.at and now - binding.at <= MAX_RANGE_AGE
+            local sampledAt = obs.rangeAt or binding.at
+            if now >= sampledAt and now - sampledAt <= MAX_RANGE_AGE
                 and (obs.rangeMin or obs.rangeMax or obs.rangeEvidence == "conflict") then
-                if not rangeAt or binding.at > rangeAt then
-                    rangeAt, rangeMin, rangeMax = binding.at, obs.rangeMin, obs.rangeMax
+                if not rangeAt or sampledAt > rangeAt then
+                    rangeAt, rangeMin, rangeMax = sampledAt, obs.rangeMin, obs.rangeMax
                     rangeExclusive, rangeEvidence = obs.rangeMinExclusive, obs.rangeEvidence
                     conflict = obs.rangeEvidence == "conflict"
-                elseif binding.at == rangeAt then
+                elseif sampledAt == rangeAt then
                     if obs.rangeMin and (not rangeMin or obs.rangeMin > rangeMin) then
                         rangeMin, rangeExclusive = obs.rangeMin, obs.rangeMinExclusive
                     elseif obs.rangeMin and obs.rangeMin == rangeMin then
