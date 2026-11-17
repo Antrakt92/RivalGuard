@@ -747,6 +747,80 @@ H.Test("threat journal records a confirmed threat that develops after the first 
     H.Equal(journal[1].encounters, 1)
 end)
 
+local function contactPressureFixture(watched)
+    local state, _, app = setup()
+    local profile, guid = app.db:GetProfile(), "Player-CapacityOwner"
+    profile.retention.maxContacts = 32
+    if watched then
+        profile.alerts.watchedOnly = true
+        assert(app.db:SetList("guid:" .. guid, "watch", nil, { name = "Capacity owner" }))
+    else
+        profile.retention.journalMode = "threats"
+        profile.alerts.muteOrdinary = true
+    end
+    app:ProfileChanged()
+    local unit = { guid = guid, name = "Capacity owner", class = "ROGUE", hostile = true, isPlayer = true }
+    state:Unit("nameplate1", unit)
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    state:Advance(0.5)
+    local original, generation = app.engine:Snapshot()[1], app.sensors.active.nameplate1.generation
+    for index = 2, 33 do
+        local token = "nameplate" .. index
+        state:Unit(token, { guid = "Player-CapacityPeer-" .. index, name = "Peer " .. index, class = "HUNTER", hostile = true, isPlayer = true })
+        state:Fire("NAME_PLATE_UNIT_ADDED", token)
+    end
+    H.Equal(#app.engine:Snapshot(), 32)
+    H.Equal(app.sensors.active.nameplate1.generation, generation)
+    H.Nil(app.engine.contacts[original.id])
+    return state, app, unit, original, generation
+end
+
+H.Test("contact pressure does not repeat a continuous watch encounter but a genuine return does", function()
+    local state, app, unit, original, generation = contactPressureFixture(true)
+    local function encounters()
+        for _, record in ipairs(app.db:GetJournal()) do
+            if record.identity == original.identity then return record.encounters end
+        end
+    end
+    H.Equal(encounters(), 1)
+    H.Equal(app.engine.counters.alerts, 1)
+    state:Fire("UNIT_FLAGS", "nameplate1")
+    state:Advance(0.5)
+    H.Equal(app.sensors.active.nameplate1.generation, generation)
+    H.Equal(encounters(), 1)
+    H.Equal(app.engine.counters.alerts, 1)
+
+    for index = 1, 33 do
+        local token = "nameplate" .. index
+        state.units[token] = nil
+        state:Fire("NAME_PLATE_UNIT_REMOVED", token)
+    end
+    state.clock.Advance(app.db:GetProfile().alerts.returnAfter + 1)
+    state:Unit("nameplate1", unit)
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    state:Advance(0.5)
+    H.True(app.sensors.active.nameplate1.generation ~= generation)
+    H.Equal(encounters(), 2)
+    H.Equal(app.engine.counters.alerts, 2)
+    H.Equal(app.ui.activeBanner.kind, "watch")
+end)
+
+H.Test("a newly confirmed threat qualifies a contact even after capacity eviction", function()
+    local state, app, _, original, generation = contactPressureFixture(false)
+    H.Equal(#app.db:GetJournal(), 0)
+    H.Equal(app.engine.counters.alerts, 0)
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-AfterPressure", 1856)
+    state:Advance(0.5)
+    H.Equal(app.sensors.active.nameplate1.generation, generation)
+    local journal = app.db:GetJournal()
+    H.Equal(#journal, 1)
+    H.Equal(journal[1].identity, original.identity)
+    H.Equal(journal[1].encounters, 1)
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(app.ui.activeBanner.kind, "stealth")
+    H.Equal(app.ui.banner.title:GetText(), app.ui:F("stealthCast", app.ui:T("spellVanish")))
+end)
+
 H.Test("watched journal records an existing encounter when the user adds it to Watch once", function()
     local state, _, app = setup()
     app.db:GetProfile().retention.journalMode = "watched"

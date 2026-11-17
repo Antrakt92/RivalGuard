@@ -397,3 +397,41 @@ H.Test("stronger overflow replaces the newest weakest arrival and lets it retry"
     H.Equal(alerts[3].kind, "sighting")
     H.Equal(alerts[3].contact.id, newest.id)
 end)
+
+H.Test("capacity continuity stores at most 512 GUIDs and clears with recent sightings", function()
+    local engine, observe = fixture()
+    engine.profile.retention.maxContacts = 32
+    for i = 1, 600 do
+        observe("nameplate1", { guid = "Player-Continuity-" .. i, name = "Rival " .. i, class = "HUNTER" })
+        engine:Remove("nameplate1")
+    end
+    local count = 0
+    for _ in pairs(engine.evictedEncounters) do count = count + 1 end
+    H.Equal(count, 512)
+    H.Equal(#engine:Snapshot(), 32)
+    engine:ClearRecent()
+    H.Nil(next(engine.evictedEncounters))
+    H.Nil(next(engine.evictionSlots))
+    H.Equal(#engine:Snapshot(), 0)
+end)
+
+H.Test("capacity continuity preserves the repeat delay for a recent cast", function()
+    local engine, observe, clock, alerts = fixture()
+    engine.profile.retention.maxContacts = 32
+    local owner = { guid = "Player-VanishOwner", name = "Owner", class = "ROGUE" }
+    observe("target", owner)
+    H.True(engine:Cast("target", 1856))
+    engine:Tick()
+    H.Equal(#alerts, 1)
+    engine:Remove("target")
+    for i = 1, 32 do observe("nameplate" .. i, { guid = "Player-Peer-" .. i, class = "HUNTER" }) end
+    H.True(engine.evictedEncounters[owner.guid] ~= nil)
+
+    clock.Advance(1.2)
+    observe("target", owner)
+    H.True(engine:Cast("target", 1856))
+    engine:Tick()
+    local casts = 0
+    for _, alert in ipairs(alerts) do if alert.kind == "stealth" then casts = casts + 1 end end
+    H.Equal(casts, 1)
+end)

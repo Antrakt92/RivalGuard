@@ -3,6 +3,7 @@ local U, D, Rules = RG.Util, RG.Defaults, RG.Rules
 local E = RG.Register("Engine", {})
 E.__index = E
 local MAX_PENDING_AGE = 5
+local EVICTED_ENCOUNTER_LIMIT = 512
 
 local SPELLS = {
     [1784] = "Stealth", [1785] = "Stealth", [1786] = "Stealth", [1787] = "Stealth", [8822] = "Stealth",
@@ -56,6 +57,7 @@ function E.New(config)
         onEncounter = config.onEncounter, onChange = config.onChange,
         contacts = {}, identities = {}, nameOwners = {}, bindings = {}, tokenSerial = 0, contactCount = 0,
         pending = {}, history = {}, cooldowns = {}, snoozes = {}, serial = 0, sequence = 0,
+        evictedEncounters = {}, evictionSlots = {}, evictionCursor = 0,
         counters = { observations = 0, alerts = 0, suppressed = 0, evicted = 0, queueOverflow = 0 },
         pausedUntil = nil, lastSound = -math.huge, revision = 0,
     }, E)
@@ -276,15 +278,72 @@ function E:Queue(contact, event)
     return true
 end
 
-function E:Drop(id)
+function E:RememberEvictedEncounter(contact, now)
+    if not contact.guid or now - contact.lastSeen >= self.profile.alerts.returnAfter then return nil end
+    if not (contact.encounterRecorded or contact.arrivalNotified or contact.lastStealthCast or contact.targeting or contact.stealth) then return nil end
+    -- Capacity eviction cannot end an encounter on its own. Keep bounded
+    -- session evidence keyed by GUID and leave live state to fresh unit reads.
+    local cursor = self.evictionCursor % EVICTED_ENCOUNTER_LIMIT + 1
+    local overwritten = self.evictionSlots[cursor]
+    if overwritten and self.evictedEncounters[overwritten.guid] == overwritten then
+        self.evictedEncounters[overwritten.guid] = nil
+    end
+    local record = {
+        guid = contact.guid, slot = cursor, lastSeen = contact.lastSeen,
+        encounterRecorded = contact.encounterRecorded, arrivalNotified = contact.arrivalNotified,
+        notifiedClass = contact.notifiedClass, lastStealthCast = contact.lastStealthCast,
+        targeting = contact.targeting, stealth = contact.stealth,
+    }
+    self.evictionSlots[cursor] = record
+    self.evictionCursor = cursor
+    self.evictedEncounters[contact.guid] = record
+    return record
+end
+
+function E:RestoreEvictedEncounter(contact, now)
+    local record = contact.guid and self.evictedEncounters[contact.guid]
+    if not record then return nil end
+    self.evictedEncounters[contact.guid], self.evictionSlots[record.slot] = nil, nil
+    if now - record.lastSeen >= self.profile.alerts.returnAfter then return nil end
+    contact.encounterRecorded = contact.encounterRecorded or record.encounterRecorded
+    contact.arrivalNotified = contact.arrivalNotified or record.arrivalNotified
+    contact.notifiedClass = contact.notifiedClass or record.notifiedClass
+    contact.lastStealthCast = contact.lastStealthCast or record.lastStealthCast
+    if record.arrivalNotified and contact.arrivalQueued then
+        for index = #self.pending, 1, -1 do
+            local item = self.pending[index]
+            if item.id == contact.id and item.event == "sighting" then table.remove(self.pending, index) end
+        end
+        contact.arrivalQueued = false
+    end
+    if record.cooldowns then
+        for kind, at in pairs(record.cooldowns) do
+            local key = contact.id .. ":" .. kind
+            self.cooldowns[key] = math.max(at, self.cooldowns[key] or -math.huge)
+        end
+    end
+    return record
+end
+
+function E:Drop(id, evictionAt)
     local contact = self.contacts[id]
     if not contact then return end
+    local record = evictionAt and self:RememberEvictedEncounter(contact, evictionAt)
     for token in pairs(contact.tokens) do self.bindings[token] = nil end
     self:UnindexContact(contact)
     self.contacts[id] = nil
     self.contactCount = self.contactCount - 1
     for index = #self.pending, 1, -1 do if self.pending[index].id == id then table.remove(self.pending, index) end end
-    for key in pairs(self.cooldowns) do if key:sub(1, #id + 1) == id .. ":" then self.cooldowns[key] = nil end end
+    local prefix = id .. ":"
+    for key, at in pairs(self.cooldowns) do
+        if key:sub(1, #prefix) == prefix then
+            if record then
+                record.cooldowns = record.cooldowns or {}
+                record.cooldowns[key:sub(#prefix + 1)] = at
+            end
+            self.cooldowns[key] = nil
+        end
+    end
 end
 
 function E:MakeRoom()
@@ -312,7 +371,7 @@ function E:MakeRoom()
             candidate, candidatePriority, candidateVisible = contact, priority, visible
         end
     end
-    if candidate then self:Drop(candidate.id) self.counters.evicted = self.counters.evicted + 1 end
+    if candidate then self:Drop(candidate.id, now) self.counters.evicted = self.counters.evicted + 1 end
 end
 
 function E:Merge(target, other)
@@ -444,14 +503,16 @@ function E:Observe(raw)
     if obs.name and (obs.nameComplete or not contact.name) then contact.name, contact.realm, contact.nameIdentity = obs.name, obs.realm, named end
     if not contact.identity then contact.identity = identity end
     if oldGuid ~= contact.guid or oldNameIdentity ~= contact.nameIdentity then self:IndexContact(contact, oldGuid, oldNameIdentity) end
+    local previous = oldGuid ~= contact.guid and self:RestoreEvictedEncounter(contact, now)
     local oldClass = contact.class
     if obs.class then contact.class = obs.class end
     if obs.level then contact.level = obs.level end
     local wasTargeting = contact.targeting
+    if wasTargeting == nil and previous then wasTargeting = previous.targeting end
     -- A restricted alias cannot erase another available source's clean evidence.
     -- Conversely, evidence vanishes when every active source becomes unreadable.
     self:Reconcile(contact)
-    local oldStealth = contact.stealth
+    local oldStealth = contact.stealth or (previous and previous.stealth)
     if obs.stealthReadable then
         if obs.stealth == true then
             if contact.stealthEvidence ~= "aura" then contact.stealthAt = now end
@@ -712,6 +773,7 @@ function E:ClearRecent()
         if next(contact.tokens) == nil then discarded[#discarded + 1] = id end
     end
     for _, id in ipairs(discarded) do self:Drop(id) end
+    self.evictedEncounters, self.evictionSlots, self.evictionCursor = {}, {}, 0
     self.history = {}
     self:Changed()
     return #discarded
@@ -720,6 +782,7 @@ end
 function E:Clear()
     self.contacts, self.identities, self.bindings, self.pending, self.cooldowns = {}, {}, {}, {}, {}
     self.nameOwners, self.contactCount = {}, 0
+    self.evictedEncounters, self.evictionSlots, self.evictionCursor = {}, {}, 0
     self.history = {}
     self:Changed()
 end
