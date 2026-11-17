@@ -38,6 +38,97 @@ local function pickSound(ui, button, value)
     H.False(picker:IsShown())
 end
 
+local function seedPlate(state, index, shape, guid)
+    local token = "nameplate" .. index
+    state:Unit(token, { guid = guid or ("Player-Seed" .. index), name = "Seed rival " .. index,
+        class = "ROGUE", hostile = true, isPlayer = true })
+    local frame = state.plates[token]
+    if shape ~= "legacy" then frame.namePlateUnitToken = nil end
+    if shape == "method" then
+        frame.GetUnit = function(self)
+            assert(self == frame, "GetUnit receiver must be the enumerated nameplate")
+            return token
+        end
+    elseif shape == "property" then frame.unitToken = token end
+    return frame, token
+end
+
+H.Test("login reload and world reseeding read stock nameplate tokens without add events", function()
+    local function configure(mock)
+        local method = seedPlate(mock, 1, "method")
+        method.unitToken = "nameplate2"
+        seedPlate(mock, 2, "property")
+        seedPlate(mock, 3, "legacy")
+    end
+    local state, _, app = setup(nil, configure)
+    local function verify(active, thirdGuid)
+        for index = 1, 3 do
+            local token = "nameplate" .. index
+            local expected = index == 3 and thirdGuid or ("Player-Seed" .. index)
+            H.Equal(assert(active.sensors.active[token]).guid, expected)
+            H.True(active.ui.badges.active[token].icon:IsVisible())
+        end
+        H.Equal(#active.engine:Snapshot(), 3)
+    end
+    verify(app, "Player-Seed3")
+
+    state:Fire("PLAYER_LOGOUT")
+    local fresh, _, reloaded = setup(state.api.RivalGuardDB, configure)
+    verify(reloaded, "Player-Seed3")
+    fresh:Fire("PLAYER_LEAVING_WORLD")
+    H.Equal(#reloaded.engine:Snapshot(), 0)
+    fresh.plates.nameplate3, fresh.units.nameplate3 = nil, nil
+    seedPlate(fresh, 3, "method", "Player-SeedAfterTravel")
+    fresh:Fire("PLAYER_ENTERING_WORLD")
+    verify(reloaded, "Player-SeedAfterTravel")
+end)
+
+H.Test("nameplate seeding ignores unsafe or stale frames and never falls back from unreadable stock tokens", function()
+    local reads, forbiddenGetUnit = {}, 0
+    local _, _, app = setup(nil, function(mock)
+        local api = mock.api
+        local first = seedPlate(mock, 1, "method")
+        local secret = H.Secret("unreadable stock nameplate token")
+        local silent = seedPlate(mock, 2, "legacy")
+        silent.GetUnit = function() return nil end
+        local throws = seedPlate(mock, 3, "legacy")
+        throws.GetUnit = function() error("nameplate GetUnit unavailable") end
+        local hiddenToken = seedPlate(mock, 4, "legacy")
+        hiddenToken.GetUnit = function() return secret end
+        local malformed = seedPlate(mock, 5, "legacy")
+        malformed.GetUnit = function() return "target" end
+        local hiddenProperty = seedPlate(mock, 6, "legacy")
+        hiddenProperty.unitToken = secret
+        local forbidden = seedPlate(mock, 7, "legacy")
+        forbidden.forbidden = true
+        local unreadable = seedPlate(mock, 8, "legacy")
+        unreadable.IsForbidden = function() return secret end
+        for _, frame in ipairs({ forbidden, unreadable }) do
+            frame.GetUnit = function() forbiddenGetUnit = forbiddenGetUnit + 1; return "nameplate1" end
+        end
+        local _, staleToken = seedPlate(mock, 9, "method")
+        local stale = api.CreateFrame("Frame", nil, api.UIParent)
+        stale.GetUnit = function() return staleToken end
+        stale.namePlateUnitToken = staleToken
+        api.C_NamePlate.GetNamePlates = function()
+            return { first, first, silent, throws, hiddenToken, malformed, hiddenProperty, forbidden, unreadable, stale }
+        end
+        local guid = api.UnitGUID
+        api.UnitGUID = function(token)
+            reads[token] = (reads[token] or 0) + 1
+            return guid(token)
+        end
+    end)
+    H.Equal(forbiddenGetUnit, 0)
+    H.Equal(#app.engine:Snapshot(), 1)
+    H.Equal(app.engine:Snapshot()[1].identity, "guid:Player-Seed1")
+    H.Equal(reads.nameplate1, 2, "one seed observation plus the initial poll")
+    for index = 2, 9 do
+        local token = "nameplate" .. index
+        H.Nil(reads[token]); H.Nil(app.sensors.active[token])
+    end
+end)
+
 H.Test("runtime status reads both nameplate settings through the supported API without writes", function()
     local writes = 0
     local state, _, app = setup(nil, function(fixture)

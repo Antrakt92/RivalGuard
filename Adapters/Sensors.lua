@@ -124,14 +124,8 @@ function Sensors:Seed()
     for _, frame in ipairs(plates) do
         visited = visited + 1
         if visited > MAX_ACTIVE then break end
-        local clean = self.client:Clean(frame)
-        if type(clean) == "table" or type(clean) == "userdata" then
-            local token = self.client:IsToken(self.client:Safe(function()
-                if type(clean.IsForbidden) == "function" and self.client:Boolean(self.client:Safe(clean.IsForbidden, clean)) ~= false then return nil end
-                return clean.namePlateUnitToken
-            end))
-            if token and token:match("^nameplate%d+$") and not self.active[token] then self:Observe(token, "nameplate") end
-        end
+        local token = self.client:NameplateToken(frame)
+        if token and not self.active[token] then self:Observe(token, "nameplate") end
     end
 end
 

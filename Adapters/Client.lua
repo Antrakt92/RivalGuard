@@ -88,6 +88,31 @@ function Client:Nameplate(token)
     return frame
 end
 
+function Client:NameplateToken(frame)
+    local plate = self:Clean(frame)
+    if not plate or (type(plate) ~= "table" and type(plate) ~= "userdata") then return nil end
+    local token = self:IsToken(self:Safe(function()
+        local forbidden = plate.IsForbidden
+        if not self:Readable(forbidden) or (forbidden ~= nil and self:Boolean(self:Safe(forbidden, plate)) ~= false) then return nil end
+        -- A present getter owns the assignment, including its unassigned state.
+        local getter = plate.GetUnit
+        if not self:Readable(getter) then return nil end
+        if getter ~= nil then
+            if type(getter) == "function" then return getter(plate) end
+            return nil
+        end
+        local unit = plate.unitToken
+        if not self:Readable(unit) then return nil end
+        if unit ~= nil then return unit end
+        return plate.namePlateUnitToken
+    end))
+    if not token or not token:match("^nameplate%d+$") then return nil end
+    local namespace = self.api.C_NamePlate
+    if type(namespace) == "table" and type(namespace.GetNamePlateForUnit) == "function"
+        and self:Nameplate(token) ~= plate then return nil end
+    return token
+end
+
 function Client:UnitMatch(token, other)
     return self:Boolean(self:Safe(self.api.UnitIsUnit, token, other))
 end
