@@ -36,6 +36,13 @@ local function minimap(state, forbidden)
     return map
 end
 
+local function nearbyDragHeader(ui)
+    for _, child in ipairs(ui.frame.children) do
+        if child.scripts.OnDragStart and child.scripts.OnDragStop then return child end
+    end
+    error("Nearby drag header missing")
+end
+
 H.Test("actual UI initializes through strict frame methods and accessible controls", function()
     local state, _, app, ui = setup()
     H.True(ui.frame:IsShown()); H.False(ui.settings:IsShown())
@@ -231,6 +238,98 @@ H.Test("Nearby layout cache follows viewport and font changes across hidden rows
     H.Equal(row:GetHeight(), 18 + 20)
 end)
 
+H.Test("automatic Nearby anchor keeps tall rows on a compact scaled viewport and restores the wide placement", function()
+    local uiScale, physicalWidth, physicalHeight = 1.35, 640, 480
+    local state, _, app, ui = setup(nil, function(mock)
+        mock.api.UIParent:SetScale(uiScale)
+        mock.api.UIParent:SetSize(physicalWidth / uiScale, physicalHeight / uiScale)
+    end)
+    local parent, frame = state.api.UIParent, ui.frame
+    local display = app.db:GetProfile().display
+    display.scale = 1.5
+    for index = 1, 20 do
+        app.engine:Observe({ token = "nameplate" .. index, guid = "Player-Layout-" .. index,
+            name = "Layout " .. index, class = "ROGUE", hostile = true, isPlayer = true })
+    end
+
+    local function checkBounds(visibleRows)
+        local point, relative, anchor, x, y = frame:GetPoint(1)
+        H.Equal(point, "RIGHT"); H.Equal(relative, parent); H.Equal(anchor, "RIGHT")
+        H.True(frame.clamped)
+        H.Nil(frame:GetPoint(2))
+        H.True(ui.rows[visibleRows]:IsShown())
+        if ui.rows[visibleRows + 1] then H.False(ui.rows[visibleRows + 1]:IsShown()) end
+        local scale = frame:GetEffectiveScale() / parent:GetEffectiveScale()
+        local right = parent:GetWidth() + x * scale
+        local center = parent:GetHeight() / 2 + y * scale
+        local halfHeight = frame:GetHeight() * scale / 2
+        H.True(right <= parent:GetWidth(), "Nearby right edge exceeds the viewport")
+        H.True(right - frame:GetWidth() * scale >= 0, "Nearby left edge exceeds the viewport")
+        H.True(center + halfHeight <= parent:GetHeight(), "Nearby top edge exceeds the viewport")
+        H.True(center - halfHeight >= 0, "Nearby bottom edge exceeds the viewport")
+        return x, y
+    end
+
+    local setPoint, anchorWrites = frame.SetPoint, 0
+    frame.SetPoint = function(self, ...)
+        anchorWrites = anchorWrites + 1
+        return setPoint(self, ...)
+    end
+    for _, rowCount in ipairs({ 8, 20 }) do
+        display.maxRows = rowCount
+        ui:Refresh()
+        checkBounds(rowCount)
+        local stable = anchorWrites
+        ui:Refresh()
+        H.Equal(anchorWrites, stable)
+
+        parent:SetSize(2560 / uiScale, 1920 / uiScale)
+        ui:Refresh()
+        local wideX, wideY = checkBounds(rowCount)
+        H.Equal(wideX, -70); H.Equal(wideY, 20)
+
+        parent:SetSize(physicalWidth / uiScale, physicalHeight / uiScale)
+        ui:Refresh()
+        checkBounds(rowCount)
+    end
+end)
+
+H.Test("a locked Nearby drag cannot save an automatic anchor", function()
+    local _, _, app, ui = setup()
+    local profile = app.db:GetProfile()
+    H.True(profile.display.locked)
+    local header = nearbyDragHeader(ui)
+    header.scripts.OnDragStart(header)
+    header.scripts.OnDragStop(header)
+    H.Nil(profile.positions.nearby)
+end)
+
+H.Test("logout does not turn automatic Nearby placement into a saved anchor", function()
+    local state, _, app, ui = setup()
+    local profile = app.db:GetProfile()
+    H.Nil(profile.positions.nearby)
+    state.api.UIParent:SetSize(480, 360)
+    ui:Refresh()
+    state:Fire("PLAYER_LOGOUT")
+    H.Nil(profile.positions.nearby)
+end)
+
+H.Test("legacy stock Nearby position adapts on load while logout preserves the stored tuple", function()
+    local _, _, original = setup()
+    original.db:GetProfile().positions.nearby = { point = "RIGHT", relativePoint = "RIGHT", x = -70, y = 20 }
+    original.db:GetProfile().display.scale = 1.5
+    local state, _, app, ui = setup(original.db.root, function(mock)
+        mock.api.UIParent:SetSize(640 / 1.35, 480 / 1.35)
+        mock.api.UIParent:SetScale(1.35)
+    end)
+    local _, _, _, x = ui.frame:GetPoint(1)
+    H.True(x > -70, "legacy stock offset still clips the compact horizontal placement")
+    state:Fire("PLAYER_LOGOUT")
+    local saved = app.db:GetProfile().positions.nearby
+    H.Equal(saved.point, "RIGHT"); H.Equal(saved.relativePoint, "RIGHT")
+    H.Equal(saved.x, -70); H.Equal(saved.y, 20)
+end)
+
 H.Test("Why describes a new sighting and clears configured outputs on rejection", function()
     local _, RG, app, ui = setup()
     ui.selected = { id = "sample" }
@@ -397,14 +496,12 @@ end)
 
 H.Test("drag saved mixed anchors survive strict export database reload and UI restore", function()
     local state, _, app, ui = setup()
+    app.db:GetProfile().display.locked = false
+    local dragHeader = nearbyDragHeader(ui)
+    dragHeader.scripts.OnDragStart(dragHeader)
     ui.frame:ClearAllPoints()
     ui.frame:SetPoint("TOPLEFT", state.api.UIParent, "BOTTOMRIGHT", 123, -87)
     ui.frame:SetPoint("TOPRIGHT", state.api.UIParent, "BOTTOMRIGHT", 471, -87)
-    local dragHeader
-    for _, child in ipairs(ui.frame.children) do
-        if child.scripts.OnDragStop then dragHeader = child break end
-    end
-    H.True(dragHeader ~= nil)
     dragHeader.scripts.OnDragStop(dragHeader)
     local saved = app.db:GetProfile().positions.nearby
     H.Equal(saved.point, "TOPLEFT"); H.Equal(saved.relativePoint, "BOTTOMRIGHT")
@@ -415,18 +512,42 @@ H.Test("drag saved mixed anchors survive strict export database reload and UI re
     H.Equal(point, "TOPLEFT"); H.Equal(parent, fresh.api.UIParent)
     H.Equal(relativePoint, "BOTTOMRIGHT"); H.Equal(x, 123); H.Equal(y, -87)
     H.Equal(restored.db:GetProfile().positions.nearby.relativePoint, "BOTTOMRIGHT")
+    fresh.api.UIParent:SetSize(640 / 1.35, 480 / 1.35)
+    restoredUI:Refresh()
+    point, parent, relativePoint, x, y = restoredUI.frame:GetPoint(1)
+    H.Equal(point, "TOPLEFT"); H.Equal(parent, fresh.api.UIParent)
+    H.Equal(relativePoint, "BOTTOMRIGHT"); H.Equal(x, 123); H.Equal(y, -87)
 end)
 
 H.Test("logout with nil GetPoint preserves prior valid saved position", function()
     local state, _, app, ui = setup()
+    app.db:GetProfile().display.locked = false
+    local header = nearbyDragHeader(ui)
+    header.scripts.OnDragStart(header)
     ui.frame:ClearAllPoints(); ui.frame:SetPoint("BOTTOM", state.api.UIParent, "TOP", 15, 30)
-    state:Fire("PLAYER_LOGOUT")
+    header.scripts.OnDragStop(header)
     local saved = app.db:GetProfile().positions.nearby
     H.Equal(saved.point, "BOTTOM"); H.Equal(saved.relativePoint, "TOP")
+    header.scripts.OnDragStart(header)
     ui.frame:ClearAllPoints()
     state:Fire("PLAYER_LOGOUT")
     H.Equal(app.db:GetProfile().positions.nearby, saved)
     H.Equal(saved.x, 15); H.Equal(saved.y, 30)
+end)
+
+H.Test("logout saves the current position when the Nearby window is being deliberately dragged", function()
+    local state, _, app, ui = setup()
+    local profile = app.db:GetProfile()
+    profile.display.locked = false
+    local header = nearbyDragHeader(ui)
+    header.scripts.OnDragStart(header)
+    ui.frame:ClearAllPoints()
+    ui.frame:SetPoint("LEFT", state.api.UIParent, "LEFT", 47, -38)
+    H.Nil(profile.positions.nearby)
+    state:Fire("PLAYER_LOGOUT")
+    local saved = profile.positions.nearby
+    H.Equal(saved.point, "LEFT"); H.Equal(saved.relativePoint, "LEFT")
+    H.Equal(saved.x, 47); H.Equal(saved.y, -38)
 end)
 
 H.Test("advanced rule editor uses detached drafts and applies valid rules on save", function()

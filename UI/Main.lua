@@ -12,6 +12,8 @@ local SOUND_EVENT_KEYS = { sighting = "eventSighting", returning = "eventReturni
     stealth = "eventStealth", watch = "eventWatch" }
 local SOUND_STATUS_KEYS = { not_requested = "lastSoundNotRequested", sound_gap = "lastSoundGap",
     playback_requested = "lastSoundRequested", playback_unconfirmed = "lastSoundUnconfirmed" }
+local WINDOW_MARGIN = 12
+local NEARBY_DEFAULT_X, NEARBY_DEFAULT_Y = -70, 20
 local nativeSettings = {}
 
 UI.layout = { width = 348, header = 88, footer = 58, rowPadding = 20, settingsWidth = 800, settingsHeight = 610 }
@@ -205,11 +207,13 @@ function UI.New(app)
     function self:FitWindow(frame, width, height, requested)
         local screenWidth = M.Number(UIParent:GetWidth(), 1920)
         local screenHeight = M.Number(UIParent:GetHeight(), 1080)
-        local scale = math.min(requested or 1, math.max(0.1, (screenWidth - 24) / width), math.max(0.1, (screenHeight - 24) / height))
+        local scale = math.min(requested or 1, math.max(0.1, (screenWidth - 2 * WINDOW_MARGIN) / width),
+            math.max(0.1, (screenHeight - 2 * WINDOW_MARGIN) / height))
         if frame.paintedScale ~= scale then
             frame:SetScale(scale)
             frame.paintedScale = scale
         end
+        return scale, screenWidth, screenHeight
     end
 
     function self:RegisterNativeSettings()
@@ -365,6 +369,7 @@ function UI.New(app)
         x, y = M.Number(x), M.Number(y)
         if allowedPoints[point] and allowedPoints[relative] and x and y then
             self:Profile().positions[key] = { point = point, relativePoint = relative, x = x, y = y }
+            return true
         end
     end
 
@@ -382,13 +387,46 @@ function UI.New(app)
     main:SetMovable(true)
     main:EnableMouseWheel(true)
     local mainBackground = fill(main); local mainBorder = outline(main)
-    restorePosition(main, "nearby", "RIGHT", -70, 20)
+    local nearbyMoveProfile, nearbyDefaultX, nearbyDefaultY
+    local function restoreNearby()
+        if nearbyMoveProfile then main:StopMovingOrSizing(); nearbyMoveProfile = nil end
+        restorePosition(main, "nearby", "RIGHT", NEARBY_DEFAULT_X, NEARBY_DEFAULT_Y)
+        nearbyDefaultX, nearbyDefaultY = NEARBY_DEFAULT_X, NEARBY_DEFAULT_Y
+    end
+
+    local function fitNearby(height, profile)
+        if nearbyMoveProfile then return end
+        local width = UI.layout.width
+        local scale, screenWidth, screenHeight = self:FitWindow(main, width, height, profile.display.scale)
+        local saved = profile.positions.nearby
+        -- Older builds saved the stock anchor on logout. Fit it like a default.
+        if saved and not (saved.point == "RIGHT" and (saved.relativePoint or saved.relative) == "RIGHT"
+            and saved.x == NEARBY_DEFAULT_X and saved.y == NEARBY_DEFAULT_Y) then return end
+        local x = math.max(NEARBY_DEFAULT_X, -math.max(0, (screenWidth - WINDOW_MARGIN) / scale - width))
+        local y = math.min(NEARBY_DEFAULT_Y, math.max(0, ((screenHeight - height * scale) / 2 - WINDOW_MARGIN) / scale))
+        if x == nearbyDefaultX and y == nearbyDefaultY then return end
+        main:ClearAllPoints()
+        main:SetPoint("RIGHT", UIParent, "RIGHT", x, y)
+        nearbyDefaultX, nearbyDefaultY = x, y
+    end
+    restoreNearby()
 
     local header = CreateFrame("Button", nil, main)
     header:SetPoint("TOPLEFT", 0, 0); header:SetPoint("TOPRIGHT", -34, 0); header:SetHeight(28)
     header:RegisterForDrag("LeftButton")
-    header:SetScript("OnDragStart", function() if not self:Profile().display.locked then main:StartMoving() end end)
-    header:SetScript("OnDragStop", function() main:StopMovingOrSizing(); savePosition(main, "nearby") end)
+    header:SetScript("OnDragStart", function()
+        local profile = self:Profile()
+        if profile.display.locked then return end
+        nearbyMoveProfile = profile
+        main:StartMoving()
+    end)
+    header:SetScript("OnDragStop", function()
+        if not nearbyMoveProfile then return end
+        main:StopMovingOrSizing()
+        local moveProfile = nearbyMoveProfile
+        nearbyMoveProfile = nil
+        if moveProfile == self:Profile() and not savePosition(main, "nearby") then restoreNearby() end
+    end)
     local title = label(header, "addon", 15, C.accent)
     title:SetPoint("LEFT", 12, 0); title:SetJustifyV("MIDDLE")
     local settingsButton = button(main, "…", 30, function() self:OpenSettings() end)
@@ -744,8 +782,9 @@ function UI.New(app)
     previewContacts:SetPoint("LEFT", preview, "RIGHT", 12, 0)
     local resetPos = localButton(appearance, "resetPosition", 260, function()
         self:Profile().positions = {}
-        restorePosition(main, "nearby", "RIGHT", -70, 20)
+        restoreNearby()
         cancelBannerMove(); restoreBanner()
+        self:Refresh()
     end)
     resetPos:SetPoint("TOPLEFT", 0, y - 45)
     appearance.height = -y + 100
@@ -1072,7 +1111,7 @@ function UI.New(app)
         end
         self:UpdateClasses()
         if self.lastProfile ~= profile then
-            restorePosition(main, "nearby", "RIGHT", -70, 20)
+            restoreNearby()
             cancelBannerMove(); restoreBanner()
             self.lastProfile = profile
             self.alertProfile, self.alertConfig = profile, self:AlertConfig(profile)
@@ -1118,7 +1157,7 @@ function UI.New(app)
                 main:SetHeight(mainHeight)
                 self.nearbyHeight = mainHeight
             end
-            self:FitWindow(main, UI.layout.width, mainHeight, profile.display.scale)
+            fitNearby(mainHeight, profile)
             self.offset = math.max(0, math.min(self.offset, math.max(0, #rows - maxRows)))
             local visibleCount = 0
             for _, row in ipairs(rows) do if row.visible and row.contact.behindCamera ~= true then visibleCount = visibleCount + 1 end end
@@ -1725,7 +1764,7 @@ function UI.New(app)
     end)
     ticker:RegisterEvent("PLAYER_LOGOUT")
     ticker:SetScript("OnEvent", function()
-        savePosition(main, "nearby")
+        if nearbyMoveProfile == self:Profile() then savePosition(main, "nearby") end
         if self:Profile().positions.alert and not self.bannerMoveProfile then savePosition(banner, "alert") end
     end)
 
