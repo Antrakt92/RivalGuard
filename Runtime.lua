@@ -131,7 +131,7 @@ function App:AlertBlock(ordinaryOnly, event)
     return "outputs_disabled"
 end
 
-function App:Status()
+function App:Status(includeUnconfirmed)
     local profile = self.db:GetProfile()
     local cvars = self.api.C_CVar
     local read = type(cvars) == "table" and cvars.GetCVarBool
@@ -149,6 +149,7 @@ function App:Status()
     if profile.enabled and self.engine.pausedUntil and self.engine.pausedUntil > self.engine:Now() then state = "paused" end
     return { state = state, detectionState = detectionState, nameplates = plates, alwaysNameplates = alwaysPlates,
         capabilities = capabilities, context = self.client:Context(), deferredNameplates = deferredNameplates,
+        unconfirmedEnemyContacts = includeUnconfirmed and self.engine:CountUnconfirmedEnemyContacts() or nil,
         contacts = RG.Util.Count(self.engine.contacts), errors = self.diagnostics.counts.errors or 0,
         writable = self.db.writable }
 end
@@ -251,7 +252,7 @@ function App:Snooze(contact, seconds)
 end
 
 function App:ExportDiagnostics()
-    local status = self:Status()
+    local status = self:Status(true)
     return self.diagnostics:Export(status.capabilities, self.engine, {
         context = self.engine.context.kind,
         detection = status.detectionState,
@@ -259,6 +260,7 @@ function App:ExportDiagnostics()
         nameplates = status.nameplates,
         alwaysNameplates = status.alwaysNameplates,
         deferredNameplates = status.deferredNameplates,
+        unconfirmedEnemyContacts = status.unconfirmedEnemyContacts,
     })
 end
 
@@ -499,6 +501,8 @@ function App:Update(elapsed)
     if status and status.deferredNameplates ~= #self.sensors.deferredPlates then
         self.ui.statusAt, self.dirty = nil, true
     end
+    if self.ui.statusPage == "support" and self.ui.statusAt and status and (status.unconfirmedEnemyContacts or 0) > 0
+        and self.engine:Now() - self.ui.statusAt >= 1 then self.dirty = true end
     if self.dirty then
         self.dirty = false
         local ok = pcall(self.ui.Refresh, self.ui)

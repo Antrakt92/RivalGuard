@@ -49,7 +49,18 @@ app.ui:Refresh()
 if view == "settings" then
     if page == "support-limited" then
         app.ui:OpenSettings("support")
-    elseif page == "support-capacity" then
+    elseif page == "support-capacity" or page == "support-partial" then
+        if page == "support-partial" then
+            local enemy, canAttack = state.api.UnitIsEnemy, state.api.UnitCanAttack
+            state.api.UnitIsEnemy = function(source, token)
+                if token ~= "nameplate200" then return enemy(source, token) end
+            end
+            state.api.UnitCanAttack = function(source, token)
+                if token ~= "nameplate200" and canAttack then return canAttack(source, token) end
+            end
+            state:Unit("nameplate200", { guid = "Player-Unconfirmed", name = "Unconfirmed", isPlayer = true, class = "ROGUE" })
+            state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate200")
+        end
         for i = 1, 129 do
             local token = "nameplate" .. (200 + i)
             state:Unit(token, { guid = "Creature-Crowd-" .. i, name = "Crowd " .. i, isPlayer = false })

@@ -58,8 +58,9 @@ function Diag:Export(capabilities, engine, state)
         lines[#lines + 1] = "  alertBlock=" .. (state.alertBlock == nil and "none" or knownValue(state.alertBlock, alertBlocks))
         lines[#lines + 1] = "  nameplates=" .. booleanValue(state.nameplates)
         lines[#lines + 1] = "  alwaysNameplates=" .. booleanValue(state.alwaysNameplates)
-        if U.IsFinite(state.deferredNameplates) and state.deferredNameplates >= 0 and state.deferredNameplates % 1 == 0 then
-            lines[#lines + 1] = "  deferredNameplates=" .. state.deferredNameplates
+        for _, key in ipairs({ "deferredNameplates", "unconfirmedEnemyContacts" }) do
+            local count = state[key]
+            if U.IsFinite(count) and count >= 0 and count % 1 == 0 then lines[#lines + 1] = "  " .. key .. "=" .. count end
         end
     end
     lines[#lines + 1] = "Counters:"

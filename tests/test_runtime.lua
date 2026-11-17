@@ -4942,6 +4942,123 @@ H.Test("Support and copied diagnostics show current nameplate overflow even with
     H.Equal(#state.sounds, 0)
 end)
 
+local function partialEnemyFixture()
+    local evidence = {}
+    local state, _, app = setup(nil, function(mock)
+        local api, secret = mock.api, H.Secret("restricted enemy eligibility")
+        local player, hostile = api.UnitIsPlayer, api.UnitIsEnemy
+        function api.UnitIsPlayer(token)
+            local sample = evidence[token]
+            if sample then
+                if sample.player == nil then return secret end
+                return sample.player
+            end
+            return player(token)
+        end
+        function api.UnitIsEnemy(unit, token)
+            local sample = evidence[token]
+            if sample then
+                if sample.hostile == nil then return secret end
+                return sample.hostile
+            end
+            return hostile(unit, token)
+        end
+        function api.UnitCanAttack(unit, token) return api.UnitIsEnemy(unit, token) end
+    end)
+    local function observe(index, player, hostile)
+        local token = "nameplate" .. index
+        evidence[token] = { player = player, hostile = hostile }
+        state:Unit(token, { guid = "Player-PrivatePartial" .. index, name = "PrivatePartialName" .. index, class = "HUNTER" })
+        state:Fire("NAME_PLATE_UNIT_ADDED", token)
+        return token
+    end
+    local function change(token, player, hostile)
+        evidence[token] = { player = player, hostile = hostile }
+        state:Fire("UNIT_FLAGS", token)
+    end
+    return state, app, observe, change
+end
+
+H.Test("Support counts only current sightings with one missing eligibility flag and diagnostics stay aggregate", function()
+    local state, app, observe, change = partialEnemyFixture()
+    local ui, profile = app.ui, app.db:GetProfile()
+    profile.locale = "ruRU"
+    app:OnSettingsChanged()
+    local playerOnly = observe(1, true, nil)
+    local hostileOnly = observe(2, nil, true)
+    observe(3, nil, nil)
+    observe(4, false, true)
+    observe(5, true, false)
+    H.Equal(#app.db:GetJournal(), 0)
+    H.Equal(#app.engine.history, 0)
+    H.Nil(app:AlertBlock())
+    H.Equal(app:Status().detectionState, "active")
+    H.Nil(app:Status().unconfirmedEnemyContacts)
+    H.Equal(app:Status(true).unconfirmedEnemyContacts, 2)
+    ui:OpenSettings("support")
+    state:Advance(1.25)
+    local function hint(shown)
+        local body = ui.supportStatus:GetText()
+        H.Equal(body:find(ui:T("nameplatesIncomplete"), 1, true) ~= nil, shown)
+    end
+    local function reportContains(count)
+        ui:ShowDiagnostics()
+        local report = ui.copyFrame.edit:GetText()
+        H.True(report:find("unconfirmedEnemyContacts=" .. count, 1, true) ~= nil)
+        for _, private in ipairs({ "Player-PrivatePartial", "PrivatePartialName", playerOnly, hostileOnly }) do
+            H.Nil(report:find(private, 1, true))
+        end
+        ui.copyFrame:Hide()
+    end
+    hint(true)
+    reportContains(2)
+    H.Equal(#app.engine.history, 0)
+    H.Equal(#state.sounds, 0)
+    app:Demo()
+    H.Equal(app:Status(true).unconfirmedEnemyContacts, 2)
+    ui:OpenSettings("support")
+    change(playerOnly, true, true)
+    H.Equal(app:Status(true).unconfirmedEnemyContacts, 1)
+    reportContains(1)
+    state:Advance(1.25)
+    hint(true)
+    H.Equal(app.db:GetJournal()[1].identity, "guid:Player-PrivatePartial1")
+
+    state.units[hostileOnly] = nil
+    state:Fire("NAME_PLATE_UNIT_REMOVED", hostileOnly)
+    H.Equal(app:Status(true).unconfirmedEnemyContacts, 0)
+    state:Advance(1.25)
+    hint(false)
+    reportContains(0)
+    H.Equal(app:Status().detectionState, "active")
+end)
+
+H.Test("same-owner complementary aliases resolve an incomplete sighting until the confirming alias leaves", function()
+    local state, app, observe, change = partialEnemyFixture()
+    local token = observe(1, true, nil)
+    H.Equal(app:Status(true).unconfirmedEnemyContacts, 1)
+    state:Unit("focus", state.units[token])
+    change("focus", nil, true)
+    H.Equal(#app.engine:Snapshot(), 1)
+    H.Equal(app:Status(true).unconfirmedEnemyContacts, 0)
+    local complete = app.engine:Snapshot()[1]
+    H.True(complete.hostile); H.True(complete.isPlayer)
+    state.units.focus = nil
+    state:Fire("PLAYER_FOCUS_CHANGED")
+    H.Equal(app:Status(true).unconfirmedEnemyContacts, 1)
+    change(token, true, true)
+    H.Equal(app:Status(true).unconfirmedEnemyContacts, 0)
+    change(token, nil, true)
+    H.Equal(app:Status(true).unconfirmedEnemyContacts, 1)
+    state.clock.Advance(2.1)
+    H.Equal(#app.engine:Snapshot(), 1)
+    H.Equal(app:Status(true).unconfirmedEnemyContacts, 0)
+    change(token, nil, true)
+    H.Equal(app:Status(true).unconfirmedEnemyContacts, 1)
+    change(token, nil, nil)
+    H.Equal(app:Status(true).unconfirmedEnemyContacts, 0)
+end)
+
 H.Test("nameplate discovery uses current sanctuary state before the zone event", function()
     local state, _, app = setup()
     state.zonePVP = "sanctuary"

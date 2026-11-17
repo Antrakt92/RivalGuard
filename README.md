@@ -64,9 +64,9 @@ current profile would handle that new sighting in the open world.
   Retain all eligible encounters, listed players or observed threats.
 - **Support:** see available sensors, why alerts are quiet here and which
   nameplate options affect coverage. The copyable report includes the current
-  detection status, nameplates waiting for a free slot and any global alert
-  blocker. Player identities and notes stay private. You can also replay the
-  first-run guide.
+  detection status, nameplates waiting for a free slot, incomplete recent
+  sightings and any global alert blocker. Player identities and notes stay
+  private. You can also replay the first-run guide.
 
 Click the minimap button to show or hide Nearby. Right-click it to open
 settings, or drag it around the minimap to move it.

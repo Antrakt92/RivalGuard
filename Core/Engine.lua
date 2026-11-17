@@ -5,6 +5,7 @@ E.__index = E
 local MAX_PENDING_AGE = 5
 local EVICTED_ENCOUNTER_LIMIT = 512
 local MAX_RANGE_AGE = 2
+local REPORT_OBSERVATION_AGE = 2
 local RECENT_STEALTH_SECONDS = 8
 local URGENT_PRIORITY, SOUND_ESCALATION_GAP = 70, 0.25
 local RANGE_EVIDENCE = { exact = true, spell = true, interaction = true, combined = true, conflict = true, unknown = true }
@@ -979,6 +980,29 @@ function E:CountVisible()
         if next(contact.tokens) ~= nil and contact.behindCamera ~= true
             and Rules.Display(self.profile, contact, self:ListEntry(contact)) then
             count = count + 1
+        end
+    end
+    return count
+end
+
+function E:CountUnconfirmedEnemyContacts()
+    local count, now = 0, self:Now()
+    for id, contact in pairs(self.contacts) do
+        if next(contact.tokens) and contact.dead ~= true then
+            local hostile, player, excluded = false, false, false
+            for token in pairs(contact.tokens) do
+                local binding = self.bindings[token]
+                local obs = binding and binding.id == id and binding.observation
+                if obs and now >= binding.at and now - binding.at <= REPORT_OBSERVATION_AGE and obs.behindCamera ~= true then
+                    if obs.hostile == false or obs.isPlayer == false then excluded = true; break end
+                    hostile = hostile or obs.hostile == true
+                    player = player or obs.isPlayer == true
+                end
+            end
+            if not excluded and hostile ~= player then
+                local entry = self:ListEntry(contact)
+                if not entry or entry.kind ~= "ignore" then count = count + 1 end
+            end
         end
     end
     return count

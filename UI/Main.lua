@@ -1066,16 +1066,17 @@ function UI.New(app)
 
     local support = CreateFrame("Frame", nil, content); self.pages.support = support; support:SetAllPoints()
     y = section(support, "support", 0, "supportHelp")
+    local supportTop = y
     self.supportStatus = font(support, 13, C.text)
     self.supportStatus:SetPoint("TOPLEFT", 0, y); self.supportStatus:SetWidth(550)
     local diagnosticButton = localButton(support, "diagnostics", 260, function() self:ShowDiagnostics() end)
-    diagnosticButton:SetPoint("TOPLEFT", 0, y - 208)
+    diagnosticButton:SetPoint("TOPLEFT", self.supportStatus, "BOTTOMLEFT", 0, -24)
     local supportPreview = localButton(support, "demo", 180, function() app:Demo() end)
     supportPreview:SetPoint("LEFT", diagnosticButton, "RIGHT", 12, 0)
     local guideReplayButton = localButton(support, "guideReplay", 300, function() if self.ShowGuide then self:ShowGuide(true) end end)
-    guideReplayButton:SetPoint("TOPLEFT", 0, y - 248)
+    guideReplayButton:SetPoint("TOPLEFT", diagnosticButton, "BOTTOMLEFT", 0, -12)
     local caution = label(support, "statusHelp", 13, C.muted)
-    caution:SetPoint("TOPLEFT", 0, y - 296); caution:SetWidth(550)
+    caution:SetPoint("TOPLEFT", guideReplayButton, "BOTTOMLEFT", 0, -20); caution:SetWidth(550)
     support.height = -y + 352
 
     local pageKeys = { "overview", "alerts", "appearance", "profiles", "journal", "support" }
@@ -1300,11 +1301,12 @@ function UI.New(app)
         end
         local untilTime = M.Number(app.engine.pausedUntil)
         local paused = untilTime ~= nil and untilTime > now
+        local supportShown = settings:IsShown() and self.currentPage == "support"
         local needsStatus = self.statusAt == nil or now - self.statusAt >= 1
             or self.statusPaused ~= paused or self.statusEnabled ~= profile.enabled
-            or settings:IsShown() and self.currentPage == "support" and self.statusPage ~= "support"
+            or supportShown and self.statusPage ~= "support"
         if needsStatus then
-            self.statusCache = app.Status and app:Status() or {}
+            self.statusCache = app.Status and app:Status(supportShown) or {}
             self.statusAt = now
             self.statusPaused, self.statusEnabled = paused, profile.enabled
         end
@@ -1312,7 +1314,6 @@ function UI.New(app)
         local appStatus = self.statusCache or {}
         if type(appStatus) ~= "table" then appStatus = { detail = appStatus } end
         local detection = self:DetectionKey(appStatus)
-        local supportShown = self.statusPage == "support"
         local alertBlock = (nearbyShown and not preview or supportShown) and self:AlertBlock()
         if nearbyShown then
             local snapshot = preview and self.previewContacts or livePage
@@ -1391,8 +1392,11 @@ function UI.New(app)
                 if coverageHint then lines[#lines + 1] = self:T(coverageHint) end
                 local deferred = M.Number(appStatus.deferredNameplates, 0)
                 if deferred > 0 then lines[#lines + 1] = self:F("nameplatesCapacity", deferred) end
+                if M.Number(appStatus.unconfirmedEnemyContacts, 0) > 0 then lines[#lines + 1] = self:T("nameplatesIncomplete") end
                 if appStatus.writable == false then lines[#lines + 1] = self:T("sessionOnly") end
-                self.supportStatus:SetText(table.concat(lines, "\n\n"))
+                paintText(self.supportStatus, table.concat(lines, "\n\n"))
+                support.height = -supportTop + M.Number(self.supportStatus:GetStringHeight(), 208) + 176
+                if self.pageHeight ~= support.height then resizeSettingsPage(support.height) end
             end
             self.dataPage = self.currentPage
         else
