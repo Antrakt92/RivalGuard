@@ -212,6 +212,51 @@ function D.Attach(ui, app, H)
         f.input:SetFocus(); f.input:HighlightText()
     end
 
+    function self:OpenProfileDelete(name)
+        local profile = app.db:GetProfile(name)
+        if not profile or not app.db.DeleteProfile or name == "Default" or name == app.db:GetActiveProfileName() then return end
+        local f = ui.profileDeleteDialog
+        if not f then
+            f = dialog("RivalGuardProfileDelete", "deleteProfileTitle", 450, 222)
+            f:SetFrameStrata("FULLSCREEN_DIALOG")
+            f.current = H.font(f, 14, H.C.text)
+            f.current:SetPoint("TOPLEFT", 18, -54); f.current:SetWidth(414)
+            if f.current.SetNonSpaceWrap then f.current:SetNonSpaceWrap(true) end
+            local description = H.label(f, "deleteProfileDescription", 13, H.C.muted)
+            description:SetPoint("TOPLEFT", 18, -111); description:SetWidth(414)
+            f.feedback = H.font(f, 12, H.C.muted)
+            f.feedback:SetPoint("TOPLEFT", 18, -146); f.feedback:SetWidth(414)
+            f.cancel = H.localButton(f, "cancel", 130, function() f:Hide() end)
+            f.cancel:SetPoint("BOTTOMLEFT", 18, 18)
+            f.apply = H.localButton(f, "deleteProfile", 130, function()
+                if not f:IsShown() or not f.owner then return end
+                local sourceName = f.sourceName
+                if app.db:GetProfile(sourceName) ~= f.owner then
+                    f.feedback:SetText(t("profileMissing")); f.apply:SetEnabled(false)
+                    return
+                end
+                if sourceName == app.db:GetActiveProfileName() then
+                    f.feedback:SetText(t("deleteProfileActive")); f.apply:SetEnabled(false)
+                    return
+                end
+                if not app.db:DeleteProfile(sourceName) then return end
+                f:Hide()
+                if ui.profilePicker then ui.profilePicker:Hide() end
+                ui:RefreshProfiles()
+                if app.Notify then app:Notify(ui:F("profileDeleted", sourceName)) end
+            end)
+            f.apply:SetPoint("BOTTOMRIGHT", -18, 18)
+            f.apply.bg:SetColorTexture(0.31, 0.12, 0.14, 1)
+            f:SetScript("OnHide", function() f.owner, f.sourceName = nil, nil end)
+            ui.profileDeleteDialog = f
+        end
+        f.sourceName, f.owner = name, profile
+        f.current:SetText(name); f.feedback:SetText("")
+        f.apply:SetEnabled(true)
+        H.hideTooltip()
+        showDialog(f)
+    end
+
     function self:RuleDraft(index)
         local profile = ui:Profile()
         self.ruleIndex, self.ruleProfile = index, profile
@@ -859,6 +904,7 @@ function D.Attach(ui, app, H)
     function ui:OpenRules() self.dialogs:OpenRules() end
     function ui:OpenProfilePicker() self.dialogs:OpenProfilePicker() end
     function ui:OpenProfileRename(name) self.dialogs:OpenProfileRename(name) end
+    function ui:OpenProfileDelete(name) self.dialogs:OpenProfileDelete(name) end
     function ui:OpenSoundPicker(...) self.dialogs:OpenSoundPicker(...) end
     function ui:OpenTransfer(mode) self.dialogs:OpenTransfer(mode) end
     function ui:ShowGuide(replay) return self.dialogs:ShowGuide(replay) end

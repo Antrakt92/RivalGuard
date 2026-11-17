@@ -943,18 +943,7 @@ function UI.New(app)
         end)
         row.rename:SetPoint("RIGHT", -105, 0)
         row.delete = localButton(row, "deleteProfile", 95, function()
-            if not row.profileName or not app.db.DeleteProfile then return end
-            local profile = app.db:GetProfile(row.profileName)
-            if not profile then return end
-            if self.deleteProfileName ~= row.profileName or self.deleteProfileObject ~= profile or (self.deleteProfileAt or 0) < self:Now() then
-                self.deleteProfileName, self.deleteProfileAt = row.profileName, self:Now() + 5
-                self.deleteProfileObject = profile
-                notify("deleteConfirm"); return
-            end
-            local ok = app.db:DeleteProfile(row.profileName)
-            self.deleteProfileName, self.deleteProfileObject = nil, nil
-            if ok then app:ProfileChanged(); notify("profileDeleted") else notify("profileError") end
-            self:Refresh()
+            if row.profileName then self:OpenProfileDelete(row.profileName) end
         end)
         row.delete:SetPoint("RIGHT", 0, 0); self.profileRows[i] = row
     end

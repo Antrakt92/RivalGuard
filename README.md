@@ -53,6 +53,7 @@ current profile would handle that new sighting in the open world.
   **…** on Nearby or use `/rg profile` to switch
   quickly. `/rg profile NAME` activates an exact saved profile name.
   **Rename** updates the name of a custom profile in place.
+  **Delete** asks you to confirm the name of the inactive profile.
 - **Journal:** search names or notes and select a personal list directly.
   Retain all eligible encounters, listed players or observed threats.
 - **Support:** see available sensors, why alerts are quiet here and which

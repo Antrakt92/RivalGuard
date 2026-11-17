@@ -3009,6 +3009,94 @@ H.Test("renaming an inactive profile preserves the active selection and rejects 
     H.False(dialog:IsShown())
 end)
 
+H.Test("a named inactive-profile confirmation preserves pending work and journal state", function()
+    local state, RG, app = setup(nil, function(mock) mock.locale = "ruRU" end)
+    local db, ui = app.db, app.ui
+    local active = assert(db:CreateProfile("Active profile"))
+    local name = "Удаляемый профиль"
+    local inactive = assert(db:CreateProfile(name, "quiet"))
+    assert(app:UseProfile("Active profile"))
+    local savedRival = "guid:Player-SavedRival"
+    assert(db:SetList(savedRival, "watch", "Seen at the outpost", { name = "SavedRival", class = "HUNTER" }))
+    local list = RG.Codec.Encode(db:GetList())
+    seeSoundRuleRival(state, 1)
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-BeforeProfileDelete", 1856)
+    local generation, pending = app.sensors.active.nameplate1.generation, RG.Codec.Encode(app.engine.pending)
+    local journal = RG.Codec.Encode(db:GetJournal())
+    H.Equal(#app.engine.pending, 1)
+    local changed, prune, changes, prunes = app.ProfileChanged, db.Prune, 0, 0
+    app.ProfileChanged = function(self, ...)
+        changes = changes + 1
+        return changed(self, ...)
+    end
+    db.Prune = function(self, ...)
+        prunes = prunes + 1
+        return prune(self, ...)
+    end
+    ui:OpenSettings("profiles")
+    H.False(profileSettingsRow(ui, "Default").delete.enabled)
+    H.False(profileSettingsRow(ui, "Active profile").delete.enabled)
+    profileSettingsRow(ui, name).delete:Click()
+    local dialog = assert(ui.profileDeleteDialog, "profile confirmation did not open")
+    H.True(dialog:IsShown())
+    H.Equal(dialog.current:GetText(), name)
+    dialog.cancel:Click()
+    H.False(dialog:IsShown())
+    H.Equal(db:GetProfile(name), inactive)
+    H.Equal(RG.Codec.Encode(app.engine.pending), pending)
+
+    profileSettingsRow(ui, name).delete:Click()
+    state.api.SlashCmdList.RIVALGUARD("profile")
+    H.True(ui.profilePicker:IsShown())
+    H.True(dialog:IsShown())
+    dialog.apply:Click()
+    H.False(dialog:IsShown())
+    H.False(ui.profilePicker:IsShown())
+    H.Nil(db:GetProfile(name))
+    H.Equal(db:GetProfile(), active); H.Equal(app.engine.profile, active)
+    H.Equal(changes, 0); H.Equal(prunes, 0)
+    H.Equal(app.sensors.active.nameplate1.generation, generation)
+    H.Equal(RG.Codec.Encode(app.engine.pending), pending)
+    H.Equal(RG.Codec.Encode(db:GetJournal()), journal)
+    H.Equal(RG.Codec.Encode(db:GetList()), list)
+    H.True(state.messages[#state.messages]:find(ui:F("profileDeleted", name), 1, true) ~= nil)
+    for _, row in ipairs(ui.profileRows) do H.True(row.profileName ~= name) end
+    state:Advance(0.5)
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(app.engine.history[1].kind, "stealth")
+    state:Fire("PLAYER_LOGOUT")
+    local _, _, fresh = setup(state.api.RivalGuardDB)
+    H.Nil(fresh.db:GetProfile(name))
+    H.Equal(fresh.db:GetActiveProfileName(), "Active profile")
+    H.Equal(fresh.db:GetList()[savedRival].note, "Seen at the outpost")
+end)
+
+for _, change in ipairs({ "replacement", "activation" }) do
+    H.Test("profile deletion rejects a previously confirmed " .. change, function()
+        local _, _, app = setup()
+        local db, ui = app.db, app.ui
+        local name = "Do not delete"
+        local expected = assert(db:CreateProfile(name, "battleground"))
+        ui:OpenSettings("profiles")
+        profileSettingsRow(ui, name).delete:Click()
+        local dialog = assert(ui.profileDeleteDialog)
+        H.True(dialog:IsShown())
+        H.Equal(dialog.current:GetText(), name)
+        if change == "replacement" then
+            assert(db:DeleteProfile(name))
+            expected = assert(db:CreateProfile(name, "quiet"))
+        else
+            assert(app:UseProfile(name))
+            H.Equal(app.engine.profile, expected)
+        end
+        dialog.apply:Click()
+        H.Equal(db:GetProfile(name), expected)
+        H.Equal(db:GetActiveProfileName(), change == "activation" and name or "Default")
+        H.Equal(dialog.feedback:GetText(), ui:T(change == "activation" and "deleteProfileActive" or "profileMissing"))
+        H.False(dialog.apply.enabled)
+    end)
+end
+
 local function profileImportPayload(RG, detectionEnabled)
     local detached = RG.Database.New()
     local profile = detached:GetProfile()
