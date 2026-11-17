@@ -1441,6 +1441,74 @@ local function urgentRangeRule(profile, allowUnknown)
         range = 35, rangePolicy = "confirmed", rangeUnknown = allowUnknown }}
 end
 
+for _, locale in ipairs({ "enUS", "ruRU" }) do
+    H.Test("measured range distinguishes exactly 20 yards from 20.04 in " .. locale, function()
+        local _, app, see, move, RG = pendingRangeFixture(function(profile)
+            profile.locale = locale
+            profile.range.enabled, profile.range.yards, profile.range.policy, profile.range.unknown = true, 20, "confirmed", false
+        end)
+        local ui = app.ui
+        local function display(expected)
+            ui:Refresh()
+            H.True(ui.rows[1].detailText:GetText():find(expected, 1, true) ~= nil)
+            ui.rows[1]:Click()
+            H.True(ui.detailsFrame.info:GetText():find(expected, 1, true) ~= nil)
+            H.True(ui.detailsFrame.info:GetText():find(ui:T("rangeEvidenceExact"), 1, true) ~= nil)
+        end
+        see(1, 20)
+        local contact = app.engine:Snapshot()[1]
+        H.Equal(contact.rangeMin, 20); H.Equal(contact.rangeMax, 20)
+        H.True(app:Explain(contact).allowed)
+        display(ui:F("rangeMeasured", 20))
+
+        move(1, 20.04)
+        contact = app.engine:Snapshot()[1]
+        H.True(contact.rangeMin > 20)
+        H.Equal(app:Explain(contact).reason, "range_outside")
+        local approximate = ui:F("rangeMeasuredApprox", 20, 4)
+        H.True(approximate ~= ui:F("rangeMeasured", 20))
+        display(approximate)
+        ui:ShowExplanation()
+        H.Equal(ui.explanationFrame.reason:GetText(), RG.Locale.Reason("range_outside", locale))
+    end)
+end
+
+H.Test("a combined spell and interaction range shows the exclusive strict lower bound", function()
+    local state, RG, app = setup(nil, function(mock)
+        local api = mock.api
+        api.Enum = { SpellBookSpellBank = { Player = 0 }, SpellBookItemType = { Spell = 1 } }
+        api.C_SpellBook = {
+            GetNumSpellBookSkillLines = function() return 1 end,
+            GetSpellBookSkillLineInfo = function() return { itemIndexOffset = 0, numSpellBookItems = 1 } end,
+            GetSpellBookItemInfo = function() return { spellID = 123, itemType = 1, isPassive = false, isOffSpec = false } end,
+            IsSpellKnown = function() return true end,
+            IsSpellBookItemInRange = function() return false end,
+        }
+        api.C_Spell = {
+            GetSpellInfo = function() return { minRange = 0, maxRange = 20 } end,
+            IsSpellHarmful = function() return true end,
+        }
+        api.CheckInteractDistance = function(token, index) return token == "nameplate1" and index == 4 end
+    end)
+    local profile, ui = app.db:GetProfile(), app.ui
+    profile.range.enabled, profile.range.yards, profile.range.policy, profile.range.unknown = true, 20, "confirmed", false
+    app:OnSettingsChanged()
+    seeSoundRuleRival(state, 1)
+    local range = app.engine:Snapshot()[1]
+    H.Equal(range.rangeMin, 20); H.Equal(range.rangeMax, 28)
+    H.Equal(range.rangeEvidence, "combined"); H.True(range.rangeMinExclusive)
+    H.Equal(app:Explain(range).reason, "range_outside")
+    ui:Refresh()
+    ui.rows[1]:Click()
+    local expected = ui:F("rangeExclusiveBracket", 20, 28)
+    H.True(ui.rows[1].detailText:GetText():find(expected, 1, true) ~= nil)
+    H.True(ui.detailsFrame.info:GetText():find(expected, 1, true) ~= nil)
+    H.Nil(ui.detailsFrame.info:GetText():find(ui:F("rangeBracket", 20, 28), 1, true))
+    H.True(ui.detailsFrame.info:GetText():find(ui:T("rangeEvidenceCombined"), 1, true) ~= nil)
+    ui:ShowExplanation()
+    H.Equal(ui.explanationFrame.reason:GetText(), RG.Locale.Reason("range_outside", profile.locale))
+end)
+
 for _, movesNear in ipairs({ false, true }) do
     H.Test("a new exact range " .. (movesNear and "expedites" or "demotes") .. " a queued sighting", function()
         local state, app, see, move = pendingRangeFixture(function(profile) urgentRangeRule(profile, false) end)

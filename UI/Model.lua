@@ -113,14 +113,21 @@ function M.Range(contact, locale)
     if evidence == "conflict" or evidence == "unknown" then return RG.Locale.Get("rangeUnknown", locale) end
     local low = M.Number(contact.rangeMin)
     local high = M.Number(contact.rangeMax)
-    if low and low < 0 then low = nil end
-    if high and high < 0 then high = nil end
-    if low and high and low > high then return RG.Locale.Get("rangeUnknown", locale) end
-    if low and high and low > 0 then
-        return RG.Locale.Format("rangeBracket", locale, math.floor(low), math.ceil(high))
+    if low and (low < 0 or low > 10000) then low = nil end
+    if high and (high < 0 or high > 10000) then high = nil end
+    local exclusive = clean(contact.rangeMinExclusive) == true
+    if low and high and (low > high or (low == high and exclusive)) then return RG.Locale.Get("rangeUnknown", locale) end
+    if evidence == "exact" and low and low == high then
+        local whole = math.floor(low)
+        if low == whole then return RG.Locale.Format("rangeMeasured", locale, whole) end
+        local hundredths = math.floor(low * 100 + 0.5)
+        return RG.Locale.Format("rangeMeasuredApprox", locale, math.floor(hundredths / 100), hundredths % 100)
+    end
+    if low and high and (low > 0 or exclusive) then
+        return RG.Locale.Format(exclusive and "rangeExclusiveBracket" or "rangeBracket", locale, math.floor(low), math.ceil(high))
     end
     if high then return RG.Locale.Format("rangeWithin", locale, math.ceil(high)) end
-    if low then return RG.Locale.Format("rangeBeyond", locale, math.floor(low)) end
+    if low then return RG.Locale.Format(exclusive and "rangeBeyond" or "rangeAtLeast", locale, math.floor(low)) end
     return RG.Locale.Get("rangeUnknown", locale)
 end
 

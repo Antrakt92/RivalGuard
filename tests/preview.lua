@@ -130,6 +130,12 @@ elseif view == "export" then app.ui:OpenTransfer("export")
 elseif view == "details" and page == "sample" then
     app:Demo()
     app.ui:Select(app.ui.previewContacts[2])
+elseif view == "details" and page == "range-boundary" then
+    local name = locale == "ruRU" and "Противник у границы" or "Opponent near the limit"
+    local contact = app.engine:Observe({ token = "nameplate80", guid = "Player-RangeBoundaryPreview", name = name,
+        class = "HUNTER", hostile = true, isPlayer = true, source = "nameplate", rangeMin = 20, rangeMax = 28,
+        rangeMinExclusive = true, rangeEvidence = "combined" })
+    app.ui:Select(contact)
 elseif view == "details" then app.ui:Select(app.engine:Snapshot()[1])
 elseif view == "explanation" then
     if page == "wave-sound" then

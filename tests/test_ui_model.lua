@@ -24,6 +24,17 @@ H.Test("range provenance requires live compatible evidence", function()
     H.Equal(M.Range({ rangeEvidence = "conflict", rangeMax = 20 }, "enUS"), L.Get("rangeUnknown", "enUS"))
 end)
 
+H.Test("range labels retain inclusive and exclusive bounds and localize measured decimals", function()
+    local RG = addon()
+    local format = RG.UIModel.Range
+    H.Equal(format({ rangeEvidence = "exact", rangeMin = 0, rangeMax = 0 }, "enUS"), "0 yd")
+    H.Equal(format({ rangeEvidence = "exact", rangeMin = 20.04, rangeMax = 20.04 }, "ruRU"), "≈20,04 ярд.")
+    H.Equal(format({ rangeMin = 20, rangeMinExclusive = true, rangeMax = 28 }, "enUS"), ">20 · ≤28 yd")
+    H.Equal(format({ rangeMin = 20, rangeMinExclusive = true }, "enUS"), "Over 20 yd")
+    H.Equal(format({ rangeMin = 20 }, "enUS"), "At least 20 yd")
+    H.Equal(format({ rangeMin = 20, rangeMinExclusive = true, rangeMax = 20 }, "enUS"), "Range unknown")
+end)
+
 H.Test("class toggle starts from all classes and never mutates saved table", function()
     local RG = addon()
     local original = {}
