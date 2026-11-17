@@ -929,20 +929,24 @@ function UI.New(app)
     for i = 1, profilePageSize do
         local row = CreateFrame("Frame", nil, profiles)
         row:SetPoint("TOPLEFT", 0, firstProfileRowY - (i - 1) * profileRowSpacing); row:SetSize(550, 34)
-        row.nameText = font(row, 13); row.nameText:SetPoint("LEFT", 0, 0); row.nameText:SetWidth(220); row.nameText:SetJustifyV("MIDDLE")
+        row.nameText = font(row, 13); row.nameText:SetPoint("LEFT", 0, 0); row.nameText:SetWidth(142); row.nameText:SetJustifyV("MIDDLE")
         if row.nameText.SetMaxLines then row.nameText:SetMaxLines(1) end
         row:EnableMouse(true)
         row:SetScript("OnEnter", function() if row.profileName then tooltip(row, row.profileName) end end)
         row:SetScript("OnLeave", hideTooltip)
-        row.use = localButton(row, "useProfile", 82, function()
+        row.use = localButton(row, "useProfile", 70, function()
             if row.profileName then app:UseProfile(row.profileName) end
         end)
-        row.use:SetPoint("RIGHT", -237, 0)
-        row.rename = localButton(row, "renameProfile", 122, function()
+        row.use:SetPoint("RIGHT", -330, 0)
+        row.copy = localButton(row, "copyProfile", 96, function()
+            if row.profileName then self:OpenProfileCopy(row.profileName) end
+        end)
+        row.copy:SetPoint("RIGHT", -226, 0)
+        row.rename = localButton(row, "renameProfile", 116, function()
             if row.profileName then self:OpenProfileRename(row.profileName) end
         end)
-        row.rename:SetPoint("RIGHT", -105, 0)
-        row.delete = localButton(row, "deleteProfile", 95, function()
+        row.rename:SetPoint("RIGHT", -102, 0)
+        row.delete = localButton(row, "deleteProfile", 94, function()
             if row.profileName then self:OpenProfileDelete(row.profileName) end
         end)
         row.delete:SetPoint("RIGHT", 0, 0); self.profileRows[i] = row

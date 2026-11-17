@@ -288,11 +288,16 @@ function DB:ClearJournal()
     return count
 end
 
+local function profileSlotError(db, name)
+    if db.root.profiles[name] then return "profile_exists" end
+    if U.Count(db.root.profiles) >= MAX_PROFILES then return "profile_limit" end
+end
+
 function DB:CreateProfile(name, preset)
     name = profileName(name)
     if not name then return nil, "invalid_name" end
-    if self.root.profiles[name] then return nil, "profile_exists" end
-    if U.Count(self.root.profiles) >= MAX_PROFILES then return nil, "profile_limit" end
+    local reason = profileSlotError(self, name)
+    if reason then return nil, reason end
     local profile, err = D.NewProfile(preset)
     if not profile then return nil, err end
     self.root.profiles[name] = profile
@@ -323,11 +328,13 @@ end
 function DB:CopyProfile(name, source)
     name = profileName(name)
     if not name then return nil, "invalid_name" end
-    if not self.root.profiles[source or self.root.activeProfile] then return nil, "profile_missing" end
-    local created, err = self:CreateProfile(name)
-    if not created then return nil, err end
-    self.root.profiles[name] = U.Copy(self.root.profiles[source or self.root.activeProfile])
-    return self.root.profiles[name]
+    local profile = self:GetProfile(source)
+    if not profile then return nil, "profile_missing" end
+    local reason = profileSlotError(self, name)
+    if reason then return nil, reason end
+    local copy = U.Copy(profile)
+    self.root.profiles[name] = copy
+    return copy
 end
 
 function DB:DeleteProfile(name)

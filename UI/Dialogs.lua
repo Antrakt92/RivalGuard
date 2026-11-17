@@ -164,12 +164,14 @@ function D.Attach(ui, app, H)
         return edit
     end
 
-    function self:OpenProfileRename(name)
+    function self:OpenProfileNameDialog(name, copy)
         local profile = app.db:GetProfile(name)
-        if not profile or name == "Default" or not app.db.RenameProfile then return end
-        local f = ui.profileRenameDialog
+        if not profile or (not copy and name == "Default") then return end
+        local field = copy and "profileCopyDialog" or "profileRenameDialog"
+        local f = ui[field]
         if not f then
-            f = dialog("RivalGuardProfileRename", "renameProfile", 450, 218)
+            local frameName = copy and "RivalGuardProfileCopy" or "RivalGuardProfileRename"
+            f = dialog(frameName, copy and "copyProfileTitle" or "renameProfile", 450, 218)
             f:SetFrameStrata("FULLSCREEN_DIALOG")
             f.current = H.font(f, 13, H.C.muted)
             f.current:SetPoint("TOPLEFT", 18, -55); f.current:SetWidth(414)
@@ -180,33 +182,49 @@ function D.Attach(ui, app, H)
             f.input:SetPoint("TOPLEFT", 25, -107)
             f.feedback = H.font(f, 12, H.C.muted)
             f.feedback:SetPoint("TOPLEFT", 18, -145); f.feedback:SetWidth(414)
-            f.apply = H.localButton(f, "renameProfile", 160, function()
+            local function submit(activate)
                 if not f:IsShown() or not f.owner then return end
                 if app.db:GetProfile(f.sourceName) ~= f.owner then
                     f.feedback:SetText(t("profileMissing")); f.apply:SetEnabled(false)
+                    if f.applyAndUse then f.applyAndUse:SetEnabled(false) end
                     return
                 end
                 local newName = RG.Util.Text(f.input:GetText(), 64)
-                if newName == f.sourceName then f:Hide(); return end
-                if not app.db:RenameProfile(f.sourceName, newName) then f.feedback:SetText(t("profileError")); return end
+                if not copy and newName == f.sourceName then f:Hide(); return end
+                local result, reason
+                if copy then result, reason = app.db:CopyProfile(newName, f.sourceName)
+                else result, reason = app.db:RenameProfile(f.sourceName, newName) end
+                if not result then
+                    f.feedback:SetText(t(reason == "profile_limit" and "profileLimit" or "profileError"))
+                    return
+                end
                 f:Hide()
                 if ui.profilePicker then ui.profilePicker:Hide() end
+                if activate then app:UseProfile(newName)
+                elseif app.Notify then app:Notify(ui:F(copy and "profileCreated" or "profileRenamed", newName)) end
                 ui:RevealProfile(newName)
-                if app.Notify then app:Notify(ui:F("profileRenamed", newName)) end
-            end)
+            end
+            f.apply = H.localButton(f, copy and "saveProfileCopy" or "renameProfile", 184, function() submit(false) end)
             f.apply:SetPoint("BOTTOMLEFT", 18, 18)
+            if copy then
+                f.applyAndUse = H.localButton(f, "copyAndUseProfile", 206, function() submit(true) end)
+                f.applyAndUse:SetPoint("BOTTOMRIGHT", -18, 18)
+            end
             f.input:SetScript("OnEnterPressed", function() f.apply:Click() end)
             f.input:SetScript("OnEscapePressed", function() f:Hide() end)
-            f.input:SetScript("OnTextChanged", function() f.feedback:SetText("") end)
+            f.input:SetScript("OnTextChanged", function()
+                if f.owner and app.db:GetProfile(f.sourceName) == f.owner then f.feedback:SetText("") end
+            end)
             f:SetScript("OnHide", function()
                 f.owner, f.sourceName = nil, nil
                 f.input:ClearFocus()
             end)
-            ui.profileRenameDialog = f
+            ui[field] = f
         end
         f.sourceName, f.owner = name, profile
-        f.current:SetText(name); f.input:SetText(name); f.feedback:SetText("")
+        f.current:SetText(name); f.input:SetText(copy and "" or name); f.feedback:SetText("")
         f.apply:SetEnabled(true)
+        if f.applyAndUse then f.applyAndUse:SetEnabled(true) end
         H.hideTooltip()
         showDialog(f)
         f.input:SetFocus(); f.input:HighlightText()
@@ -903,7 +921,8 @@ function D.Attach(ui, app, H)
 
     function ui:OpenRules() self.dialogs:OpenRules() end
     function ui:OpenProfilePicker() self.dialogs:OpenProfilePicker() end
-    function ui:OpenProfileRename(name) self.dialogs:OpenProfileRename(name) end
+    function ui:OpenProfileRename(name) self.dialogs:OpenProfileNameDialog(name, false) end
+    function ui:OpenProfileCopy(name) self.dialogs:OpenProfileNameDialog(name, true) end
     function ui:OpenProfileDelete(name) self.dialogs:OpenProfileDelete(name) end
     function ui:OpenSoundPicker(...) self.dialogs:OpenSoundPicker(...) end
     function ui:OpenTransfer(mode) self.dialogs:OpenTransfer(mode) end

@@ -55,6 +55,11 @@ if view == "settings" then
         assert(app.db:CreateProfile(name, "farming"))
         app.ui:OpenSettings("profiles")
         app.ui:OpenProfileDelete(name)
+    elseif page == "profile-copy" then
+        local name = locale == "ruRU" and "Вечерний патруль у заставы" or "Evening patrol near the outpost"
+        assert(app.db:CreateProfile(name, "farming"))
+        app.ui:OpenSettings("profiles")
+        app.ui.profileRows[2].copy:Click()
     elseif page == "profile-picker" then
         assert(app.db:CreateProfile(RG.Locale.Get("quiet", locale), "quiet"))
         assert(app.db:CreateProfile(RG.Locale.Get("farming", locale), "farming"))

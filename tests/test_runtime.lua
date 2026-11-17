@@ -3097,6 +3097,111 @@ for _, change in ipairs({ "replacement", "activation" }) do
     end)
 end
 
+H.Test("copying an inactive profile saves an independent Unicode profile without interrupting a queued alert", function()
+    local state, RG, app = setup(nil, function(mock) mock.locale = "ruRU" end)
+    local db, ui = app.db, app.ui
+    local active = db:GetProfile()
+    local source = assert(db:CreateProfile("Copy source", "quiet"))
+    source.alerts.classes, source.alerts.sounds.stealth = { HUNTER = true }, "quest"
+    source.range.enabled, source.range.yards = true, 25
+    local rule = soundRule("Source cue", "quest", 85)
+    rule.classes = { HUNTER = true }
+    source.rules = { rule }
+    for index = 1, 9 do assert(db:CreateProfile(string.format("Field %02d", index))) end
+    seeSoundRuleRival(state, 1)
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-BeforeProfileCopy", 1856)
+    assert(db:SetList("guid:Player-CopyLocal", "watch", "Local note", { name = "Local rival" }))
+    local pending = RG.Codec.Encode(app.engine.pending)
+    local personal, history = RG.Codec.Encode(db:GetList()), RG.Codec.Encode(db:GetJournal())
+    local generation, frame = app.sensors.active.nameplate1.generation, app.sensors.frame
+    local changed, changes = app.ProfileChanged, 0
+    app.ProfileChanged = function(self, ...)
+        changes = changes + 1
+        return changed(self, ...)
+    end
+
+    ui:OpenSettings("profiles")
+    H.True(profileSettingsRow(ui, "Default").copy.enabled)
+    profileSettingsRow(ui, "Copy source").copy:Click()
+    local dialog = assert(ui.profileCopyDialog)
+    H.True(dialog:IsShown())
+    H.Equal(dialog.current:GetText(), "Copy source")
+    local name = "Резервный профиль"
+    dialog.input:SetText("  " .. name .. "  ")
+    dialog.input.scripts.OnEnterPressed(dialog.input)
+    H.False(dialog:IsShown())
+    local copied = assert(db:GetProfile(name))
+    H.True(copied ~= source)
+    H.Equal(RG.Codec.Encode(copied), RG.Codec.Encode(source))
+    H.True(copied.alerts ~= source.alerts and copied.alerts.sounds ~= source.alerts.sounds)
+    H.True(copied.rules[1] ~= rule and copied.rules[1].classes ~= rule.classes)
+    copied.alerts.sounds.stealth, copied.rules[1].classes.HUNTER = "warning", false
+    H.Equal(source.alerts.sounds.stealth, "quest"); H.True(rule.classes.HUNTER)
+    H.True(profileSettingsRow(ui, name).use.enabled)
+    H.Equal(db:GetProfile(), active); H.Equal(app.engine.profile, active)
+    H.Equal(changes, 0)
+    H.Equal(app.sensors.frame, frame); H.Equal(app.sensors.active.nameplate1.generation, generation)
+    H.Equal(RG.Codec.Encode(app.engine.pending), pending)
+    H.Equal(RG.Codec.Encode(db:GetList()), personal); H.Equal(RG.Codec.Encode(db:GetJournal()), history)
+    state:Advance(0.5)
+    H.Equal(app.engine.history[1].kind, "stealth")
+    state:Fire("PLAYER_LOGOUT")
+    local _, _, fresh = setup(state.api.RivalGuardDB)
+    H.Equal(fresh.db:GetActiveProfileName(), "Default")
+    H.Equal(fresh.db:GetProfile(name).alerts.sounds.stealth, "warning")
+    H.Equal(fresh.db:GetProfile("Copy source").alerts.sounds.stealth, "quest")
+end)
+
+H.Test("explicit profile copying can switch and rejects stale, duplicate, and full targets", function()
+    local _, _, app = setup()
+    local db, ui = app.db, app.ui
+    local default = db:GetProfile()
+    assert(db:CreateProfile("Copy from here", "farming"))
+    ui:OpenSettings("profiles")
+    profileSettingsRow(ui, "Copy from here").copy:Click()
+    local dialog = assert(ui.profileCopyDialog)
+    dialog.input:SetText("Default")
+    dialog.applyAndUse:Click()
+    H.True(dialog:IsShown())
+    H.Equal(dialog.feedback:GetText(), ui:T("profileError"))
+    H.Equal(dialog.input:GetText(), "Default")
+    H.Equal(db:GetProfile(), default)
+    H.Equal(#db:ListProfiles(), 2)
+
+    assert(db:DeleteProfile("Copy from here"))
+    local replacement = assert(db:CreateProfile("Copy from here", "quiet"))
+    replacement.enabled = false
+    dialog.input:SetText("Must not copy")
+    dialog.apply:Click()
+    H.Equal(dialog.feedback:GetText(), ui:T("profileMissing"))
+    H.Nil(db:GetProfile("Must not copy"))
+    H.Equal(db:GetProfile("Copy from here"), replacement)
+    H.Equal(db:GetProfile(), default)
+    dialog.input.scripts.OnEscapePressed(dialog.input)
+    H.False(dialog:IsShown())
+
+    profileSettingsRow(ui, "Copy from here").copy:Click()
+    dialog.input:SetText("Activated copy")
+    dialog.applyAndUse:Click()
+    H.False(dialog:IsShown())
+    H.Equal(db:GetActiveProfileName(), "Activated copy")
+    H.Equal(app.engine.profile, db:GetProfile())
+    H.True(db:GetProfile() ~= replacement)
+    H.False(app.sensors.running)
+    H.Equal(app:Status().detectionState, "disabled")
+    for index = #db:ListProfiles() + 1, 20 do assert(db:CreateProfile(string.format("Filler %02d", index))) end
+    ui:OpenSettings("profiles")
+    profileSettingsRow(ui, "Activated copy").copy:Click()
+    dialog.input:SetText("At capacity")
+    dialog.apply:Click()
+    H.True(dialog:IsShown())
+    H.Equal(dialog.feedback:GetText(), ui:T("profileLimit"))
+    H.Equal(dialog.input:GetText(), "At capacity")
+    H.Nil(db:GetProfile("At capacity"))
+    H.Equal(db:GetActiveProfileName(), "Activated copy")
+    H.Equal(#db:ListProfiles(), 20)
+end)
+
 local function profileImportPayload(RG, detectionEnabled)
     local detached = RG.Database.New()
     local profile = detached:GetProfile()
