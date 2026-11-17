@@ -4733,6 +4733,112 @@ local function returnStealthFixture(state, app, unit)
     return first
 end
 
+local function returnFixtureRival(state, seconds)
+    local unit = assert(state.units.nameplate1)
+    state.units.nameplate1 = nil
+    state:Fire("NAME_PLATE_UNIT_REMOVED", "nameplate1")
+    state.clock.Advance(seconds)
+    state:Unit("nameplate1", unit)
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+end
+
+H.Test("a return-only sound plays after a silent first encounter", function()
+    local state, app, profile = ruleSoundFixture()
+    profile.alerts.banner = false
+    profile.alerts.sounds.returning = "ready"
+    app:OnSettingsChanged()
+    seeSoundRuleRival(state, 1)
+    state:Advance(1.25)
+    H.Equal(#app.engine.history, 0)
+    H.Equal(#state.sounds, 0)
+    H.Equal(app.db:GetJournal()[1].encounters, 1)
+
+    returnFixtureRival(state, profile.alerts.returnAfter + 1)
+    state:Advance(1.25)
+    H.Equal(#app.engine.history, 1)
+    H.Equal(app.engine.history[1].kind, "returning")
+    H.Equal(#state.sounds, 1)
+    H.Equal(state.sounds[1].id, RULE_SOUND_KITS.READY_CHECK)
+    H.False(app.ui.banner:IsShown())
+    H.Equal(app.db:GetJournal()[1].encounters, 2)
+end)
+
+H.Test("a suppressed return is not retried as a new sighting", function()
+    local state, app, profile = ruleSoundFixture()
+    profile.alerts.banner = false
+    app:OnSettingsChanged()
+    seeSoundRuleRival(state, 1)
+    state:Advance(1.25)
+    H.Equal(#state.sounds, 0)
+    local rule = soundRule("Suppress returning rivals", nil, 90)
+    rule.event, rule.action = "returning", "suppress"
+    profile.rules = { rule }
+    profile.alerts.sounds.sighting = "ping"
+    profile.alerts.sounds.returning = "ready"
+    app:OnSettingsChanged()
+
+    returnFixtureRival(state, profile.alerts.returnAfter + 1)
+    state:Advance(2)
+    H.Equal(#app.engine.history, 0)
+    H.Equal(#state.sounds, 0)
+    H.Equal(app.db:GetJournal()[1].encounters, 2)
+    seeSoundRuleRival(state, 2)
+    state:Advance(1.25)
+    H.Equal(#app.engine.history, 1)
+    H.Equal(app.engine.history[1].kind, "sighting")
+    H.Equal(#state.sounds, 1)
+    H.Equal(state.sounds[1].id, RULE_SOUND_KITS.MAP_PING)
+end)
+
+H.Test("a normal long return still alerts and records a second encounter", function()
+    local state, _, app = setup()
+    local profile = app.db:GetProfile()
+    seeSoundRuleRival(state, 1)
+    state:Advance(1.25)
+    H.Equal(app.engine.history[1].kind, "sighting")
+    returnFixtureRival(state, profile.alerts.returnAfter + 1)
+    state:Advance(1.25)
+    H.Equal(#app.engine.history, 2)
+    H.Equal(app.engine.history[2].kind, "returning")
+    H.Equal(#state.sounds, 2)
+    H.Equal(app.db:GetJournal()[1].encounters, 2)
+end)
+
+for _, newEncounter in ipairs({ false, true }) do
+    H.Test("a previously queued Vanish " .. (newEncounter and "expires at the exact return boundary" or "survives a brief departure"), function()
+        local state, _, app = setup()
+        app.db:GetProfile().alerts.returnAfter = 5
+        app:OnSettingsChanged()
+        seeSoundRuleRival(state, 1)
+        state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-PreviousEncounter", 1856)
+        H.Equal(app.engine.counters.alerts, 0)
+        returnFixtureRival(state, newEncounter and 5 or 4.99)
+        local current = app.engine:Snapshot()[1]
+        if newEncounter then H.Nil(current.stealth) else H.Equal(current.stealth, "confirmed") end
+        app.engine:Tick()
+        H.Equal(app.engine.counters.alerts, newEncounter and 0 or 1)
+        H.Equal(app.db:GetJournal()[1].encounters, newEncounter and 2 or 1)
+        if not newEncounter then
+            H.Equal(app.engine.history[1].kind, "stealth")
+            H.Equal(#state.sounds, 1)
+            return
+        end
+
+        state.clock.Advance(0.85)
+        app.engine:Tick()
+        H.Equal(app.engine.counters.alerts, 1)
+        H.Equal(app.engine.history[1].kind, "returning")
+        state.clock.Advance(0.3)
+        state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-NewEncounter", 1856)
+        app.engine:Tick()
+        H.Equal(app.engine.counters.alerts, 2)
+        H.Equal(app.engine.history[2].kind, "stealth")
+        H.Equal(app.ui.banner.title:GetText(), app.ui:F("stealthCast", app.ui:T("spellVanish")))
+        H.Equal(#state.sounds, 2)
+        H.Equal(app.db:GetJournal()[1].encounters, 2)
+    end)
+end
+
 H.Test("a long return with unreadable aura does not inherit an old cast or add a threat", function()
     local state, app, unit = stealthFixture(false)
     local first = returnStealthFixture(state, app, unit)

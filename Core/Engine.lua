@@ -387,7 +387,7 @@ end
 
 function E:RememberEvictedEncounter(contact, now)
     if not contact.guid or now - contact.lastSeen >= self.profile.alerts.returnAfter then return nil end
-    if not (contact.encounterRecorded or contact.arrivalNotified or contact.lastStealthCast
+    if not (contact.encounterRecorded or contact.arrivalNotified or contact.hasReturned or contact.lastStealthCast
         or contact.targetingNotified ~= nil or contact.stealth) then return nil end
     -- Capacity eviction cannot end an encounter on its own. Keep bounded
     -- session evidence keyed by GUID and leave live state to fresh unit reads.
@@ -398,7 +398,7 @@ function E:RememberEvictedEncounter(contact, now)
     end
     local record = {
         guid = contact.guid, slot = cursor, lastSeen = contact.lastSeen,
-        encounterRecorded = contact.encounterRecorded, arrivalNotified = contact.arrivalNotified,
+        encounterRecorded = contact.encounterRecorded, arrivalNotified = contact.arrivalNotified, hasReturned = contact.hasReturned,
         notifiedClass = contact.notifiedClass, lastStealthCast = contact.lastStealthCast,
         targetingNotified = contact.targetingNotified, stealth = contact.stealth,
     }
@@ -413,6 +413,7 @@ function E:RestoreEvictedEncounter(contact, now)
     if not record then return nil end
     self.evictedEncounters[contact.guid], self.evictionSlots[record.slot] = nil, nil
     if now - record.lastSeen >= self.profile.alerts.returnAfter then return nil end
+    contact.hasReturned = contact.hasReturned or record.hasReturned
     contact.encounterRecorded = contact.encounterRecorded or record.encounterRecorded
     contact.arrivalNotified = contact.arrivalNotified or record.arrivalNotified
     contact.notifiedClass = contact.notifiedClass or record.notifiedClass
@@ -420,7 +421,7 @@ function E:RestoreEvictedEncounter(contact, now)
     if contact.targetingNotified ~= true and record.targetingNotified ~= nil then
         contact.targetingNotified = record.targetingNotified
     end
-    if record.arrivalNotified and contact.arrivalQueued then
+    if (record.arrivalNotified or record.hasReturned) and contact.arrivalQueued then
         for index = #self.pending, 1, -1 do
             local item = self.pending[index]
             if item.id == contact.id and item.event == "sighting" then table.remove(self.pending, index) end
@@ -497,6 +498,7 @@ function E:Merge(target, other)
     end
     target.firstSeen = math.min(target.firstSeen, other.firstSeen)
     target.lastSeen = math.max(target.lastSeen, other.lastSeen)
+    target.hasReturned = target.hasReturned or other.hasReturned
     target.arrivalNotified = target.arrivalNotified or other.arrivalNotified
     target.arrivalQueued = target.arrivalQueued or other.arrivalQueued
     target.encounterRecorded = target.encounterRecorded or other.encounterRecorded
@@ -514,8 +516,13 @@ function E:Merge(target, other)
         target.stealth, target.stealthAt = other.stealth, other.stealthAt
         target.stealthEvidence, target.stealthSpell = other.stealthEvidence, other.stealthSpell
     end
-    for _, item in ipairs(self.pending) do
+    for index = #self.pending, 1, -1 do
+        local item = self.pending[index]
         if item.id == other.id then item.id = target.id end
+        if item.id == target.id and target.hasReturned and item.event == "sighting" then
+            table.remove(self.pending, index)
+            target.arrivalQueued = false
+        end
     end
     for kind in pairs({ sighting = true, returning = true, watch = true, targeting = true, stealth = true, identified = true }) do
         local old = self.cooldowns[other.id .. ":" .. kind]
@@ -556,8 +563,18 @@ function E:CoalesceContactPending(contact)
     end
 end
 
+function E:DiscardContactPending(contact)
+    for index = #self.pending, 1, -1 do
+        if self.pending[index].id == contact.id then table.remove(self.pending, index) end
+    end
+    contact.arrivalQueued = false
+end
+
 function E:ResetReturningEncounter(contact, now)
     if next(contact.tokens) ~= nil or now - contact.lastSeen < self.profile.alerts.returnAfter then return false end
+    -- Returning is a new encounter even if the previous sighting was silent.
+    self:DiscardContactPending(contact)
+    contact.hasReturned = true
     contact.encounterRecorded = false
     contact.targetingNotified = nil
     contact.soundOutcome = nil
@@ -673,10 +690,10 @@ function E:Observe(raw)
         if merged then self:CoalesceContactPending(contact) end
     end
     self:RecordEncounter(contact, now)
-    if not contact.arrivalNotified and not contact.arrivalQueued then
-        contact.arrivalQueued = self:Queue(contact, "sighting")
-    elseif returning then
+    if returning then
         self:Queue(contact, "returning")
+    elseif not contact.hasReturned and not contact.arrivalNotified and not contact.arrivalQueued then
+        contact.arrivalQueued = self:Queue(contact, "sighting")
     end
     if not oldClass and contact.class and contact.arrivalNotified and not contact.notifiedClass then self:Queue(contact, "identified") end
     if contact.stealth and not oldStealth then self:Queue(contact, "stealth") end
@@ -693,10 +710,8 @@ end
 function E:Disqualify(contact, contradiction)
     if contradiction.hostile == false then contact.hostile = false end
     if contradiction.isPlayer == false then contact.isPlayer = false end
-    contact.targeting, contact.targetingNotified, contact.arrivalQueued = nil, nil, false
-    for index = #self.pending, 1, -1 do
-        if self.pending[index].id == contact.id then table.remove(self.pending, index) end
-    end
+    contact.targeting, contact.targetingNotified = nil, nil
+    self:DiscardContactPending(contact)
 end
 
 function E:Remove(token, contradiction)
@@ -1052,10 +1067,7 @@ function E:ToggleContactSnooze(id, seconds)
         expiry = now + U.Clamp(seconds, 1, 3600, 600)
         self.snoozes[contact.identity] = expiry
     end
-    for index = #self.pending, 1, -1 do
-        if self.pending[index].id == id then table.remove(self.pending, index) end
-    end
-    contact.arrivalQueued = false
+    self:DiscardContactPending(contact)
     self:Changed()
     return true, expiry
 end

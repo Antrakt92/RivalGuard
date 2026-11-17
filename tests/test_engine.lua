@@ -149,6 +149,45 @@ H.Test("brief disappearance has no return alert while long absence does", functi
     H.Equal(#alerts, 2); H.Equal(alerts[2].kind, "returning")
 end)
 
+H.Test("an anonymous sighting cannot override the returning rule when its owner is recognized", function()
+    local engine, clock, alerts, observe, tick, profile = setup(function(p)
+        p.alerts.returnAfter = 5
+        p.alerts.sound, p.alerts.banner = false, false
+        p.rules = { { enabled = true, event = "returning", classes = {}, action = "suppress" } }
+    end)
+    local first = observe("nameplate1", "Owner")
+    engine:Remove("nameplate1")
+    clock.Advance(5)
+    profile.alerts.banner = true
+    observe("nameplate2", nil)
+    H.Equal(#engine.pending, 1)
+    H.Equal(engine.pending[1].event, "sighting")
+    H.Equal(observe("nameplate2", "Owner").id, first.id)
+    tick()
+    H.Equal(#alerts, 0)
+    H.Equal(#engine.pending, 0)
+end)
+
+H.Test("eviction cannot turn a suppressed return into a first sighting", function()
+    local engine, clock, alerts, observe, tick, profile = setup(function(p)
+        p.alerts.returnAfter = 5
+        p.retention.maxContacts = 1
+        p.alerts.sound, p.alerts.banner = false, false
+        p.rules = { { enabled = true, event = "returning", classes = {}, action = "suppress" } }
+    end)
+    engine.onEncounter = nil
+    local first = observe("nameplate1", "Owner")
+    engine:Remove("nameplate1")
+    clock.Advance(5)
+    H.Equal(observe("nameplate1", "Owner").id, first.id)
+    H.True(observe("nameplate2", "Other").id ~= first.id)
+    H.Nil(engine.contacts[first.id])
+    profile.alerts.banner = true
+    H.True(observe("nameplate1", "Owner").id ~= first.id)
+    tick()
+    H.Equal(#alerts, 0)
+end)
+
 H.Test("disappearance never fabricates confirmed stealth and stale casts are dropped", function()
     local engine, _, alerts, observe, tick = setup()
     observe("nameplate1", "A"); tick()
