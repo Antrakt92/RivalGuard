@@ -62,6 +62,8 @@ current profile would handle that new sighting in the open world.
   **Delete** asks you to confirm the name of the inactive profile.
 - **Journal:** search names or notes and select a personal list directly.
   Retain all eligible encounters, listed players or observed threats.
+  If a live contact disappears while you edit a note, you can finish the draft
+  when the same verified player still has an entry in Recent.
 - **Support:** see available sensors, why alerts are quiet here and which
   nameplate options affect coverage. The copyable report includes the current
   detection status, nameplates waiting for a free slot, incomplete recent

@@ -5894,6 +5894,112 @@ H.Test("nameplate highlight leaves a note draft intact", function()
     H.Nil(app.db:GetList()[ui.selected.identity])
 end)
 
+local function recentNoteDraftFixture(raw)
+    local state, _, app = setup(raw)
+    local unit = { guid = "Player-LocatorOwner", name = "Locator", realm = "FixtureRealm",
+        class = "ROGUE", hostile = true, isPlayer = true }
+    state:Unit("nameplate1", unit)
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    state:Advance(0.5)
+    local ui = app.ui
+    ui.rows[1]:Click()
+    local detail, selected = ui.detailsFrame, ui.selected
+    local text = "Private draft after departure"
+    detail.note:SetFocus()
+    detail.note:SetText(text)
+    detail.note.scripts.OnTextChanged(detail.note, true)
+    H.Equal(ui.noteDraft.text, text)
+    return state, app, ui, detail, selected, text
+end
+
+for _, loss in ipairs({ "shard refresh", "shard immediate save", "live retention" }) do
+    H.Test("an exact-GUID Nearby note draft can be saved to its Recent record after " .. loss, function()
+        local key = "guid:Player-LocatorOwner"
+        local alias = "name:Locator-FixtureRealm"
+        local lists = loss ~= "shard immediate save" and {
+            [key] = { kind = "watch", name = "Locator", class = "ROGUE", note = "Prior exact note" },
+            [alias] = { kind = "avoid", name = "Locator-FixtureRealm", class = "ROGUE", note = "Name-based note" },
+        } or {}
+        local state, app, ui, detail, selected, draft = recentNoteDraftFixture({ schemaVersion = 1, lists = lists })
+        H.Equal(detail.listIdentity, key)
+        H.Equal(app.db:GetJournal()[1].identity, key)
+        state.units.nameplate1 = nil
+        if loss == "live retention" then
+            state:Fire("NAME_PLATE_UNIT_REMOVED", "nameplate1")
+            state.clock.Advance(app.db:GetProfile().retention.contactSeconds + 1)
+            app.engine:Tick()
+        else
+            state:Fire("SHARD_TRANSFER")
+        end
+        H.Equal(#app.engine:Snapshot(), 0)
+        H.Nil(app:SetNote(selected, "Direct stale write"))
+        local before = app.db:GetList()[key]
+        H.Equal(before and before.note, lists[key] and lists[key].note)
+        if loss ~= "shard immediate save" then
+            ui:Refresh()
+            H.True(ui.selectedFromJournal)
+            H.True(ui.selected.sources.journal)
+            H.Equal(ui.selected.identity, key)
+            H.Equal(detail.note:GetText(), draft)
+            H.True(detail.note:HasFocus())
+            H.Equal(detail.listIdentity, key)
+            H.False(detail.locate:IsShown())
+            H.False(detail.snooze:IsShown())
+        end
+        detail.saveNote:Click()
+        H.True(ui.selectedFromJournal)
+        H.Equal(app.db:GetList()[key].note, draft)
+        H.Equal(app.db:GetList()[key].kind, lists[key] and "watch" or "note")
+        local unchanged = app.db:GetList()[alias]
+        H.Equal(unchanged and unchanged.note, lists[alias] and lists[alias].note)
+        H.Equal(detail.note:GetText(), draft)
+        H.False(detail.note:HasFocus())
+        H.True(detail:IsShown())
+    end)
+end
+
+for _, unsafe in ipairs({ "missing Recent", "name-bound list", "streamer mode", "cleared Recent" }) do
+    H.Test("a departed Nearby note cannot be saved through a " .. unsafe .. " draft fallback", function()
+        local aliasKey = "name:Locator-FixtureRealm"
+        local raw
+        if unsafe == "name-bound list" then
+            raw = { schemaVersion = 1, lists = {
+                [aliasKey] = { kind = "watch", class = "ROGUE", note = "Original alias note" },
+            } }
+        end
+        local state, app, ui, detail, selected = recentNoteDraftFixture(raw)
+        local key = selected.identity
+        if unsafe == "name-bound list" then
+            H.Equal(ui.noteDraft.identity, aliasKey)
+        else
+            H.Equal(ui.noteDraft.identity, key)
+        end
+        H.Equal(app.db:GetJournal()[1].identity, key)
+        if unsafe == "missing Recent" then
+            H.Equal(app.db:ClearJournal(), 1)
+        elseif unsafe == "streamer mode" then
+            app.db:GetProfile().display.streamer = true
+            app:OnSettingsChanged()
+        end
+        state.units.nameplate1 = nil
+        state:Fire("SHARD_TRANSFER")
+        if unsafe == "cleared Recent" then
+            ui:Refresh()
+            H.True(ui.selectedFromJournal)
+            H.True(detail.note:HasFocus())
+            H.Equal(app.db:ClearJournal(), 1)
+        end
+        detail.saveNote:Click()
+        ui:Refresh()
+        H.Nil(app.db:GetList()[key])
+        if unsafe ~= "cleared Recent" then H.False(ui.selectedFromJournal) end
+        H.Nil(ui.noteDraft)
+        H.False(detail.note:HasFocus())
+        H.Equal(detail.note:GetText(), "")
+        if unsafe == "name-bound list" then H.Equal(app.db:GetList()[aliasKey].note, "Original alias note") end
+    end)
+end
+
 H.Test("fail once before UI creation preserves saved data and allows clean retry", function()
     local state = W.New()
     local raw = { schemaVersion = 1, activeProfile = "Default", profiles = {} }

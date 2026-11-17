@@ -360,6 +360,13 @@ function UI.New(app)
     end
 
     local function listEntry(contact)
+        if contact and contact.recentDraft then
+            local identity = contact.identity
+            if not app.db:HasJournalEntry(identity) then return nil end
+            local entry, key = app:ResolveJournalListEntry(identity)
+            if key == identity then return entry, key end
+            return nil
+        end
         if app.ResolveList then return app:ResolveList(contact) end
         local identity = M.EditableIdentity(contact)
         if identity then return app.db:GetList()[identity], identity end
@@ -368,6 +375,18 @@ function UI.New(app)
     local function journalListEntry(identity)
         if app.ResolveJournalListEntry then return app:ResolveJournalListEntry(identity) end
         return app.db:GetList()[identity]
+    end
+
+    local function journalCard(entry, epoch, now)
+        entry.searchName = nil
+        entry.id, entry.visible, entry.sources = entry.identity, false, { journal = true }
+        if not entry.savedOnly then
+            local recorded = M.Number(entry.lastSeen)
+            entry.lastSeen = epoch and epoch > 0 and recorded and recorded > 0 and now - math.max(0, epoch - recorded) or nil
+            local record = journalListEntry(entry.identity)
+            if record then entry.note, entry.listKind = record.note, record.kind end
+        end
+        return entry
     end
 
     local function setList(contact, kind, note)
@@ -1242,18 +1261,7 @@ function UI.New(app)
         local now = self:Now()
         for i, row in ipairs(self.journalRows) do
             local entry = entries[entryOffset + i]
-            if entry then
-                entry.searchName = nil
-                entry.id = entry.identity
-                entry.visible = false
-                entry.sources = { journal = true }
-                if not entry.savedOnly then
-                    local recorded = M.Number(entry.lastSeen)
-                    entry.lastSeen = epoch and epoch > 0 and recorded and recorded > 0 and now - math.max(0, epoch - recorded) or nil
-                    local record = journalListEntry(entry.identity)
-                    if record then entry.note, entry.listKind = record.note, record.kind end
-                end
-            end
+            if entry then journalCard(entry, epoch, now) end
             row.contact = entry
             paintShown(row, entry ~= nil)
             if entry then
@@ -1292,7 +1300,7 @@ function UI.New(app)
         end
         local nearbyShown = profile.display.showList or preview == true
         local detailsShown = self.detailsFrame and self.detailsFrame:IsShown() and self.selected
-        local liveDetailsShown = detailsShown and not self.selected.preview
+        local liveDetailsShown = detailsShown and not self.selected.preview and not self.selected.recentDraft
         local maxRows = math.floor(RG.Util.Clamp(profile.display.maxRows, 3, 20, 8))
         local livePage, nearbyCount, nearbyVisible, nearbyIds
         local paged = nearbyShown and not preview
@@ -1651,6 +1659,24 @@ function UI.New(app)
         self:ShowDetails()
     end
 
+    function self:KeepNoteInRecent()
+        local contact, draft = self.selected, self.noteDraft
+        if not contact or not draft or self.selectedFromJournal or self:Profile().display.streamer or not app.db.GetJournalEntry then return end
+        local identity = M.EditableIdentity(contact)
+        if not identity or not identity:match("^guid:") or draft.identity ~= identity
+            or self.detailsFrame.listIdentity ~= identity then return end
+        local _, currentKey = listEntry(contact)
+        if currentKey then return end
+        local record = app.db:GetJournalEntry(identity)
+        if not record then return end
+        local _, recentKey = journalListEntry(identity)
+        if recentKey ~= identity then return end
+        local epoch = app.engine.epoch and M.Number(app.engine.epoch())
+        self.selected = journalCard(record, epoch, self:Now())
+        self.selected.recentDraft = true
+        self.selectedFromJournal, self.selectedOutside, self.locateFailed = true, true, nil
+    end
+
     function self:ShowDetails(refreshOnly)
         if not self.detailsFrame then
             local detail = self:Window("RivalGuardDetails", UIParent)
@@ -1668,6 +1694,7 @@ function UI.New(app)
             detail.notice = font(detail, 11, C.muted)
             detail.notice:SetWidth(432)
             local function selectedList()
+                self:KeepNoteInRecent()
                 local contact = self.selected
                 local entry, identity = listEntry(contact)
                 if identity ~= detail.listIdentity then
@@ -1777,6 +1804,7 @@ function UI.New(app)
             detail.removeSaved:SetPoint("TOPRIGHT", -16, -380)
             if UISpecialFrames then UISpecialFrames[#UISpecialFrames + 1] = "RivalGuardDetails" end
         end
+        self:KeepNoteInRecent()
         local detail, contact = self.detailsFrame, self.selected
         if not contact then detail:Hide() return end
         local profile = self:Profile()

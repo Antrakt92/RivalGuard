@@ -189,6 +189,21 @@ elseif view == "details" and page == "range-boundary" then
         class = "HUNTER", hostile = true, isPlayer = true, source = "nameplate", rangeMin = 20, rangeMax = 28,
         rangeMinExclusive = true, rangeEvidence = "combined" })
     app.ui:Select(contact)
+elseif view == "details" and page == "recent-note" then
+    local token = "nameplate80"
+    local name = locale == "ruRU" and "Разбойник у заставы" or "Rogue at the outpost"
+    state:Unit(token, { guid = "Player-RecentNote", name = name, class = "ROGUE", hostile = true, isPlayer = true })
+    state:Fire("NAME_PLATE_UNIT_ADDED", token)
+    local id = assert(app.sensors.active[token].contactID)
+    app.ui:Select(assert(app.engine:SelectedContact(id, "guid:Player-RecentNote")))
+    local note = app.ui.detailsFrame.note
+    note:SetFocus()
+    note:SetText(locale == "ruRU" and "Встречался у восточных ворот" or "Seen near the east gate")
+    note.scripts.OnTextChanged(note, true)
+    state.units[token], state.plates[token] = nil, nil
+    state:Fire("SHARD_TRANSFER")
+    app.ui:Refresh()
+    assert(app.ui.selected.recentDraft, "note draft did not move to Recent")
 elseif view == "details" then app.ui:Select(app.engine:Snapshot()[1])
 elseif view == "explanation" then
     if page == "rule-scope" then

@@ -263,6 +263,8 @@ function DB:GetActiveProfileName() return self.root.activeProfile end
 function DB:ListProfiles() return U.SortedKeys(self.root.profiles) end
 function DB:GetList() return self.root.lists end
 function DB:GetJournal() return U.Copy(self.root.journal) end
+function DB:GetJournalEntry(identity) return U.Copy(self.journalByIdentity[identity]) end
+function DB:HasJournalEntry(identity) return self.journalByIdentity[identity] ~= nil end
 
 function DB:GetJournalPage(offset, pageSize, matches, resolveList)
     local journal = self.root.journal
