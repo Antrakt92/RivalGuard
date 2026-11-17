@@ -2,6 +2,7 @@ local _, RG = ...
 local U, D, Rules = RG.Util, RG.Defaults, RG.Rules
 local E = RG.Register("Engine", {})
 E.__index = E
+local MAX_PENDING_AGE = 5
 
 local SPELLS = {
     [1784] = "Stealth", [1785] = "Stealth", [1786] = "Stealth", [1787] = "Stealth", [8822] = "Stealth",
@@ -213,6 +214,15 @@ local function upgradeStealthEvidence(item, evidence, spell)
     end
 end
 
+local function strongerAlert(a, b)
+    if a.decision.priority == b.decision.priority then return a.sequence < b.sequence end
+    return a.decision.priority > b.decision.priority
+end
+
+local function ordinaryAlert(decision)
+    return decision.priority < 70 and (decision.kind == "sighting" or decision.kind == "returning")
+end
+
 function E:Queue(contact, event)
     local now = self:Now()
     if self:SnoozedUntil(contact) then return false end
@@ -224,11 +234,14 @@ function E:Queue(contact, event)
     local cooldown = self.cooldowns[key]
     if cooldown and now - cooldown < decision.cooldown then contact.lastReason = "cooldown" return false end
     for _, item in ipairs(self.pending) do
-        if item.id == contact.id and (item.decision.dedupKey or item.decision.kind) == (decision.dedupKey or decision.kind) then
-            if event == "stealth" then upgradeStealthEvidence(item, contact.stealthEvidence, contact.stealthSpell) end
-            return false
+        if item.id == contact.id then
+            local age = now - item.at
+            if age <= MAX_PENDING_AGE and (item.decision.dedupKey or item.decision.kind) == (decision.dedupKey or decision.kind) then
+                if event == "stealth" then upgradeStealthEvidence(item, contact.stealthEvidence, contact.stealthSpell) end
+                return false
+            end
+            if age <= self.profile.alerts.waveWindow and item.decision.priority >= decision.priority then return false end
         end
-        if item.id == contact.id and now - item.at <= self.profile.alerts.waveWindow and item.decision.priority >= decision.priority then return false end
     end
     for index = #self.pending, 1, -1 do
         local item = self.pending[index]
@@ -299,10 +312,7 @@ function E:Merge(target, other)
         if item.id == target.id then mergedPending[#mergedPending + 1] = item end
     end
     if #mergedPending > 1 then
-        table.sort(mergedPending, function(a, b)
-            if a.decision.priority == b.decision.priority then return a.sequence < b.sequence end
-            return a.decision.priority > b.decision.priority
-        end)
+        table.sort(mergedPending, strongerAlert)
         local kept, discard = {}, {}
         for _, item in ipairs(mergedPending) do
             for _, strongest in ipairs(kept) do
@@ -488,20 +498,47 @@ function E:Emit(decision, now)
     self.onAlert(decision)
 end
 
+function E:EmitOrdinary(group, now)
+    if #group < self.profile.alerts.waveThreshold then
+        if #group > 1 then table.sort(group, strongerAlert) end
+        for _, item in ipairs(group) do self:Emit(item.decision, now) end
+        return
+    end
+    local classes, sound, banner = {}, false, false
+    for _, item in ipairs(group) do
+        local decision = item.decision
+        local class = decision.contact.class or "UNKNOWN"
+        classes[class] = (classes[class] or 0) + 1
+        sound, banner = sound or decision.waveSound, banner or decision.banner
+    end
+    self:Emit({ kind = "wave", count = #group, classes = classes, priority = 35, sound = sound, banner = banner, reason = "multiple_sightings" }, now)
+end
+
 function E:Tick()
     local now = self:Now()
     local resumed = self.pausedUntil and now >= self.pausedUntil
     if resumed then self.pausedUntil = nil end
     local ready, waiting = {}, {}
+    local waveWindow = self.profile.alerts.waveWindow
+    local firstOrdinaryAt
+    -- Pending entries are appended in observation order. The first arrival
+    -- sets the deadline for its group, including arrivals close to that deadline.
     for _, item in ipairs(self.pending) do
-        if item.decision.priority >= 70 or now - item.at >= self.profile.alerts.waveWindow then ready[#ready + 1] = item
-        else waiting[#waiting + 1] = item end
+        local age = now - item.at
+        if age > MAX_PENDING_AGE then
+            local contact = self.contacts[item.id]
+            if contact and item.event == "sighting" then contact.arrivalQueued = false end
+        else
+            if ordinaryAlert(item.decision) then
+                if not firstOrdinaryAt or item.at - firstOrdinaryAt > waveWindow then firstOrdinaryAt = item.at end
+                age = now - firstOrdinaryAt
+            end
+            local nextQueue = (item.decision.priority >= 70 or age >= waveWindow) and ready or waiting
+            nextQueue[#nextQueue + 1] = item
+        end
     end
     self.pending = waiting
-    table.sort(ready, function(a, b)
-        if a.decision.priority == b.decision.priority then return a.sequence < b.sequence end
-        return a.decision.priority > b.decision.priority
-    end)
+    table.sort(ready, strongerAlert)
     local ordinary, accepted = {}, {}
     for _, item in ipairs(ready) do
         local contact = self.contacts[item.id]
@@ -518,23 +555,35 @@ function E:Tick()
                 decision.stealthEvidence, decision.stealthSpell = item.stealthEvidence, item.stealthSpell
                 contact.arrivalNotified, contact.arrivalQueued = true, false
                 if contact.class then contact.notifiedClass = contact.class end
-                if decision.priority < 70 and (decision.kind == "sighting" or decision.kind == "returning") then ordinary[#ordinary + 1] = decision
-                else self:Emit(decision, now) end
+                if ordinaryAlert(decision) then
+                    item.decision = decision
+                    ordinary[#ordinary + 1] = item
+                else
+                    self:Emit(decision, now)
+                end
             end
         elseif contact and item.event == "sighting" then
             contact.arrivalQueued = false
         end
     end
-    if #ordinary >= self.profile.alerts.waveThreshold then
-        local classes, sound, banner = {}, false, false
-        for _, decision in ipairs(ordinary) do
-            local class = decision.contact.class or "UNKNOWN"
-            classes[class] = (classes[class] or 0) + 1
-            sound, banner = sound or decision.waveSound, banner or decision.banner
+    if #ordinary > 0 then
+        if #ordinary > 1 then
+            -- Priority delivery above can reorder sightings. Group by the
+            -- original event times, even when a single tick drains several waves.
+            table.sort(ordinary, function(a, b)
+                if a.at == b.at then return a.sequence < b.sequence end
+                return a.at < b.at
+            end)
         end
-        self:Emit({ kind = "wave", count = #ordinary, classes = classes, priority = 35, sound = sound, banner = banner, reason = "multiple_sightings" }, now)
-    else
-        for _, decision in ipairs(ordinary) do self:Emit(decision, now) end
+        local group, firstAt = {}, ordinary[1].at
+        for _, item in ipairs(ordinary) do
+            if item.at - firstAt > waveWindow then
+                self:EmitOrdinary(group, now)
+                group, firstAt = {}, item.at
+            end
+            group[#group + 1] = item
+        end
+        self:EmitOrdinary(group, now)
     end
     local expired = {}
     for id, contact in pairs(self.contacts) do

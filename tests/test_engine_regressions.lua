@@ -234,3 +234,97 @@ H.Test("sightings with no individual output can still play the configured group 
         H.Equal(engine:ExplainView(first.id, "sighting").reason, "wave_only")
     end
 end)
+
+H.Test("a stalled tick drops expired events without spending first-arrival or sound budget", function()
+    for _, staleKind in ipairs({ "sighting", "stealth" }) do
+        local engine, observe, clock, alerts = fixture()
+        local fields = { guid = "Player-Stalled", name = "Fixture Rival", class = "ROGUE" }
+        local original = observe("nameplate1", fields)
+        if staleKind == "stealth" then H.True(engine:Cast("nameplate1", 1856)) end
+        clock.Advance(11)
+        engine:Tick()
+        H.Equal(#alerts, 0)
+        H.Equal(#engine.history, 0)
+        H.True(engine:ExplainView(original.id, "sighting").allowed)
+
+        fields.stealth, fields.stealthReadable = false, true
+        H.Equal(observe("nameplate1", fields).id, original.id)
+        clock.Advance(1)
+        engine:Tick()
+        H.Equal(#alerts, 1)
+        H.Equal(alerts[1].kind, "sighting")
+        H.True(alerts[1].sound)
+    end
+end)
+
+H.Test("an expired pending cast cannot block a fresh cast of the same event before Tick", function()
+    local engine, observe, clock, alerts = fixture()
+    local contact = observe("nameplate1", { guid = "Player-Recast", class = "ROGUE" })
+    H.True(engine:Cast("nameplate1", 1856))
+    clock.Advance(5.1)
+    H.True(engine:Cast("nameplate1", 1784))
+    engine:Tick()
+    H.Equal(#alerts, 1)
+    H.Equal(alerts[1].contact.id, contact.id)
+    H.Equal(alerts[1].stealthSpell, "Stealth")
+    H.True(alerts[1].sound)
+end)
+
+H.Test("a delayed tick emits separate waves for observations from different windows", function()
+    local engine, observe, clock, alerts = fixture()
+    local function crowd(first, class)
+        for index = first, first + 2 do
+            observe("nameplate" .. index, { guid = "Player-Delayed-" .. index, class = class })
+            clock.Advance(0.05)
+        end
+    end
+    crowd(1, "ROGUE")
+    clock.Advance(engine.profile.alerts.waveWindow + 0.2)
+    crowd(4, "HUNTER")
+    clock.Advance(1)
+    engine:Tick()
+    H.Equal(#alerts, 2)
+    H.Equal(alerts[1].kind, "wave")
+    H.Equal(alerts[1].count, 3)
+    H.Equal(alerts[1].classes.ROGUE, 3)
+    H.Nil(alerts[1].classes.HUNTER)
+    H.True(alerts[1].sound)
+    H.Equal(alerts[2].kind, "wave")
+    H.Equal(alerts[2].count, 3)
+    H.Equal(alerts[2].classes.HUNTER, 3)
+    H.Nil(alerts[2].classes.ROGUE)
+    H.False(alerts[2].sound)
+end)
+
+H.Test("a regular tick collects a burst when its first arrival's window closes", function()
+    local engine, observe, clock, alerts = fixture()
+    for index = 1, 3 do
+        observe("nameplate" .. index, { guid = "Player-Regular-" .. index, class = "ROGUE" })
+        engine:Tick()
+        if index < 3 then clock.Advance(0.1) end
+    end
+    H.Equal(#alerts, 0)
+    clock.Advance(engine.profile.alerts.waveWindow - 0.15)
+    engine:Tick()
+    H.Equal(#alerts, 1)
+    H.Equal(alerts[1].kind, "wave")
+    H.Equal(alerts[1].count, 3)
+    clock.Advance(0.3)
+    engine:Tick()
+    H.Equal(#alerts, 1)
+end)
+
+H.Test("an expired crowd cannot turn a recent isolated sighting into a wave", function()
+    local engine, observe, clock, alerts = fixture()
+    for index = 1, 3 do
+        observe("nameplate" .. index, { guid = "Player-Expired-" .. index, class = "ROGUE" })
+    end
+    clock.Advance(11)
+    local fresh = observe("target", { guid = "Player-Fresh", class = "HUNTER" })
+    clock.Advance(1)
+    engine:Tick()
+    H.Equal(#alerts, 1)
+    H.Equal(alerts[1].kind, "sighting")
+    H.Equal(alerts[1].contact.id, fresh.id)
+    H.True(alerts[1].sound)
+end)
