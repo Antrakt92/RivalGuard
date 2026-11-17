@@ -101,6 +101,10 @@ function E:IndexName(name, id, add)
     for owner in pairs(owners) do
         local contact = self.contacts[owner]
         if contact then
+            if (contact.ambiguousIdentity == true) ~= ambiguous and #self.pending > 0 then
+                self.pendingNameChanges = self.pendingNameChanges or {}
+                self.pendingNameChanges[owner] = true
+            end
             contact.ambiguousIdentity = ambiguous
             contact.identity = contact.guid and ("guid:" .. contact.guid) or (not ambiguous and name or nil)
         end
@@ -314,6 +318,7 @@ end
 
 function E:Queue(contact, event)
     local now = self:Now()
+    if self.pendingNameChanges and self.pendingNameChanges[contact.id] then self:RevalidateContactPending(contact, now) end
     if self:SnoozedUntil(contact) then return false end
     local decision, reason = self:Explain(contact, event, now)
     contact.lastReason = reason or (decision and decision.reason)
@@ -429,6 +434,7 @@ function E:Drop(id, evictionAt)
     for token in pairs(contact.tokens) do self.bindings[token] = nil end
     self:UnindexContact(contact)
     self.contacts[id] = nil
+    if self.pendingNameChanges then self.pendingNameChanges[id] = nil end
     self.contactCount = self.contactCount - 1
     for index = #self.pending, 1, -1 do if self.pending[index].id == id then table.remove(self.pending, index) end end
     local prefix = id .. ":"
@@ -446,6 +452,7 @@ end
 function E:MakeRoom()
     if self.contactCount < self.profile.retention.maxContacts then return end
     local urgent, now = {}, self:Now()
+    self:RevalidateNamePending(now)
     for _, item in ipairs(self.pending) do
         local contact = self.contacts[item.id]
         local priority = item.decision.priority
@@ -498,10 +505,25 @@ function E:Merge(target, other)
         target.stealth, target.stealthAt = other.stealth, other.stealthAt
         target.stealthEvidence, target.stealthSpell = other.stealthEvidence, other.stealthSpell
     end
-    local mergedPending = {}
     for _, item in ipairs(self.pending) do
         if item.id == other.id then item.id = target.id end
-        if item.id == target.id then mergedPending[#mergedPending + 1] = item end
+    end
+    for kind in pairs({ sighting = true, returning = true, watch = true, targeting = true, stealth = true, identified = true }) do
+        local old = self.cooldowns[other.id .. ":" .. kind]
+        if old then self.cooldowns[target.id .. ":" .. kind] = math.max(old, self.cooldowns[target.id .. ":" .. kind] or -math.huge) end
+        self.cooldowns[other.id .. ":" .. kind] = nil
+    end
+    self.contacts[other.id] = nil
+    if self.pendingNameChanges then self.pendingNameChanges[other.id] = nil end
+    self.contactCount = self.contactCount - 1
+    self:IndexContact(target, oldGuid, oldName)
+    return target
+end
+
+function E:CoalesceContactPending(contact)
+    local mergedPending = {}
+    for _, item in ipairs(self.pending) do
+        if item.id == contact.id then mergedPending[#mergedPending + 1] = item end
     end
     if #mergedPending > 1 then
         table.sort(mergedPending, strongerAlert)
@@ -520,18 +542,9 @@ function E:Merge(target, other)
         for index = #self.pending, 1, -1 do
             if discard[self.pending[index]] then table.remove(self.pending, index) end
         end
-        target.arrivalQueued = false
-        for _, item in ipairs(kept) do if item.event == "sighting" then target.arrivalQueued = true break end end
+        contact.arrivalQueued = false
+        for _, item in ipairs(kept) do if item.event == "sighting" then contact.arrivalQueued = true break end end
     end
-    for kind in pairs({ sighting = true, returning = true, watch = true, targeting = true, stealth = true, identified = true }) do
-        local old = self.cooldowns[other.id .. ":" .. kind]
-        if old then self.cooldowns[target.id .. ":" .. kind] = math.max(old, self.cooldowns[target.id .. ":" .. kind] or -math.huge) end
-        self.cooldowns[other.id .. ":" .. kind] = nil
-    end
-    self.contacts[other.id] = nil
-    self.contactCount = self.contactCount - 1
-    self:IndexContact(target, oldGuid, oldName)
-    return target
 end
 
 function E:ResetReturningEncounter(contact, now)
@@ -648,6 +661,7 @@ function E:Observe(raw)
     if existing and #self.pending > 0 and (merged or oldClass ~= contact.class
         or oldGuid ~= contact.guid or oldNameIdentity ~= contact.nameIdentity) then
         self:RevalidateContactPending(contact, now)
+        if merged then self:CoalesceContactPending(contact) end
     end
     self:RecordEncounter(contact, now)
     if not contact.arrivalNotified and not contact.arrivalQueued then
@@ -785,6 +799,7 @@ function E:Tick()
     local now = self:Now()
     local resumed = self.pausedUntil and now >= self.pausedUntil
     if resumed then self.pausedUntil = nil end
+    self:RevalidateNamePending(now)
     local ready, waiting = {}, {}
     local waveWindow = self.profile.alerts.waveWindow
     local firstOrdinaryAt
@@ -930,6 +945,7 @@ function E:RevalidatePending()
         table.sort(kept, function(a, b) return a.sequence < b.sequence end)
     end
     self.pending = kept
+    self.pendingNameChanges = nil
     for _, contact in pairs(self.contacts) do contact.arrivalQueued = false end
     for _, item in ipairs(kept) do
         if item.event == "sighting" then self.contacts[item.id].arrivalQueued = true end
@@ -946,6 +962,7 @@ function E:SetProfile(profile, preservePending)
 end
 
 function E:RevalidateContactPending(contact, now)
+    if self.pendingNameChanges then self.pendingNameChanges[contact.id] = nil end
     contact.arrivalQueued = false
     now = now or self:Now()
     for index = #self.pending, 1, -1 do
@@ -957,6 +974,18 @@ function E:RevalidateContactPending(contact, now)
                 contact.arrivalQueued = true
             end
         end
+    end
+end
+
+function E:RevalidateNamePending(now)
+    local affected = self.pendingNameChanges
+    if not affected then return end
+    -- Index changes during a merge can be temporary. Recheck only once the
+    -- observations and canonical identities for this batch are settled.
+    self.pendingNameChanges = nil
+    for id in pairs(affected) do
+        local contact = self.contacts[id]
+        if contact then self:RevalidateContactPending(contact, now) end
     end
 end
 
@@ -1023,6 +1052,7 @@ end
 function E:Clear()
     self.contacts, self.identities, self.bindings, self.pending, self.cooldowns = {}, {}, {}, {}, {}
     self.nameOwners, self.contactCount = {}, 0
+    self.pendingNameChanges = nil
     self.evictedEncounters, self.evictionSlots, self.evictionCursor = {}, {}, 0
     self.history = {}
     self:Changed()

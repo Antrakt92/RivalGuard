@@ -2790,6 +2790,100 @@ H.Test("merging a queued anonymous plate into a retained GUID keeps its original
     H.Equal(app.engine.history[1].id, remembered.id)
 end)
 
+local function queuedNameCollisionFixture(startInArena)
+    local state, _, app = setup({ schemaVersion = 1, onboardingSeen = true, lists = {
+        ["name:Same-FixtureRealm"] = { kind = "watch", name = "Same-FixtureRealm", class = "ROGUE" },
+    } }, function(mock) if startInArena then mock.instance = "arena" end end)
+    local function add(index)
+        local token, guid = "nameplate" .. index, "Player-Colliding" .. index
+        local unit = { guid = guid, name = "Same", realm = "FixtureRealm", class = "ROGUE", hostile = true, isPlayer = true }
+        state:Unit(token, unit)
+        state:Fire("NAME_PLATE_UNIT_ADDED", token)
+        for _, contact in ipairs(app.engine:Snapshot()) do if contact.identity == "guid:" .. guid then return contact, unit end end
+        error("missing same-name player")
+    end
+    return state, app, add
+end
+
+H.Test("a same-name collision removes Watch urgency without resetting the original wave window", function()
+    local state, app, add = queuedNameCollisionFixture()
+    local first = add(1)
+    H.Equal(first.listKind, "watch")
+    state.clock.Advance(0.2)
+    local second = add(2)
+    H.Nil(second.listKind)
+    H.Nil(app.engine:SelectedContact(first.id, first.identity).listKind)
+    state.clock.Advance(0.05)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 0)
+    H.Equal(#state.sounds, 0)
+    state.clock.Advance(0.6)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 2)
+    H.Equal(app.engine.history[1].kind, "sighting"); H.Equal(app.engine.history[1].id, first.id)
+    H.Equal(app.engine.history[2].kind, "sighting"); H.Equal(app.engine.history[2].id, second.id)
+end)
+
+H.Test("resolving a name collision expedites the remaining owner's queued Watch", function()
+    local state, app, add = queuedNameCollisionFixture(true)
+    local first, unit = add(1)
+    changeFixtureZone(state)
+    local second = add(2)
+    H.Nil(second.listKind)
+    state.clock.Advance(0.2)
+    unit.name = "Corrected"
+    state:Fire("UNIT_NAME_UPDATE", "nameplate1")
+    H.Equal(app.engine:SelectedContact(second.id, second.identity).listKind, "watch")
+    state.clock.Advance(0.05)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(app.engine.history[1].kind, "watch"); H.Equal(app.engine.history[1].id, second.id)
+
+    state.clock.Advance(0.8)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 2)
+    H.Equal(app.engine.history[2].kind, "sighting"); H.Equal(app.engine.history[2].id, first.id)
+end)
+
+H.Test("alias merger evaluates queued alerts for the confirmed list membership before coalescing", function()
+    local identity = "guid:Player-VerifiedAlias"
+    local state, _, app = setup({ schemaVersion = 1, onboardingSeen = true, lists = {
+        [identity] = { kind = "watch", name = "Known-FixtureRealm", class = "ROGUE" },
+    } })
+    local arrival = soundRule("Urgent unlisted arrival", "ready", 95)
+    arrival.list = "unlisted"
+    local stealth = soundRule("Listed stealth", "warning", 92)
+    stealth.event, stealth.list = "stealth", "listed"
+    app.db:GetProfile().rules = { arrival, stealth }
+    app:OnSettingsChanged()
+    local verified = { guid = "Player-VerifiedAlias", name = "Known", realm = "FixtureRealm",
+        class = "ROGUE", hostile = true, isPlayer = true }
+    state:Unit("nameplate1", verified)
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    local owner = app.engine:Snapshot()[1]
+    local castAt = state.clock.Now()
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-BeforeAliasMerge", 1856)
+    state.clock.Advance(0.2)
+    state:Unit("nameplate2", { class = "ROGUE", hostile = true, isPlayer = true })
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+    H.Equal(#app.engine.pending, 2)
+    state.clock.Advance(0.1)
+    state:Unit("nameplate2", verified)
+    state:Fire("UNIT_NAME_UPDATE", "nameplate2")
+    H.Equal(#app.engine:Snapshot(), 1)
+    local pendingAt = app.engine.pending[1].at
+    state.clock.Advance(0.05)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(app.engine.history[1].kind, "stealth")
+    H.Equal(app.engine.history[1].id, owner.id)
+    H.Equal(pendingAt, castAt)
+    H.Equal(app.ui.banner.title:GetText(), app.ui:F("stealthCast", app.ui:T("spellVanish")))
+    state.clock.Advance(0.8)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 1)
+end)
+
 H.Test("a collision invalidates a draft for a name alias without hiding explicit GUID records", function()
     local identity = "name:Same-FixtureRealm"
     local state, _, app = setup({ schemaVersion = 1, onboardingSeen = true, lists = {
