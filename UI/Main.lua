@@ -1526,8 +1526,15 @@ function UI.New(app)
     end
 
     function self:Toggle()
-        nearbyOpened = false
-        self:Profile().display.showList = not self:Profile().display.showList
+        local display = self:Profile().display
+        display.showList = not main:IsShown()
+        nearbyOpened = display.showList and not display.nearbyCollapsed
+        if not display.showList then
+            self.nearbyMoveMode = nil
+            if nearbyMoveProfile then restoreNearby() end
+            self.previewContacts, self.previewUntil = nil, nil
+            self:ClosePreviewDetails()
+        end
         changed()
     end
 

@@ -86,7 +86,8 @@ or **Appearance → Move Nearby**, then drag the RivalGuard title to place it.
 **Overview → Keep Nearby open without opponents** leaves it visible between encounters.
 Click **−** to collapse Nearby to a small **RivalGuard +** tab. Click the tab to
 reopen the list. The collapsed state survives a reload and alerts keep running.
-Click the minimap button to toggle Nearby, right-click it to open settings,
+Click the minimap button or type `/rg` to open Nearby even with no opponents,
+or to hide it when visible. Right-click the minimap button to open settings,
 or drag it around the minimap to move the button.
 Use `/rg alert` or **Appearance → Preview alert** to preview the compact banner
 and drag it to a different position.

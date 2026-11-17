@@ -1217,7 +1217,7 @@ H.Test("hidden Nearby skips row production while minimap census and alerts stay 
     end)
     local profile, ui = app.db:GetProfile(), app.ui
     profile.display.classes = { HUNTER = true }
-    profile.display.showUnknown = false
+    profile.display.showUnknown, profile.display.showEmpty = false, true
     profile.alerts.waveThreshold = 20
     app:ProfileChanged()
     assert(app.db:SetList("guid:Player-Count-4", "ignore", nil, { name = "Ignored Hunter" }))
@@ -1233,6 +1233,7 @@ H.Test("hidden Nearby skips row production while minimap census and alerts stay 
     end
 
     local launcher = assert(ui.launcher).frame
+    H.True(ui.frame:IsShown())
     launcher:Click()
     H.False(ui.frame:IsShown())
     for index, class in ipairs({ "HUNTER", "MAGE", "HUNTER", "HUNTER", "UNKNOWN_FIXTURE" }) do
@@ -2967,6 +2968,37 @@ H.Test("Nearby right-click opens the profile chooser and existing Settings and m
     launcher:Click("LeftButton"); H.True(ui.frame:IsShown())
     state.api.SlashCmdList.RIVALGUARD("profile")
     H.True(picker:IsShown())
+end)
+
+H.Test("minimap left click and the slash shortcut open Nearby when no opponents are visible", function()
+    local state, _, app = setup(nil, function(mock)
+        mock.api.CreateFrame("Frame", "Minimap", mock.api.UIParent):SetSize(160, 160)
+    end)
+    local ui, display = app.ui, app.db:GetProfile().display
+    local launcher = assert(ui.launcher).frame
+    H.True(display.showList)
+    H.False(display.showEmpty)
+    H.False(ui.frame:IsShown())
+    launcher:Click("RightButton")
+    H.True(ui.settings:IsShown())
+    H.False(ui.frame:IsShown())
+    ui.settings:Hide()
+    launcher:Click("LeftButton")
+    H.True(ui.frame:IsShown())
+    H.True(ui.nearbyCollapseButton:IsVisible())
+    state:Advance(2)
+    H.True(ui.frame:IsShown())
+    launcher:Click("LeftButton")
+    H.False(ui.frame:IsShown())
+    state.api.SlashCmdList.RIVALGUARD("")
+    H.True(ui.frame:IsShown())
+    ui.nearbyCollapseButton:Click()
+    H.True(ui.nearbyExpandButton:IsVisible())
+    launcher:Click("LeftButton")
+    H.False(ui.frame:IsShown())
+    launcher:Click("LeftButton")
+    H.True(ui.nearbyExpandButton:IsVisible())
+    H.False(display.showEmpty)
 end)
 
 H.Test("slash profile selects the exact Unicode name, rechecks queued alerts, and persists", function()
@@ -4936,8 +4968,10 @@ H.Test("highlight shortcut finds the live banner's rival with Nearby hidden and 
     H.Equal(state.api.BINDING_NAME_RIVALGUARD_HIGHLIGHT_ALERT, ui:T("bindingHighlightAlert"))
     profile.display.classes = { MAGE = true }
     profile.display.showBadges, profile.display.streamer = false, true
+    profile.display.showEmpty = true
     app:OnSettingsChanged()
     local bind = state.api.RivalGuard_Binding
+    H.True(ui.frame:IsShown())
     bind("nearby")
     H.False(ui.frame:IsShown())
     seeSoundRuleRival(state, 1)
