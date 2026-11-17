@@ -413,6 +413,119 @@ H.Test("the rule sound picker previews and selects on its own draft only", funct
     H.Equal(#state.sounds, 1)
 end)
 
+H.Test("a new rule defaults to confirmed classes and leaves unknown arrivals on the global schedule", function()
+    local state, app, profile = ruleSoundFixture()
+    local ui = app.ui
+    profile.alerts.sounds.watch = "ready"
+    app:OnSettingsChanged()
+    ui:OpenRules()
+    local dialog = ui.rulesDialog
+    H.True(dialog.knownClassOnly:GetChecked())
+    for _, chip in ipairs(dialog.classes) do
+        if chip.class == "ROGUE" then chip.frame:Click("RightButton"); break end
+    end
+    dialog.priority:SetValue(80)
+    pickSound(ui, dialog.soundCue, "quest")
+    dialog.previewCue:Click()
+    H.Equal(#state.sounds, 1)
+    H.Equal(#profile.rules, 0)
+    H.Equal(app.engine.counters.alerts, 0)
+    H.Equal(#app.engine.history, 0)
+    H.True(profile.alerts.unknownClass)
+    dialog.save:Click()
+    H.True(profile.rules[1].knownClassOnly)
+
+    seeSoundRuleRival(state, 1, "UNKNOWN_FIXTURE")
+    local unknown = app.engine:Snapshot()[1]
+    H.Nil(unknown.class)
+    H.Equal(app:Explain(unknown).reason, "event_matched")
+    H.False(app:Explain(unknown).sound)
+    state.clock.Advance(0.2)
+    seeSoundRuleRival(state, 2, "ROGUE")
+    state.clock.Advance(0.05)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(app.engine.history[1].reason, "custom_rule")
+    H.Equal(ui.activeBanner.name, "Sound rival 2")
+    H.Equal(#state.sounds, 2)
+    H.Equal(state.sounds[2].id, RULE_SOUND_KITS.IG_QUEST_LIST_COMPLETE)
+    state.clock.Advance(0.6)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 2)
+    H.Equal(app.engine.history[2].id, unknown.id)
+    H.Equal(app.engine.history[2].reason, "event_matched")
+    H.Equal(#state.sounds, 2)
+
+    state.clock.Advance(1.5)
+    assert(app.db:SetList("guid:Player-RuleCue3", "watch", nil, { name = "Watched rival" }))
+    seeSoundRuleRival(state, 3, "UNKNOWN_FIXTURE")
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 3)
+    H.Equal(app.engine.history[3].kind, "watch")
+    H.Equal(app.engine.history[3].reason, "watch_list")
+    H.Equal(#state.sounds, 3)
+    H.Equal(state.sounds[3].id, RULE_SOUND_KITS.READY_CHECK)
+end)
+
+H.Test("a confirmed-class suppressing rule suppresses only the matching known Rogue", function()
+    local state, app, profile = ruleSoundFixture()
+    local rule = soundRule("Do not warn for confirmed rogues", nil, 90)
+    rule.action, rule.classes, rule.knownClassOnly = "suppress", { ROGUE = true }, true
+    profile.rules = { rule }
+    app:OnSettingsChanged()
+    seeSoundRuleRival(state, 1, "ROGUE")
+    local known = app.engine:Snapshot()[1]
+    H.Equal(app:Explain(known).reason, "custom_suppressed")
+    seeSoundRuleRival(state, 2, "UNKNOWN_FIXTURE")
+    state:Advance(1.5)
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(app.engine.history[1].reason, "event_matched")
+    H.Equal(app.ui.activeBanner.name, "Sound rival 2")
+    H.Equal(#state.sounds, 0)
+end)
+
+for _, legacy in ipairs({ false, true }) do
+    H.Test("the rule editor and reload keep global unknown behavior for " .. (legacy and "legacy rules" or "explicit opt-out"), function()
+        local state, app, profile, soundKits = ruleSoundFixture()
+        local rule = soundRule("Rogues when possible", "quest", 90)
+        rule.classes = { ROGUE = true }
+        if not legacy then rule.knownClassOnly = true end
+        profile.rules = { rule }
+        app:OnSettingsChanged()
+        local ui = app.ui
+        ui:OpenRules()
+        local dialog = ui.rulesDialog
+        H.Equal(dialog.knownClassOnly:GetChecked(), not legacy)
+        if legacy then dialog.nameInput:SetText("Renamed legacy rule")
+        else dialog.knownClassOnly:Click() end
+        H.False(dialog.knownClassOnly:GetChecked())
+        H.Equal(profile.rules[1], rule)
+        H.Equal(profile.rules[1].knownClassOnly, not legacy and true or nil)
+        dialog.save:Click()
+        H.Nil(profile.rules[1].knownClassOnly)
+        if legacy then H.Equal(profile.rules[1].name, "Renamed legacy rule") end
+
+        state:Fire("PLAYER_LOGOUT")
+        local fresh, _, reloaded = setup(state.api.RivalGuardDB, soundKits)
+        local active = reloaded.db:GetProfile()
+        H.Nil(active.rules[1].knownClassOnly)
+        seeSoundRuleRival(fresh, 1, "UNKNOWN_FIXTURE")
+        local unknown = reloaded.engine:Snapshot()[1]
+        H.Equal(reloaded:Explain(unknown).reason, "custom_rule")
+        fresh:Advance(0.5)
+        H.Equal(reloaded.engine.counters.alerts, 1)
+        H.Equal(reloaded.engine.history[1].reason, "custom_rule")
+        H.Equal(#fresh.sounds, 0)
+
+        active.alerts.unknownClass = false
+        reloaded:OnSettingsChanged()
+        seeSoundRuleRival(fresh, 2, "UNKNOWN_FIXTURE")
+        fresh:Advance(1.5)
+        H.Equal(reloaded.engine.counters.alerts, 1)
+        H.Equal(#fresh.sounds, 0)
+    end)
+end
+
 for _, locale in ipairs({ "enUS", "ruRU" }) do
     H.Test("a single-class sound rule can be drafted and named from Alerts in " .. locale, function()
         local state, app, profile = ruleSoundFixture()

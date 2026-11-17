@@ -94,7 +94,7 @@ function D.Attach(ui, app, H)
         self.ruleDraft = RG.Util.Copy(self.ruleOriginal or {
             name = t("ruleNewName"), enabled = true, priority = 50, classes = {},
             event = "sighting", action = "alert", sound = true, banner = true, cooldown = 30,
-            context = "any", list = "any", range = 0, rangePolicy = "possible", rangeUnknown = false,
+            context = "any", list = "any", range = 0, rangePolicy = "possible", rangeUnknown = false, knownClassOnly = true,
         })
         self.ruleDraft.context = self.ruleDraft.context or "any"
         self.ruleDraft.list = self.ruleDraft.list or "any"
@@ -110,12 +110,12 @@ function D.Attach(ui, app, H)
         self:RefreshRules()
     end
 
-    local function draftCheck(parent, key, field, x, y)
+    local function draftCheck(parent, key, field, x, y, labelWidth)
         local check = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
         check:SetPoint("TOPLEFT", x, y); check:SetSize(26, 26)
         local label = H.label(check, key, 13)
-        label:SetPoint("LEFT", check, "RIGHT", 2, 0); label:SetWidth(360); label:SetJustifyV("MIDDLE")
-        check:SetHitRectInsets(0, -350, 0, 0)
+        label:SetPoint("LEFT", check, "RIGHT", 2, 0); label:SetWidth(labelWidth or 360); label:SetJustifyV("MIDDLE")
+        check:SetHitRectInsets(0, -(labelWidth or 350), 0, 0)
         check:SetScript("OnClick", function()
             if self.ruleDraft then self.ruleDraft[field] = check:GetChecked() and true or false; self:RefreshRules() end
         end)
@@ -266,6 +266,9 @@ function D.Attach(ui, app, H)
             H.tooltip(f.clearClasses, t("clearClassSelection"), t("clearRuleClassesTip"))
         end)
         f.clearClasses:SetScript("OnLeave", H.hideTooltip)
+        f.knownClassOnly = draftCheck(base, "ruleKnownClass", "knownClassOnly", 573, -357, 145)
+        f.knownClassOnly:SetScript("OnEnter", function() H.tooltip(f.knownClassOnly, t("ruleKnownClass"), t("ruleKnownClassTip")) end)
+        f.knownClassOnly:SetScript("OnLeave", H.hideTooltip)
         f.action = draftChoice(base, "ruleAction", "action", { { "alert", "ruleAlert" }, { "suppress", "ruleSuppress" } }, 253, -395, 190)
         local cues = { { "inherit", "ruleSoundInherit" } }
         for _, option in ipairs(RG.Defaults.soundOptions) do
@@ -331,7 +334,7 @@ function D.Attach(ui, app, H)
         f.basicPanel:SetShown(not conditionTab); f.conditionPanel:SetShown(conditionTab)
         f.basic.bg:SetColorTexture(unpack(not conditionTab and { 0.10, 0.22, 0.28, 1 } or H.C.panel))
         f.conditions.bg:SetColorTexture(unpack(conditionTab and { 0.10, 0.22, 0.28, 1 } or H.C.panel))
-        for _, field in ipairs({ "enabled", "sound", "banner", "rangeUnknown" }) do f[field]:SetChecked(self.ruleDraft[field] == true) end
+        for _, field in ipairs({ "enabled", "sound", "banner", "rangeUnknown", "knownClassOnly" }) do f[field]:SetChecked(self.ruleDraft[field] == true) end
         for _, key in ipairs({ "event", "action", "soundCue", "context", "list", "rangePolicy" }) do
             for _, option in ipairs(f[key].ruleOptions) do
                 if self.ruleDraft[f[key].ruleField] == option[1] then f[key].label:SetText(t(option[2]) .. "  ›") end

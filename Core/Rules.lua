@@ -62,7 +62,7 @@ function R.Evaluate(profile, contact, event, context, listEntry, rangeFresh)
         if rule.enabled and (rule.event == event or rule.event == "any")
             and (not rule.context or rule.context == "any" or rule.context == ((context and context.kind) or "world"))
             and (not rule.list or rule.list == "any" or (rule.list == "listed" and watched) or (rule.list == "unlisted" and not watched))
-            and R.ClassMatches(rule.classes, contact.class, profile.alerts.unknownClass) then
+            and R.ClassMatches(rule.classes, contact.class, profile.alerts.unknownClass and not rule.knownClassOnly) then
             local rangeMatches = not rule.range or rule.range == 0
                 or R.RangeMatches({ enabled = true, yards = rule.range, policy = rule.rangePolicy, unknown = rule.rangeUnknown }, contact, rangeFresh)
             if rangeMatches and (not matched or rule.priority > matched.priority) then matched = rule end

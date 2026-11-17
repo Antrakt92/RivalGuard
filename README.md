@@ -33,6 +33,8 @@ current profile would handle that new sighting in the open world.
   A rule can use a distinct sound, such as different cues for Hunters and
   Rogues. Open **Advanced rules** at the top of Alerts and right-click a class
   icon in a new rule. Open the sound list to hear each choice before saving.
+  New rules require a known class by default. Turn off **Require known class**
+  to use the general unknown-class setting, as existing rules do by default.
   Group warnings use the wave sound.
   Below the class buttons, see the active profile and any global setting
   currently blocking warnings for new sightings outside your personal lists.

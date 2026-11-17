@@ -85,6 +85,24 @@ H.Test("profile transfers preserve explicit rule sounds and inherit when the fie
     H.Equal(recovered.rules[2].name, "Audible rule")
 end)
 
+H.Test("profile transfers preserve a known-class requirement without changing older rules", function()
+    local RG = addon()
+    local db = RG.Database.New()
+    local profile = db:GetProfile()
+    profile.rules = { { name = "Existing rule" }, { name = "Known class", knownClassOnly = true } }
+    local imported = assert(db:ImportProfile("Known classes", assert(db:ExportProfile())))
+    H.Nil(imported.rules[1].knownClassOnly)
+    H.True(imported.rules[2].knownClassOnly)
+    profile.rules[2].knownClassOnly = false
+    H.Nil(assert(db:PreviewImport(assert(db:ExportProfile()))).rules[2].knownClassOnly)
+    profile.rules[2].knownClassOnly = "true"
+    H.Nil(db:ExportProfile())
+    local encoded = assert(RG.Codec.Encode({ format = "RivalGuardProfile", schemaVersion = RG.schemaVersion, profile = profile }))
+    H.Nil(db:PreviewImport(encoded))
+    H.Nil(RG.Database.New(db.root):GetProfile().rules[2].knownClassOnly)
+    H.True(db.root.profiles["Known classes"].rules[2].knownClassOnly)
+end)
+
 H.Test("profile limits count restored Default and do not partially create extras", function()
     local RG = addon()
     local db = RG.Database.New()

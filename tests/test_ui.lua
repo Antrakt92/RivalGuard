@@ -747,6 +747,9 @@ H.Test("clear selection in a rule supports arbitrary subsets and profile transfe
         return decision and decision.ruleName
     end
     H.Nil(applies("ROGUE"))
+    H.Nil(applies(nil))
+    dialog.knownClassOnly:Click()
+    dialog.save:Click()
     H.Equal(applies(nil), "Selected class rule")
     for _, chip in ipairs(dialog.classes) do
         if chip.class == "HUNTER" or chip.class == "MAGE" then chip.frame:Click() end
