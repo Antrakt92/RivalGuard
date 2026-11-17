@@ -67,6 +67,33 @@ H.Test("streamer rows hide names preserve alias stability and bound churn", func
     H.True(RG.Util.Count(aliases) <= 513, "streamer aliases grow without a bound")
 end)
 
+H.Test("streamer pages reserve aliases in list order and preserve off-page aliases at capacity", function()
+    local RG = addon()
+    local model, profile, aliases = RG.UIModel, RG.Defaults.NewProfile(), {}
+    local ids = {}
+    for index = 1, 512 do ids[index] = "opponent_" .. index end
+    local same = { id = ids[511], class = "ROGUE", name = "Private name" }
+    profile.display.streamer = true
+    local initial = model.Rows({ same }, profile, 100, aliases, ids, 510)[1].name
+    H.Equal(aliases[same.id], 511)
+    H.Equal(RG.Util.Count(aliases), 512)
+
+    profile.display.streamer = false
+    model.Rows({ { id = ids[20], class = "HUNTER" } }, profile, 100, aliases)
+    H.Equal(aliases[same.id], 511)
+    H.Equal(RG.Util.Count(aliases), 512)
+
+    local removed = table.remove(ids, 1)
+    local newcomer = { id = "new_opponent", class = "ROGUE" }
+    ids[#ids + 1] = newcomer.id
+    profile.display.streamer = true
+    local after = model.Rows({ same, newcomer }, profile, 100, aliases, ids, 509)
+    H.Equal(after[1].name, initial)
+    H.Nil(aliases[removed])
+    H.Equal(aliases[newcomer.id], 513)
+    H.Equal(RG.Util.Count(aliases), 512)
+end)
+
 H.Test("unknown stealth string does not become confirmed stealth label", function()
     local RG = addon()
     local contact = { visible = true, stealth = "suspected", rangeMax = 20, hostile = true, isPlayer = true }

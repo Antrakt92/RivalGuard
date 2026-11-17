@@ -1256,12 +1256,10 @@ function UI.New(app)
         local detailsShown = self.detailsFrame and self.detailsFrame:IsShown() and self.selected
         local liveDetailsShown = detailsShown and not self.selected.preview
         local maxRows = math.floor(RG.Util.Clamp(profile.display.maxRows, 3, 20, 8))
-        local liveSnapshot, nearbyCount, nearbyVisible
-        local paged = nearbyShown and not preview and not profile.display.streamer
+        local livePage, nearbyCount, nearbyVisible, nearbyIds
+        local paged = nearbyShown and not preview
         if paged then
-            liveSnapshot, nearbyCount, nearbyVisible, self.offset = app.engine:NearbyPage(self.offset, maxRows)
-        elseif nearbyShown and not preview then
-            liveSnapshot = app.engine:Snapshot()
+            livePage, nearbyCount, nearbyVisible, self.offset, nearbyIds = app.engine:NearbyPage(self.offset, maxRows, profile.display.streamer)
         end
         local untilTime = M.Number(app.engine.pausedUntil)
         local paused = untilTime ~= nil and untilTime > now
@@ -1280,8 +1278,8 @@ function UI.New(app)
         local supportShown = self.statusPage == "support"
         local alertBlock = (nearbyShown and not preview or supportShown) and self:AlertBlock()
         if nearbyShown then
-            local snapshot = preview and self.previewContacts or liveSnapshot
-            local rows = M.Rows(snapshot, profile, now, preview and self.previewAliases or self.aliases)
+            local snapshot = preview and self.previewContacts or livePage
+            local rows = M.Rows(snapshot, profile, now, preview and self.previewAliases or self.aliases, nearbyIds, paged and self.offset or nil)
             local rowCount = nearbyCount or #rows
             self.renderedCount = rowCount
             local rowHeight = profile.display.textSize + UI.layout.rowPadding
@@ -1366,14 +1364,7 @@ function UI.New(app)
         end
         if self.dialogs then self.dialogs:Refresh() end
         if liveDetailsShown then
-            local current
-            if liveSnapshot and not paged then
-                for _, contact in ipairs(liveSnapshot) do
-                    if contact.id == self.selected.id or self.selected.identity and contact.identity == self.selected.identity then current = contact break end
-                end
-            else
-                current = app.engine:SelectedContact(self.selected.id, self.selected.identity)
-            end
+            local current = app.engine:SelectedContact(self.selected.id, self.selected.identity)
             if current and not self.selected.savedOnly then self.selected = current end
             self.selectedOutside = current == nil
         end

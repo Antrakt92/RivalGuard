@@ -1213,8 +1213,10 @@ H.Test("a live Nearby refresh builds only the visible page in a mixed crowd", fu
         stats = nil
         return observed
     end
+    local referenceAliases = {}
     local function checkPage(refresh, offset)
         local expected = rawSnapshot(engine)
+        local names = profile.display.streamer and rawRows(expected, profile, engine:Now(), referenceAliases)
         local visible = 0
         for _, contact in ipairs(expected) do
             if contact.visible and contact.behindCamera ~= true then visible = visible + 1 end
@@ -1228,6 +1230,10 @@ H.Test("a live Nearby refresh builds only the visible page in a mixed crowd", fu
             local wanted, row = expected[offset + index], ui.rows[index]
             H.Equal(row:IsShown(), wanted ~= nil)
             H.Equal(row.contact and row.contact.identity, wanted and wanted.identity)
+            if names and wanted then
+                H.Equal(row.nameText:GetText(), names[offset + index].name)
+                H.Nil(row.nameText:GetText():find("Crowd rival", 1, true))
+            end
         end
         H.Equal(measured.snapshots, 0)
         H.True(measured.views <= profile.display.maxRows + 2)
@@ -1251,14 +1257,36 @@ H.Test("a live Nearby refresh builds only the visible page in a mixed crowd", fu
     H.Equal(ui.visibleCount, 2)
 
     profile.display.classes, profile.display.showUnknown, profile.display.streamer = {}, true, true
-    app:OnSettingsChanged()
-    local private = measure(function() ui:Refresh() end)
-    H.True(private.snapshots > 0)
-    H.True(private.input > profile.display.maxRows)
+    checkPage(function() app:OnSettingsChanged() end, 0)
+    checkPage(function() ui.frame.scripts.OnMouseWheel(ui.frame, -500) end, offsetEnd)
+    assert(app.db:SetList(identity(97), "watch", "Local-only note", { name = "Incoming rival" }))
+    for index = 97, 98 do
+        local token = "nameplate" .. index
+        state:Unit(token, { guid = "Player-NearbyPage-" .. index, name = "Crowd rival " .. index,
+            class = "MAGE", hostile = true, isPlayer = true })
+        state:Fire("NAME_PLATE_UNIT_ADDED", token)
+    end
+    checkPage(function() ui:Refresh() end, offsetEnd)
+    checkPage(function() ui.frame.scripts.OnMouseWheel(ui.frame, 500) end, 0)
+    local appended
+    for _, contact in ipairs(rawSnapshot(engine)) do if contact.identity == identity(98) then appended = contact; break end end
+    assert(app:SetList(assert(appended), "avoid", "Preserve this locally"))
+    checkPage(function() ui:Refresh() end, 0)
+    profile.display.classes, profile.display.showUnknown = { MAGE = true }, false
+    checkPage(function() app:OnSettingsChanged() end, 0)
+    profile.display.classes, profile.display.showUnknown = {}, true
+    checkPage(function() app:OnSettingsChanged() end, 0)
+
+    local aliasesBefore = RG.Codec.Encode(ui.aliases)
+    local listsBefore = RG.Codec.Encode(app.db:GetList())
     local preview = measure(function() app:Demo() end)
     H.Equal(preview.snapshots, 0)
     H.Equal(preview.input, 3)
     H.True(ui.rows[1].contact.preview)
+    local demo = rawRows(ui.previewContacts, profile, engine:Now(), {})
+    H.Equal(ui.rows[1].nameText:GetText(), demo[1].name)
+    H.Equal(RG.Codec.Encode(ui.aliases), aliasesBefore)
+    H.Equal(RG.Codec.Encode(app.db:GetList()), listsBefore)
     H.Equal(engine.counters.alerts, alerts); H.Equal(#state.sounds, sounds)
 end)
 

@@ -989,7 +989,7 @@ function E:Snapshot()
     return result
 end
 
-function E:NearbyPage(offset, limit)
+function E:NearbyPage(offset, limit, includeIds)
     local candidates, ranks, visibleCount = {}, {}, 0
     for _, contact in pairs(self.contacts) do
         local entry = self:ListEntry(contact)
@@ -1011,7 +1011,12 @@ function E:NearbyPage(offset, limit)
     for index = offset + 1, math.min(count, offset + limit) do
         page[#page + 1] = self:View(candidates[index], now)
     end
-    return page, count, visibleCount, offset
+    local ids
+    if includeIds then
+        ids = {}
+        for _, contact in ipairs(candidates) do ids[#ids + 1] = contact.id end
+    end
+    return page, count, visibleCount, offset, ids
 end
 
 function E:RevalidatePending()

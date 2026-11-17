@@ -178,32 +178,51 @@ function M.State(contact, now, locale)
     return RG.Locale.Format("lastSeen", locale, M.Age(now - lastSeen, locale))
 end
 
-function M.Rows(snapshot, profile, now, aliases)
-    local rows = {}
-    local display = profile.display
-    local aliasCount = RG.Util.Count(aliases)
-    if aliasCount >= 512 then
-        local current = {}
-        for _, contact in ipairs(snapshot or {}) do current[M.Text(contact.id, "anonymous")] = true end
-        for id in pairs(aliases) do if not current[id] then aliases[id] = nil end end
-        aliasCount = RG.Util.Count(aliases)
+local function claimAlias(aliases, state, id)
+    if not aliases[id] and state.count < 512 then
+        state.serial = state.serial + 1
+        aliases[id] = state.serial
+        state.count = state.count + 1
     end
+    return aliases[id]
+end
+
+local function prepareAliases(aliases, snapshot, orderedIds)
     local state = aliasState[aliases]
     if not state then state = { serial = 0 }; aliasState[aliases] = state end
+    state.count = RG.Util.Count(aliases)
+    if state.count >= 512 then
+        local current = {}
+        if orderedIds then
+            for _, id in ipairs(orderedIds) do current[id] = true end
+        else
+            for _, contact in ipairs(snapshot or {}) do current[M.Text(contact.id, "anonymous")] = true end
+        end
+        for id in pairs(aliases) do if not current[id] then aliases[id] = nil end end
+        state.count = RG.Util.Count(aliases)
+    end
+    if orderedIds then
+        -- Reserve aliases in list order, including opponents on other pages.
+        for _, id in ipairs(orderedIds) do claimAlias(aliases, state, id) end
+    end
+    return state
+end
+
+function M.Rows(snapshot, profile, now, aliases, orderedIds, offset)
+    local rows = {}
+    local display = profile.display
+    local aliasesState = display.streamer and prepareAliases(aliases, snapshot, orderedIds)
     for _, contact in ipairs(snapshot or {}) do
         local class = M.Text(contact.class, "")
         local known = RG.Defaults.classSet[class] == true
         if clean(contact.preview) == true or (known and M.ClassEnabled(display.classes, class)) or (not known and display.showUnknown) then
-            local name = M.Text(contact.name, RG.Locale.Get("unknownPlayer", profile.locale))
-            if display.streamer then
-                local id = M.Text(contact.id, "anonymous")
-                if not aliases[id] and aliasCount < 512 then
-                    state.serial = state.serial + 1
-                    aliases[id] = state.serial
-                    aliasCount = aliasCount + 1
-                end
+            local name
+            if aliasesState then
+                local alias = claimAlias(aliases, aliasesState, M.Text(contact.id, "anonymous"))
                 local className = known and RG.Locale.Class(class, profile.locale) or RG.Locale.Get("unknownClass", profile.locale)
-                name = className .. " " .. (aliases[id] or (#rows + 1))
+                name = className .. " " .. (alias or ((offset or 0) + #rows + 1))
+            else
+                name = M.Text(contact.name, RG.Locale.Get("unknownPlayer", profile.locale))
             end
             rows[#rows + 1] = {
                 contact = contact, class = known and class or nil, name = name,
