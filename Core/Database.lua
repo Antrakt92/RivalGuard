@@ -173,7 +173,7 @@ end
 local function newRoot()
     return { schemaVersion = RG.schemaVersion, activeProfile = "Default", profiles = { Default = D.NewProfile() },
         lists = {}, journal = {}, journalPolicy = { days = D.profile.retention.journalDays, maximum = D.profile.retention.maxJournal },
-        onboardingSeen = false }
+        onboardingSeen = false, nearbyLockMigrated = true }
 end
 
 local function newerEncounter(a, b)
@@ -211,6 +211,8 @@ function DB.New(raw)
         local function restore(name)
             local clean = DB.ValidateProfile(raw.profiles[name], false)
             if not clean then return end
+            -- Earlier builds saved the locked default for every profile.
+            if raw.nearbyLockMigrated ~= true then clean.display.locked = false end
             if not self.root.profiles[name] then count = count + 1 end
             self.root.profiles[name] = clean
         end

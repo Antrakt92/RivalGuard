@@ -3699,6 +3699,7 @@ end)
 H.Test("Nearby appears above the chat area only for visible rivals and can be placed while empty", function()
     local state, _, app = setup()
     local ui, profile = app.ui, app.db:GetProfile()
+    profile.display.locked = true
     H.False(ui.frame:IsShown())
     H.True(profile.display.locked)
     seeSoundRuleRival(state, 1)

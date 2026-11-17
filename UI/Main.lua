@@ -498,8 +498,7 @@ function UI.New(app)
     end
     local function startNearbyDrag(compact)
         local profile = self:Profile()
-        if profile.display.locked and self.nearbyMoveMode ~= profile
-            and not (IsShiftKeyDown and IsShiftKeyDown()) then return end
+        if profile.display.locked and self.nearbyMoveMode ~= profile then return end
         nearbyMoveProfile = profile
         nearbyDraggingCompact = compact
         main:StartMoving()

@@ -332,6 +332,7 @@ end)
 H.Test("a locked Nearby drag cannot save an automatic anchor", function()
     local _, _, app, ui = setup()
     local profile = app.db:GetProfile()
+    profile.display.locked = true
     H.True(profile.display.locked)
     local header = nearbyDragHeader(ui)
     header.scripts.OnDragStart(header)
@@ -339,26 +340,22 @@ H.Test("a locked Nearby drag cannot save an automatic anchor", function()
     H.Nil(profile.positions.nearby)
 end)
 
-H.Test("both Nearby forms can be moved while locked by holding Shift", function()
-    local shift = false
-    local state, _, app, ui = setup(nil, function(mock)
-        mock.api.IsShiftKeyDown = function() return shift end
-    end)
+H.Test("both Nearby forms can be moved with an ordinary left drag", function()
+    local state, _, app, ui = setup()
     local profile = app.db:GetProfile()
-    H.True(profile.display.locked)
+    H.False(profile.display.locked)
     ui:Toggle()
     local header = nearbyDragHeader(ui)
-    shift = true
     header.scripts.OnDragStart(header)
     H.True(ui.frame.moving)
     ui.frame:ClearAllPoints(); ui.frame:SetPoint("BOTTOMLEFT", state.api.UIParent, "BOTTOMLEFT", 120, 205)
-    shift = false
     header.scripts.OnDragStop(header)
     H.Equal(profile.positions.nearby.x, 120)
 
     ui.nearbyCollapseButton:Click()
     local tab = ui.nearbyExpandButton
     H.Equal(tab.dragButtons[1], "LeftButton")
+    profile.display.locked = true
     tab.scripts.OnMouseDown(tab)
     tab.scripts.OnDragStart(tab)
     H.False(ui.frame.moving)
@@ -367,7 +364,7 @@ H.Test("both Nearby forms can be moved while locked by holding Shift", function(
     H.True(tab:IsVisible())
     H.Equal(profile.positions.nearby.x, 120)
 
-    shift = true
+    profile.display.locked = false
     tab.scripts.OnMouseDown(tab)
     tab.scripts.OnDragStart(tab)
     H.True(ui.frame.moving)
@@ -390,6 +387,20 @@ H.Test("both Nearby forms can be moved while locked by holding Shift", function(
     H.True(ui.nearbyCollapseButton:IsVisible())
     _, _, _, x, y = ui.frame:GetPoint()
     H.Equal(x, 220); H.Equal(y, 305)
+end)
+
+H.Test("old Nearby profiles are unlocked once and a new explicit lock survives reload", function()
+    local _, _, app = setup({
+        schemaVersion = 1, profiles = { Default = { display = { locked = true },
+            positions = { nearby = { point = "BOTTOMLEFT", relativePoint = "BOTTOMLEFT", x = 80, y = 210 } } } },
+    })
+    local profile = app.db:GetProfile()
+    H.False(profile.display.locked)
+    H.Equal(profile.positions.nearby.x, 80)
+    profile.display.locked = true
+    local _, _, reloaded = setup(app.db.root)
+    H.True(reloaded.db:GetProfile().display.locked)
+    H.Equal(reloaded.db:GetProfile().positions.nearby.y, 210)
 end)
 
 H.Test("Nearby collapses from move mode and stays reopenable with an empty list", function()
