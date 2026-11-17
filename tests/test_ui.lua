@@ -884,6 +884,27 @@ H.Test("a delete confirmation cannot apply to a replacement with the old profile
     H.Equal(app.db:GetProfile("Later"), renamed)
 end)
 
+H.Test("resolved alert duplicates share one banner without extending its deadline", function()
+    local _, _, _, ui = setup()
+    local verified = { id = "verified", identity = "guid:Player-Owner", class = "ROGUE", name = "Rival" }
+    local unresolved = { id = "unresolved", class = "ROGUE" }
+    ui:Alert({ kind = "sighting", banner = true, contact = verified })
+    local active, untilTime = ui.activeBanner, ui.bannerUntil
+    ui:Alert({ kind = "sighting", banner = true, contact = unresolved })
+    ui:Alert({ kind = "returning", priority = 10, banner = true, contact = unresolved })
+    H.Equal(#ui.bannerQueue, 2)
+    local ordinaryReturn = ui.bannerQueue[2]
+    local originalAt = ordinaryReturn.at
+    ui:ResolveAlertIdentity(unresolved.id, verified)
+    H.Equal(ui.activeBanner, active)
+    H.Equal(ui.bannerUntil, untilTime)
+    H.Equal(#ui.bannerQueue, 1)
+    H.Equal(ui.bannerQueue[1], ordinaryReturn)
+    H.Equal(ordinaryReturn.id, verified.id)
+    H.Equal(ordinaryReturn.identity, verified.identity)
+    H.Equal(ordinaryReturn.at, originalAt)
+end)
+
 H.Test("live banner priority resists waves and previews while stronger danger preempts", function()
     local _, _, _, ui = setup()
     local function alert(kind, priority, name)

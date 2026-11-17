@@ -1493,17 +1493,49 @@ function UI.New(app)
         return app:HasTargetingEvidence(item.id)
     end
 
+    local function bannerFresh(item, now)
+        local maximumAge = item.priority >= BANNER_URGENT_PRIORITY and BANNER_URGENT_MAX_AGE or BANNER_ORDINARY_MAX_AGE
+        return now - item.at <= maximumAge
+    end
+
+    function self:ResolveAlertIdentity(previousId, contact)
+        local identity = M.Text(contact.identity, "", 256)
+        local function resolve(item)
+            if not item or item.preview or item.id ~= previousId then return false end
+            if item.identity:match("^guid:") and item.identity ~= identity then return false end
+            item.id, item.identity = contact.id, identity
+            item.key = item.kind .. ":" .. contact.id
+            item.name = M.Text(contact.name, item.name)
+            item.class = M.Text(contact.class, item.class)
+            return true
+        end
+        local active = self.activeBanner
+        local activeChanged = resolve(active)
+        local changed = activeChanged
+        for _, item in ipairs(self.bannerQueue) do if resolve(item) then changed = true end end
+        if not changed then return end
+        local now = self:Now()
+        local activeLive = active and not active.preview and self.bannerUntil and now < self.bannerUntil and bannerHasEvidence(active)
+        local seen, index = {}, 1
+        if activeLive and active.key then seen[active.key] = true end
+        while index <= #self.bannerQueue do
+            local item = self.bannerQueue[index]
+            local key = bannerFresh(item, now) and item.key
+            if key and seen[key] then table.remove(self.bannerQueue, index)
+            else
+                if key then seen[key] = true end
+                index = index + 1
+            end
+        end
+        if activeChanged and activeLive then self:PaintBanner(active) end
+    end
+
     function self:CurrentAlertContact(now)
         local active = self.activeBanner
         if active and not active.preview and active.kind ~= "wave" and active.id ~= ""
             and self.bannerUntil and now < self.bannerUntil and banner:IsVisible() and bannerHasEvidence(active) then
             return active
         end
-    end
-
-    local function bannerFresh(item, now)
-        local maximumAge = item.priority >= BANNER_URGENT_PRIORITY and BANNER_URGENT_MAX_AGE or BANNER_ORDINARY_MAX_AGE
-        return now - item.at <= maximumAge
     end
 
     function self:AdvanceBanner(now)

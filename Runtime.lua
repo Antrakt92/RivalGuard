@@ -445,6 +445,12 @@ function App:Initialize()
         retailStealth = self.client.retailStealth,
         onChange = function() self.dirty = true end,
         onContextBlocked = function() if self.ui then self.ui:ClearBanners() end end,
+        onIdentityResolved = function(previousId, contact)
+            if self.ui then
+                local ok = pcall(self.ui.ResolveAlertIdentity, self.ui, previousId, contact)
+                if not ok then self.diagnostics:Error("ui_alert_identity") end
+            end
+        end,
         onEncounter = function(contact, epoch)
             return self.db:Record(contact, epoch, zoneName)
         end,

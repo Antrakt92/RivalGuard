@@ -4605,6 +4605,116 @@ H.Test("highlight shortcut finds the live banner's rival with Nearby hidden and 
     H.Equal(targetChanges, 0)
 end)
 
+local function unresolvedBannerFixture(withFocus, holdBanner)
+    local state, app, add = automaticLocatorFixture(false)
+    local api, secret = state.api, H.Secret("unreadable owner until name update")
+    local guid, name = api.UnitGUID, api.UnitName
+    local restricted = true
+    function api.UnitGUID(token)
+        if token == "nameplate1" and restricted then return secret end
+        return guid(token)
+    end
+    function api.UnitName(token)
+        if token == "nameplate1" and restricted then return secret, secret end
+        return name(token)
+    end
+    api.UnitFullName = api.UnitName
+
+    if holdBanner then
+        add(2, false)
+        state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate2", "Cast-HoldingBanner", 1856)
+        state:Advance(0.3)
+        H.Equal(app.ui.activeBanner.kind, "stealth")
+    end
+    local unit = { guid = "Player-ResolvedBanner", name = "Resolved Hunter", class = "HUNTER",
+        hostile = true, isPlayer = true }
+    local focus
+    if withFocus then
+        state:Unit("focus", unit)
+        state:Fire("PLAYER_FOCUS_CHANGED")
+        focus = assert(app.engine.identities["guid:" .. unit.guid])
+    end
+    state:Unit("nameplate1", unit)
+    state:Unit("nameplate1target", state.units.player)
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    state:Advance(0.3)
+    local anonymous = app.sensors.active.nameplate1.contactID
+    H.True(anonymous ~= nil and anonymous ~= focus)
+    local function resolve()
+        restricted = false
+        state:Fire("UNIT_NAME_UPDATE", "nameplate1")
+    end
+    return state, app, anonymous, focus, unit, resolve
+end
+
+for _, withFocus in ipairs({ false, true }) do
+    local resolution = withFocus and "merges into an existing focus" or "gains a GUID in place"
+    H.Test("the live targeting banner can highlight when its anonymous contact " .. resolution, function()
+        local state, app, anonymous, focus, unit, resolve = unresolvedBannerFixture(withFocus)
+        local ui, bind = app.ui, state.api.RivalGuard_Binding
+        local active = assert(ui.activeBanner)
+        H.Equal(active.kind, "targeting")
+        H.Equal(active.id, anonymous)
+        H.Equal(active.identity, "")
+        H.Equal(ui.banner.body:GetText(), ui:T("unknownPlayer"))
+        local deadline, observedAt = ui.bannerUntil, active.at
+        H.Equal(#app.engine.history, 1)
+        H.Equal(#state.sounds, 1)
+        H.False(locatorVisible(ui, "nameplate1"))
+        resolve()
+        state:Advance(0.3)
+        local current = assert(ui.activeBanner)
+        H.Equal(current.id, focus or anonymous)
+        H.Equal(current.identity, "guid:" .. unit.guid)
+        H.Equal(ui.banner.body:GetText(), unit.name)
+        H.Equal(ui.bannerUntil, deadline)
+        H.Equal(current.at, observedAt)
+        H.Equal(#app.engine.history, 1)
+        H.Equal(#state.sounds, 1)
+        H.True(bind("highlight"))
+        H.True(locatorVisible(ui, "nameplate1"))
+        H.Equal(ui.badges.highlight.id, focus or anonymous)
+    end)
+end
+
+H.Test("a queued targeting banner retains its queue time when the owner becomes identifiable", function()
+    local state, app, anonymous, focus, unit, resolve = unresolvedBannerFixture(true, true)
+    local ui = app.ui
+    H.Equal(ui.activeBanner.kind, "stealth")
+    local queued = assert(ui.bannerQueue[1])
+    H.Equal(queued.id, anonymous)
+    H.Equal(queued.kind, "targeting")
+    local observedAt, deadline = queued.at, ui.bannerUntil
+    resolve()
+    H.Equal(ui.activeBanner.kind, "stealth")
+    H.Equal(ui.bannerUntil, deadline)
+    H.Equal(#ui.bannerQueue, 1)
+    H.Equal(ui.bannerQueue[1].id, focus)
+    H.Equal(ui.bannerQueue[1].identity, "guid:" .. unit.guid)
+    H.Equal(ui.bannerQueue[1].at, observedAt)
+    local soundCount, delivered = #state.sounds, #app.engine.history
+    state.clock.Advance(deadline - state.clock.Now() + 0.01)
+    state:Advance(0.25)
+    H.Equal(ui.activeBanner.kind, "targeting")
+    H.Equal(ui.banner.body:GetText(), unit.name)
+    H.Equal(#state.sounds, soundCount)
+    H.Equal(#app.engine.history, delivered)
+    H.True(state.api.RivalGuard_Binding("highlight"))
+    H.True(locatorVisible(ui, "nameplate1"))
+end)
+
+H.Test("resolving a banner owner cannot restore a targeting relation lost on the same read", function()
+    local state, app, _, _, _, resolve = unresolvedBannerFixture(true)
+    H.Equal(app.ui.activeBanner.kind, "targeting")
+    state.units.nameplate1target = nil
+    resolve()
+    state:Advance(0.3)
+    H.Nil(app.ui.activeBanner)
+    H.False(state.api.RivalGuard_Binding("highlight"))
+    H.False(locatorVisible(app.ui, "nameplate1"))
+    H.Equal(#state.sounds, 1)
+end)
+
 for _, ineligible in ipairs({ "wave", "preview", "expired", "paused" }) do
     H.Test("highlight shortcut declines the current banner when it is " .. ineligible, function()
         local state, _, app = setup()

@@ -69,6 +69,7 @@ function E.New(config)
         lists = config.lists or {}, onAlert = config.onAlert or function() end,
         retailStealth = config.retailStealth == true,
         onEncounter = config.onEncounter, onChange = config.onChange, onContextBlocked = config.onContextBlocked,
+        onIdentityResolved = config.onIdentityResolved,
         contacts = {}, identities = {}, nameOwners = {}, bindings = {}, tokenSerial = 0, contactCount = 0,
         pending = {}, history = {}, cooldowns = {}, snoozes = {}, serial = 0, sequence = 0,
         evictedEncounters = {}, evictionSlots = {}, evictionCursor = 0,
@@ -666,15 +667,15 @@ function E:Observe(raw)
         local namedContact = nameOwner and self.contacts[nameOwner]
         if namedContact and (not obs.guid or not namedContact.guid or namedContact.guid == obs.guid) then known = nameOwner end
     end
-    local returning, merged
+    local returning, mergedFrom
     local matched = known and self.contacts[known]
     if matched then
         if contact and contact.id ~= known then
             -- The anonymous live alias is part of the new encounter. Clear
             -- stale evidence on the old identity before inheriting any of it.
             returning = self:ResetReturningEncounter(matched, now)
+            mergedFrom = contact.id
             contact = self:Merge(matched, contact)
-            merged = true
         else
             contact = matched
         end
@@ -727,10 +728,10 @@ function E:Observe(raw)
     end
     -- Class rules and personal lists can change an already queued event's
     -- priority when this observation identifies its owner more precisely.
-    if existing and #self.pending > 0 and (merged or oldClass ~= contact.class
+    if existing and #self.pending > 0 and (mergedFrom or oldClass ~= contact.class
         or oldGuid ~= contact.guid or oldNameIdentity ~= contact.nameIdentity) then
         self:RevalidateContactPending(contact, now)
-        if merged then self:CoalesceContactPending(contact) end
+        if mergedFrom then self:CoalesceContactPending(contact) end
     end
     self:RecordEncounter(contact, now)
     if returning then
@@ -747,7 +748,11 @@ function E:Observe(raw)
         if self.profile.alerts.targeting then self:Queue(contact, "targeting") end
     end
     self:Changed()
-    return self:View(contact, now)
+    local view = self:View(contact, now)
+    if self.onIdentityResolved and (mergedFrom or (existing and not oldGuid and contact.guid)) then
+        self.onIdentityResolved(mergedFrom or contact.id, view)
+    end
+    return view
 end
 
 function E:Disqualify(contact, contradiction)
