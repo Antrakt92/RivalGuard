@@ -267,8 +267,8 @@ function E:ExplainView(id, event)
         result.rangeMin, result.rangeMax, result.rangeMinExclusive = contact.rangeMin, contact.rangeMax, contact.rangeMinExclusive
     end
     if self:SnoozedUntil(contact) then result.reason = "contact_snoozed"; return result end
-    local decision, reason, matchedIndex = self:Explain(contact, event, now)
-    result.ruleName, result.rangeLimit = Rules.ExplanationScope(self.profile, matchedIndex, reason)
+    local decision, reason, matchedIndex, rangeChecked = self:Explain(contact, event, now)
+    result.ruleName, result.globalRange, result.ruleRange = Rules.ExplanationScope(self.profile, matchedIndex, rangeChecked)
     if not decision then result.reason = reason; return result end
     if self.pausedUntil and now < self.pausedUntil then result.reason = "paused"; return result end
     result.kind = decision.kind

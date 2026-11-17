@@ -235,6 +235,7 @@ elseif view == "explanation" then
     if page == "rule-scope" then
         app.engine:Clear()
         local profile = app.db:GetProfile()
+        profile.range.enabled, profile.range.yards, profile.range.policy, profile.range.unknown = true, 35, "possible", true
         profile.rules = { { enabled = true, event = "sighting", classes = { HUNTER = true }, action = "alert", priority = 70,
             name = locale == "ruRU" and "Охотник рядом с маршрутом патруля" or "Hunter near the patrol route",
             cooldown = 30, range = 20.25, rangePolicy = "confirmed", sound = true, banner = true } }

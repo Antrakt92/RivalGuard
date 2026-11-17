@@ -29,8 +29,8 @@ see how your current profile would handle that new sighting in the open world.
 - **Nearby:** view current sightings and distinguish them from recently seen
   players. Click a row for evidence, personal notes or a temporary alert pause.
   **Why?** checks what the current settings would do for a new sighting and
-  shows the matching rule, fresh distance and applicable limit, configured sound and
-  latest individual or group sound result when available.
+  shows the matching rule, fresh distance, applicable global and rule limits,
+  configured sound and the latest individual or group sound result when available.
   **Highlight** briefly marks the player's nameplate when the client can verify
   who it belongs to and RivalGuard can safely attach a marker.
   Streamer mode uses the same session alias in Nearby, live details and alerts.

@@ -2492,13 +2492,17 @@ H.Test("Why retains the winning rule and displays its distance scope through coo
         local result = app:Explain(contact)
         H.Equal(result.reason, reason)
         H.Equal(result.ruleName, ruleVisible and rule.name or nil)
-        H.Equal(result.rangeLimit.source, source)
-        H.Equal(result.rangeLimit.yards, yards)
-        H.Equal(result.rangeLimit.policy, policy)
+        H.Equal(result.globalRange.yards, 35)
+        H.Equal(result.globalRange.policy, "confirmed")
+        local scope = source == "rule" and result.ruleRange or result.globalRange
+        H.Equal(scope.yards, yards)
+        H.Equal(scope.policy, policy)
+        if source == "global" then H.Nil(result.ruleRange) end
         ui:Select(contact); ui:ShowExplanation()
         local frame = ui.explanationFrame
         local key = source == "rule" and "explanationRuleRange" or "explanationGlobalRange"
         H.True(frame.rangeEvidence:GetText():find(ui:F(key, yards, ui:T(policy)), 1, true) ~= nil)
+        H.True(frame.rangeEvidence:GetText():find(ui:F("explanationGlobalRange", 35, ui:T("confirmed")), 1, true) ~= nil)
         H.Equal(frame.rule:GetText(), ruleVisible and ui:F("explanationMatchedRule", rule.name) or "")
     end
 
@@ -2523,7 +2527,8 @@ H.Test("Why retains the winning rule and displays its distance scope through coo
     H.True(ui.explanationFrame.rangeEvidence:GetText():find(ui:F("explanationRuleRange", 20, ui:T("possible")), 1, true) ~= nil)
     local report = app:ExportDiagnostics()
     H.Nil(report:find(rule.name, 1, true))
-    H.Nil(report:find("rangeLimit", 1, true))
+    H.Nil(report:find("globalRange", 1, true))
+    H.Nil(report:find("ruleRange", 1, true))
 end)
 
 H.Test("Why refreshes live distance independently of an older selection and keeps only fresh alias evidence", function()
@@ -2547,6 +2552,7 @@ H.Test("Why refreshes live distance independently of an older selection and keep
         return text
     end
     local first = valid(18, "event_matched")
+    H.True(first:find(ui:F("explanationGlobalRange", 20, ui:T("confirmed")), 1, true) ~= nil)
     state.clock.Advance(0.2)
     move(1, 26)
     H.Equal(selected.rangeMax, 18)
@@ -2593,9 +2599,10 @@ H.Test("sample Why distinguishes the matching rule range from a blocking global 
         local explanation = app:Explain(ui.selected)
         H.Equal(explanation.reason, reason)
         H.Equal(explanation.ruleName, source == "rule" and rule.name or nil)
-        H.Equal(explanation.rangeLimit.source, source)
-        H.Equal(explanation.rangeLimit.yards, yards)
-        H.Equal(explanation.rangeLimit.policy, policy)
+        local scope = source == "rule" and explanation.ruleRange or explanation.globalRange
+        H.Equal(scope.yards, yards)
+        H.Equal(scope.policy, policy)
+        if source == "global" then H.Nil(explanation.ruleRange) end
         H.Equal(explanation.rangeMin, 8); H.Equal(explanation.rangeMax, 20)
         ui:ShowExplanation()
         local key = source == "rule" and "explanationRuleRange" or "explanationGlobalRange"
@@ -2603,9 +2610,20 @@ H.Test("sample Why distinguishes the matching rule range from a blocking global 
         H.True(ui.explanationFrame.rangeEvidence:GetText():find(ui:F("demoRange", ui:F("rangeBracket", 8, 20)), 1, true) ~= nil)
     end
     show("custom_rule", "rule", 25, "possible")
+    H.Nil(app:Explain(ui.selected).globalRange)
+    profile.range.enabled, profile.range.yards, profile.range.policy, profile.range.unknown = true, 20, "confirmed", true
+    app:OnSettingsChanged()
+    show("custom_rule", "rule", 25, "possible")
+    local both = ui.explanationFrame.rangeEvidence:GetText()
+    H.True(both:find(ui:F("explanationGlobalRange", 20, ui:T("confirmed")) .. " · " .. ui:T("explanationUnknownRangeAllowed"), 1, true) ~= nil)
     profile.range.enabled, profile.range.yards, profile.range.policy = true, 10, "confirmed"
     app:OnSettingsChanged()
     show("range_unconfirmed", "global", 10, "confirmed")
+    profile.context.world = false
+    app:OnSettingsChanged()
+    local blocked = app:Explain(ui.selected)
+    H.Equal(blocked.reason, "context_disabled")
+    H.Nil(blocked.globalRange); H.Nil(blocked.ruleRange)
     H.Equal(#app.db:GetJournal(), 0)
     H.Equal(#app.engine.history, 0)
 end)
