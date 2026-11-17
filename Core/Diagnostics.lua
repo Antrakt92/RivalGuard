@@ -21,9 +21,9 @@ end
 function Diag:Error(key)
     key = code(key)
     self:Count("errors")
+    if self.lastError[key] == nil and U.Count(self.lastError) >= 63 then key = "other" end
     local now = self.clock()
     if self.lastError[key] and now - self.lastError[key] < 5 then return end
-    if self.lastError[key] == nil and U.Count(self.lastError) >= 63 then key = "other" end
     self.lastError[key] = now
     U.ArrayPush(self.errors, { at = now, code = key }, 40)
 end

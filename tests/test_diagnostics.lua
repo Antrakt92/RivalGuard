@@ -47,3 +47,17 @@ H.Test("diagnostic key and ring bounds survive long sessions of distinct errors"
     H.True(RG.Util.Count(diagnostics.lastError) <= 64)
     H.True(#diagnostics.errors <= 40)
 end)
+
+H.Test("overflow error codes share a rate limit and retain earlier diagnostics", function()
+    local RG = addon()
+    local clock = H.Clock(100)
+    local diagnostics = RG.Diagnostics.New(clock.Now)
+    for index = 1, 63 do diagnostics:Error("distinct_" .. index) end
+    for index = 1, 100 do diagnostics:Error("overflow_" .. index) end
+    H.Equal(diagnostics.counts.errors, 163)
+    H.Equal(diagnostics.errors[#diagnostics.errors - 1].code, "distinct_63")
+    H.Equal(diagnostics.errors[#diagnostics.errors].code, "other")
+    clock.Advance(5)
+    diagnostics:Error("another_overflow")
+    H.Equal(diagnostics.errors[#diagnostics.errors - 1].code, "other")
+end)
