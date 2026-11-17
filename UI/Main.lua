@@ -1665,6 +1665,28 @@ function UI.New(app)
         self:ShowDetails()
     end
 
+    function self:ResolveSelectedIdentity(previousId, contact)
+        local selected, detail = self.selected, self.detailsFrame
+        if not detail or not detail:IsShown() or not selected or selected.id ~= previousId
+            or self.selectedFromJournal or selected.recentDraft or selected.savedOnly or selected.preview then return end
+        local identity = M.EditableIdentity(contact)
+        if not contact.visible or contact.hostile ~= true or contact.isPlayer ~= true
+            or not identity or not identity:match("^guid:") then return end
+        local previous = M.EditableIdentity(selected)
+        if previous and previous:match("^guid:") and previous ~= identity then return end
+
+        local entry, key = listEntry(contact)
+        local streamer = self:Profile().display.streamer
+        if previous ~= identity or key ~= identity or detail.listIdentity ~= key or streamer then
+            self.noteDraft = nil
+            detail.note:ClearFocus()
+            -- A click can arrive before the next refresh, even if the new
+            -- contact still resolves to the same legacy list key.
+            detail.note:SetText(not streamer and M.Text(entry and entry.note, "", 512) or "")
+        end
+        self.selected, self.selectedOutside, self.locateError = contact, false, nil
+    end
+
     function self:KeepNoteInRecent()
         local contact, draft = self.selected, self.noteDraft
         if not contact or not draft or self.selectedFromJournal or self:Profile().display.streamer or not app.db.GetJournalEntry then return end

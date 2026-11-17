@@ -4819,17 +4819,17 @@ H.Test("highlight shortcut finds the live banner's rival with Nearby hidden and 
     H.Equal(targetChanges, 0)
 end)
 
-local function unresolvedBannerFixture(withFocus, holdBanner)
+local function unresolvedBannerFixture(withFocus, holdBanner, completeName)
     local state, app, add = automaticLocatorFixture(false)
     local api, secret = state.api, H.Secret("unreadable owner until name update")
     local guid, name = api.UnitGUID, api.UnitName
-    local restricted = true
+    local restricted, nameRestricted = true, true
     function api.UnitGUID(token)
         if token == "nameplate1" and restricted then return secret end
         return guid(token)
     end
     function api.UnitName(token)
-        if token == "nameplate1" and restricted then return secret, secret end
+        if token == "nameplate1" and nameRestricted then return secret, secret end
         return name(token)
     end
     api.UnitFullName = api.UnitName
@@ -4842,6 +4842,7 @@ local function unresolvedBannerFixture(withFocus, holdBanner)
     end
     local unit = { guid = "Player-ResolvedBanner", name = "Resolved Hunter", class = "HUNTER",
         hostile = true, isPlayer = true }
+    if completeName then unit.realm = "FixtureRealm" end
     local focus
     if withFocus then
         state:Unit("focus", unit)
@@ -4854,11 +4855,108 @@ local function unresolvedBannerFixture(withFocus, holdBanner)
     state:Advance(0.3)
     local anonymous = app.sensors.active.nameplate1.contactID
     H.True(anonymous ~= nil and anonymous ~= focus)
-    local function resolve()
-        restricted = false
+    local function resolve(nameOnly)
+        restricted, nameRestricted = nameOnly == true, false
         state:Fire("UNIT_NAME_UPDATE", "nameplate1")
     end
     return state, app, anonymous, focus, unit, resolve
+end
+
+H.Test("an open anonymous card follows a fresh GUID merge and keeps Why open", function()
+    local state, app, anonymous, focus, unit, resolve = unresolvedBannerFixture(true, false, true)
+    local ui = app.ui
+    ui:Select(assert(app.engine:SelectedContact(anonymous)))
+    ui.detailsFrame.why:Click()
+    H.True(ui.explanationFrame:IsShown())
+    H.False(ui.detailsFrame.saveNote.enabled)
+    resolve(true)
+    state:Advance(0.3)
+    H.Equal(ui.selected.id, anonymous)
+    H.Equal(app.sensors.active.nameplate1.contactID, anonymous)
+    H.False(ui.detailsFrame.saveNote.enabled)
+
+    local identity = "guid:" .. unit.guid
+    assert(app.db:SetList(identity, "watch", "Existing exact note", { name = unit.name }))
+    resolve()
+    state:Advance(0.3)
+    H.Equal(ui.selected.id, focus)
+    H.Equal(ui.selected.identity, identity)
+    H.False(ui.selectedOutside)
+    H.True(ui.detailsFrame:IsShown())
+    H.True(ui.explanationFrame:IsShown())
+    H.Equal(ui.detailsFrame.note:GetText(), "Existing exact note")
+    H.True(ui.detailsFrame.saveNote.enabled)
+end)
+
+H.Test("a temporarily unavailable GUID cannot merge two previously confirmed players of the same name", function()
+    local nameReadable, guidReadable = false, true
+    local state, _, app = setup(nil, function(mock)
+        local guid, name = mock.api.UnitGUID, mock.api.UnitName
+        local secret = H.Secret("unreadable owner field")
+        mock.api.UnitGUID = function(token)
+            if token == "nameplate1" and not guidReadable then return secret end
+            return guid(token)
+        end
+        mock.api.UnitName = function(token)
+            if token == "nameplate1" and not nameReadable then return secret, secret end
+            return name(token)
+        end
+        mock.api.UnitFullName = mock.api.UnitName
+    end)
+    local function player(guid)
+        return { guid = guid, name = "Same", realm = "FixtureRealm", class = "ROGUE", hostile = true, isPlayer = true }
+    end
+    state:Unit("focus", player("Player-SameFocus")); state:Fire("PLAYER_FOCUS_CHANGED")
+    state:Unit("nameplate1", player("Player-SamePlate")); state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    local identity = "guid:Player-SamePlate"
+    local id = assert(app.engine.identities[identity])
+    local ui = app.ui
+    ui:Select(assert(app.engine:SelectedContact(id)))
+    local note = ui.detailsFrame.note
+    note:SetFocus()
+    note:SetText("Draft for plate owner")
+    note.scripts.OnTextChanged(note, true)
+    nameReadable, guidReadable = true, false
+    state:Fire("UNIT_NAME_UPDATE", "nameplate1")
+    ui:Refresh()
+    H.Equal(#app.engine:Snapshot(), 2)
+    H.Equal(ui.selected.id, id)
+    H.Equal(ui.selected.identity, identity)
+    H.Equal(note:GetText(), "Draft for plate owner")
+    H.True(note:HasFocus())
+    H.Nil(app.db:GetList()["guid:Player-SameFocus"])
+end)
+
+for _, useExact in ipairs({ true, false }) do
+    H.Test("a verified merge clears an unsaved name draft when the saved note is " .. (useExact and "exact" or "name-based"), function()
+        local state, _, app = setup()
+        local guid, identity = "Player-AliasDraft", "guid:Player-AliasDraft"
+        local name, alias = "Enemy-FixtureRealm", "name:Enemy-FixtureRealm"
+        local noteKey = useExact and identity or alias
+        assert(app.db:SetList(noteKey, "note", "Saved note", { name = name }))
+        state:Unit("nameplate1", { name = "Enemy", realm = "FixtureRealm", class = "ROGUE", hostile = true, isPlayer = true })
+        state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+        local ui = app.ui
+        ui:Select(app.engine:Snapshot()[1])
+        H.Equal(ui.selected.identity, alias)
+        local note = ui.detailsFrame.note
+        note:SetFocus()
+        note:SetText("Unverified draft")
+        note.scripts.OnTextChanged(note, true)
+        H.Equal(ui.noteDraft.identity, alias)
+        state:Unit("focus", { guid = guid, class = "ROGUE", hostile = true, isPlayer = true })
+        state:Fire("PLAYER_FOCUS_CHANGED")
+        state.units.nameplate1.guid = guid
+        state:Fire("UNIT_NAME_UPDATE", "nameplate1")
+        ui.detailsFrame.saveNote:Click()
+        H.Equal(app.db:GetList()[noteKey].note, "Saved note")
+        ui:Refresh()
+        H.Equal(ui.selected.identity, identity)
+        H.Nil(ui.noteDraft)
+        H.False(note:HasFocus())
+        H.Equal(note:GetText(), "Saved note")
+        H.Nil(app.db:GetList()[useExact and alias or identity])
+    end)
 end
 
 for _, withFocus in ipairs({ false, true }) do

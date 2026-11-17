@@ -684,11 +684,16 @@ function E:Observe(raw)
         self:Remove(obs.token)
         contact, binding = nil, nil
     end
-    local known = identity and self.identities[identity]
+    local known = obs.guid and self.identities[identity]
     if not known and named then
         local nameOwner = self.identities[named]
         local namedContact = nameOwner and self.contacts[nameOwner]
-        if namedContact and (not obs.guid or not namedContact.guid or namedContact.guid == obs.guid) then known = nameOwner end
+        local observedGuid = obs.guid or (contact and contact.guid)
+        -- A name may associate an unbound token. It cannot collapse an existing
+        -- contact into another GUID while ownership is unknown or conflicting.
+        if namedContact and (not namedContact.guid or namedContact.guid == observedGuid or (not observedGuid and not contact)) then
+            known = nameOwner
+        end
     end
     local returning, mergedFrom
     local matched = known and self.contacts[known]
@@ -773,7 +778,7 @@ function E:Observe(raw)
     self:Changed()
     local view = self:View(contact, now)
     if self.onIdentityResolved and (mergedFrom or (existing and not oldGuid and contact.guid)) then
-        self.onIdentityResolved(mergedFrom or contact.id, view)
+        self.onIdentityResolved(mergedFrom or contact.id, view, obs.guid ~= nil and contact.guid == obs.guid)
     end
     return view
 end

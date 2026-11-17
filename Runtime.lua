@@ -454,10 +454,14 @@ function App:Initialize()
         retailStealth = self.client.retailStealth,
         onChange = function() self.dirty = true end,
         onContextBlocked = function() if self.ui then self.ui:ClearBanners() end end,
-        onIdentityResolved = function(previousId, contact)
+        onIdentityResolved = function(previousId, contact, guidConfirmed)
             if self.ui then
                 local ok = pcall(self.ui.ResolveAlertIdentity, self.ui, previousId, contact)
                 if not ok then self.diagnostics:Error("ui_alert_identity") end
+                if guidConfirmed then
+                    local resolved = pcall(self.ui.ResolveSelectedIdentity, self.ui, previousId, contact)
+                    if not resolved then self.diagnostics:Error("ui_selected_identity") end
+                end
             end
         end,
         onEncounter = function(contact, epoch)
