@@ -183,7 +183,7 @@ function E:Changed()
     if self.onChange then self.onChange() end
 end
 
-function E:Reconcile(contact, now, clearOlderTargeting)
+function E:Reconcile(contact, now, clearOlderTargeting, verifiedDead)
     local hostile, player, targeting, dead, behind, currentTarget, currentFocus
     local rangeAt, rangeMin, rangeMax, rangeExclusive, rangeEvidence, conflict
     for token in pairs(contact.tokens) do
@@ -195,6 +195,8 @@ function E:Reconcile(contact, now, clearOlderTargeting)
             if clearOlderTargeting and obs.targeting == true then obs.targeting = nil end
             if obs.targeting == true then targeting = true
             elseif obs.targeting == false and targeting == nil then targeting = false end
+            -- A new owner-verified reading supersedes cached contradictions on its aliases.
+            if verifiedDead ~= nil and obs.dead ~= verifiedDead then obs.dead = nil end
             if obs.dead == true then dead = true
             elseif obs.dead == false and dead == nil then dead = false end
             if obs.behindCamera == true then behind = true
@@ -592,11 +594,14 @@ function E:CoalesceContactPending(contact)
     end
 end
 
-function E:DiscardContactPending(contact)
+function E:DiscardContactPending(contact, threatsOnly)
     for index = #self.pending, 1, -1 do
-        if self.pending[index].id == contact.id then table.remove(self.pending, index) end
+        local item = self.pending[index]
+        if item.id == contact.id and (not threatsOnly or item.event == "stealth" or item.event == "targeting") then
+            table.remove(self.pending, index)
+        end
     end
-    contact.arrivalQueued = false
+    if not threatsOnly then contact.arrivalQueued = false end
 end
 
 function E:ResetReturningEncounter(contact, now)
@@ -682,7 +687,11 @@ function E:Observe(raw)
         self.contactCount = self.contactCount + 1
     end
     returning = returning or self:ResetReturningEncounter(contact, now)
-    local clearOlderTargeting = obs.targetEvent and obs.targeting == false and ownerMatches(contact, obs.guid, named)
+    local verifiedDead, clearOlderTargeting
+    if (obs.dead ~= nil or (obs.targetEvent and obs.targeting == false)) and ownerMatches(contact, obs.guid, named) then
+        verifiedDead = obs.dead
+        clearOlderTargeting = obs.targetEvent and obs.targeting == false
+    end
     if not binding or binding.id ~= contact.id then
         self.tokenSerial = self.tokenSerial + 1
         self.bindings[obs.token] = { id = contact.id, generation = self.tokenSerial, source = obs.source }
@@ -704,7 +713,9 @@ function E:Observe(raw)
     if obs.level then contact.level = obs.level end
     -- A restricted alias cannot erase another available source's clean evidence.
     -- A verified owner's target-change event can supersede older positives.
-    self:Reconcile(contact, now, clearOlderTargeting)
+    local wasDead = contact.dead == true
+    self:Reconcile(contact, now, clearOlderTargeting, verifiedDead)
+    if verifiedDead == true and not wasDead and #self.pending > 0 then self:DiscardContactPending(contact, true) end
     local oldStealth = contact.stealth or (previous and previous.stealth)
     if obs.stealthReadable then
         if obs.stealth == true then

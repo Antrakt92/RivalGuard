@@ -1900,6 +1900,107 @@ for _, tickWhileDead in ipairs({ false, true }) do
     end)
 end
 
+local function aliasedLifeFixture(initiallyDead)
+    local state, _, app = setup(nil, function(mock)
+        function mock.api.UnitIsDeadOrGhost(token)
+            local unit = mock.units[token]
+            if unit then return unit.dead end
+            return false
+        end
+    end)
+    local profile = app.db:GetProfile()
+    profile.alerts.muteOrdinary = true
+    profile.retention.journalMode = "threats"
+    app:OnSettingsChanged()
+    local plateUnit = { guid = "Player-AliasedLife", name = "Fixture rogue", class = "ROGUE",
+        hostile = true, isPlayer = true, dead = initiallyDead }
+    local focusUnit = state.RG.Util.Copy(plateUnit)
+    state:Unit("nameplate1", plateUnit)
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    state:Unit("focus", focusUnit)
+    state:Fire("PLAYER_FOCUS_CHANGED")
+    local first = assert(app.engine:Snapshot()[1])
+    H.Equal(first.dead, initiallyDead)
+    H.True(first.sources.nameplate); H.True(first.sources.focus)
+    H.Equal(#app.db:GetJournal(), 0)
+    local function original()
+        return assert(app.engine:SelectedContact(first.id, first.identity))
+    end
+    return state, app, plateUnit, original
+end
+
+H.Test("confirmed same-GUID resurrection allows a Vanish before the cached focus can refresh", function()
+    local state, app, unit, original = aliasedLifeFixture(true)
+    local now = state.clock.Now()
+    unit.dead = false
+    state:Fire("UNIT_FLAGS", "nameplate1")
+    H.False(original().dead)
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-AfterResurrection", 1856)
+    H.Equal(state.clock.Now(), now)
+    H.Equal(#app.db:GetJournal(), 1)
+    H.Equal(app.db:GetJournal()[1].identity, original().identity)
+    H.Equal(app.db:GetJournal()[1].encounters, 1)
+    app.engine:Tick()
+    H.Equal(#app.engine.history, 1)
+    H.Equal(app.engine.history[1].kind, "stealth")
+    H.Equal(app.engine.history[1].id, original().id)
+    H.Equal(#state.sounds, 1)
+    H.Equal(app.ui.banner.title:GetText(), app.ui:F("stealthCast", app.ui:T("spellVanish")))
+
+    state.units.nameplate1 = nil
+    state:Fire("NAME_PLATE_UNIT_REMOVED", "nameplate1")
+    local remaining = original()
+    H.True(remaining.visible); H.True(remaining.sources.focus)
+    H.Nil(remaining.sources.nameplate)
+    H.True(remaining.dead ~= true)
+    app.engine:Tick()
+    H.Equal(#app.engine.history, 1)
+end)
+
+H.Test("confirmed death cancels a queued Vanish even when its nameplate leaves before the tick", function()
+    local state, app, unit, original = aliasedLifeFixture(false)
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-BeforeFreshDeath", 1856)
+    H.Equal(#app.engine.pending, 1)
+    unit.dead = true
+    state:Fire("UNIT_FLAGS", "nameplate1")
+    H.True(original().dead)
+    state.units.nameplate1 = nil
+    state:Fire("NAME_PLATE_UNIT_REMOVED", "nameplate1")
+    H.True(original().sources.focus)
+    app.engine:Tick()
+    H.Equal(#app.engine.history, 0)
+    H.Equal(#state.sounds, 0)
+    H.Nil(app.ui.activeBanner)
+end)
+
+for _, evidence in ipairs({ "restricted life", "restricted identity", "different player" }) do
+    H.Test("known death from focus survives " .. evidence .. " evidence on another alias", function()
+        local state, app, unit, original = aliasedLifeFixture(true)
+        local restricted = H.Secret("unreadable resurrection evidence")
+        if evidence == "different player" then
+            state:Unit("nameplate1", { guid = "Player-DifferentAlive", name = "Another rogue", class = "ROGUE",
+                hostile = true, isPlayer = true, dead = false })
+        elseif evidence == "restricted identity" then
+            local guid, name = state.api.UnitGUID, state.api.UnitName
+            state.api.UnitGUID = function(token) if token == "nameplate1" then return restricted end return guid(token) end
+            state.api.UnitName = function(token) if token == "nameplate1" then return restricted, restricted end return name(token) end
+            state.api.UnitFullName = state.api.UnitName
+            unit.dead = false
+        else
+            unit.dead = restricted
+        end
+        state:Fire("UNIT_FLAGS", "nameplate1")
+        local old = original()
+        H.True(old.dead); H.True(old.sources.focus)
+        H.Equal(app:Explain(old).reason, "dead")
+        state:Fire("UNIT_SPELLCAST_SUCCEEDED", "focus", "Cast-UnverifiedResurrection", 1856)
+        app.engine:Tick()
+        H.Equal(#app.engine.history, 0)
+        H.Equal(#app.db:GetJournal(), 0)
+        H.Equal(#state.sounds, 0)
+    end)
+end
+
 H.Test("unchanged exact measurements do not reschedule sightings when no range filter is in use", function()
     local state, app, see, move, RG, reads = pendingRangeFixture()
     local arrival = state.clock.Now()

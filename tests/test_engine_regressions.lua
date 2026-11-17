@@ -30,6 +30,21 @@ local function selectLikeSnapshot(engine, id, identity)
     return selected
 end
 
+H.Test("only a complete verified name can replace contradictory life state without a GUID", function()
+    local engine, observe = fixture()
+    local initial = observe("nameplate1", { name = "Enemy", realm = "Realm", class = "ROGUE", dead = true })
+    local focus = observe("focus", { name = "Enemy", realm = "Realm", class = "ROGUE", dead = true })
+    H.Equal(focus.id, initial.id)
+    local unverified = observe("focus", { name = "Enemy", nameComplete = false, class = "ROGUE", dead = false })
+    H.True(unverified.dead)
+    local verified = observe("focus", { name = "Enemy", realm = "Realm", class = "ROGUE", dead = false })
+    H.False(verified.dead)
+    engine:Remove("focus")
+    H.Nil(engine:Snapshot()[1].dead)
+    local refreshed = observe("nameplate1", { name = "Enemy", realm = "Realm", class = "ROGUE", dead = false })
+    H.False(refreshed.dead)
+end)
+
 H.Test("selected contact follows identity promotion and reattachment by canonical identity", function()
     local engine, observe, clock = fixture()
     local anonymous = observe("target", { class = "ROGUE" })
