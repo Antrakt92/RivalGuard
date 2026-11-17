@@ -116,3 +116,18 @@ H.Test("merged evidence emits only the strongest notification for the same sight
     engine:Tick(); clock.Advance(1); engine:Tick()
     H.Equal(#alerts, 1); H.Equal(alerts[1].kind, "stealth")
 end)
+
+H.Test("discarding a stale targeting alert can still allow the initial ordinary sighting", function()
+    local RG = H.Addon({ "Core/Bootstrap.lua", "Core/Util.lua", "Core/Defaults.lua", "Core/Rules.lua", "Core/Engine.lua" })
+    local clock, alerts = H.Clock(), {}
+    local engine = RG.Engine.New({ clock = clock.Now, onAlert = function(event) alerts[#alerts + 1] = event end })
+    local observation = { token = "nameplate1", guid = "A", name = "Quiet", class = "ROGUE", hostile = true, isPlayer = true, targeting = true }
+    engine:Observe(observation)
+    observation.targeting = false
+    engine:Observe(observation)
+    engine:Tick()
+    H.Equal(#alerts, 0)
+    engine:Observe(observation)
+    clock.Advance(1); engine:Tick()
+    H.Equal(#alerts, 1); H.Equal(alerts[1].kind, "sighting")
+end)

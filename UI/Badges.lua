@@ -85,7 +85,10 @@ function B.New(getProfile)
         if type(unit) ~= "string" or not unit:match("^nameplate%d+$") then return end
         if not frame or not frame.SetPoint or not available(frame) then self:Remove(unit); return end
         local badge = self.active[unit]
-        if locked() and (not badge or badge.parent ~= frame) then return end
+        if locked() and (not badge or badge.parent ~= frame) then
+            if badge then self:Remove(unit) end
+            return
+        end
         if not badge then
             badge = acquire()
             if not badge then return end

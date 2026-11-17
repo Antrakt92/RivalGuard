@@ -86,6 +86,51 @@ H.Test("unknown player and hostility evidence stays silent until clean confirmat
     engine:Observe(unknown); tick(); H.Equal(#alerts, 1)
 end)
 
+H.Test("queued targeting is canceled if clean target evidence ends before delivery", function()
+    local _, _, alerts, observe, tick = setup(function(profile)
+        profile.alerts.targeting = true
+        profile.alerts.soundGap = 0
+    end)
+    observe("nameplate1", "A", { targeting = false })
+    tick()
+    H.Equal(#alerts, 1)
+    observe("nameplate1", "A", { targeting = true })
+    observe("nameplate1", "A", { targeting = false })
+    tick()
+    H.Equal(#alerts, 1)
+    observe("nameplate1", "A", { targeting = true })
+    tick()
+    H.Equal(#alerts, 2)
+    H.Equal(alerts[2].kind, "targeting")
+    H.True(alerts[2].contact.targeting)
+end)
+
+H.Test("a session contact snooze survives contact eviction and world changes until expiry", function()
+    local engine, _, alerts, observe, tick = setup(function(profile)
+        profile.retention.maxContacts = 32
+        profile.alerts.waveThreshold = 2
+    end)
+    local first = observe("nameplate1", "Snoozed")
+    engine:Remove("nameplate1")
+    H.True(engine:ToggleContactSnooze(first.id, 60))
+    for index = 2, 33 do observe("nameplate" .. index, "Other" .. index) end
+    H.Equal(engine:ExplainView(first.id).reason, "not_observed")
+    local returned = observe("target", "Snoozed")
+    H.True(returned.id ~= first.id)
+    H.Equal(engine:ExplainView(returned.id).reason, "contact_snoozed")
+
+    engine:Clear()
+    local changedWorld = observe("nameplate1", "Snoozed")
+    tick()
+    H.Equal(#alerts, 0)
+    H.Equal(engine:ExplainView(changedWorld.id).reason, "contact_snoozed")
+    tick(61)
+    observe("nameplate1", "Snoozed")
+    tick()
+    H.Equal(#alerts, 1)
+    H.Equal(alerts[1].contact.id, changedWorld.id)
+end)
+
 H.Test("restricted observation fields do not leak to identity history or alerts", function()
     local engine, _, alerts, _, tick = setup()
     local secret = H.Secret("observation")
@@ -136,6 +181,31 @@ H.Test("crowd arrivals summarize ordinary threats without swallowing watched ene
     H.Equal(alerts[1].kind, "watch"); H.Equal(alerts[2].kind, "wave")
     H.Equal(alerts[2].count, 5); H.Equal(alerts[2].classes.ROGUE, 5)
     H.True(alerts[1].sound); H.False(alerts[2].sound)
+end)
+
+H.Test("high-priority custom sightings keep their individual priority in a crowd", function()
+    local _, _, alerts, observe, tick = setup(function(profile)
+        profile.alerts.waveThreshold = 3
+        profile.rules = {{
+            name = "Urgent rogue", enabled = true, event = "sighting", priority = 95,
+            classes = { ROGUE = true }, action = "alert", sound = false, banner = true, cooldown = 20,
+        }}
+    end)
+    for index = 1, 3 do
+        observe("nameplate" .. index, "Rogue" .. index)
+        observe("nameplate" .. (index + 3), "Hunter" .. index, { class = "HUNTER" })
+    end
+    tick()
+    H.Equal(#alerts, 4)
+    for index = 1, 3 do
+        H.Equal(alerts[index].priority, 95)
+        H.Equal(alerts[index].contact.class, "ROGUE")
+        H.Equal(alerts[index].ruleName, "Urgent rogue")
+    end
+    H.Equal(alerts[4].kind, "wave")
+    H.Equal(alerts[4].count, 3)
+    H.Equal(alerts[4].classes.HUNTER, 3)
+    H.Nil(alerts[4].classes.ROGUE)
 end)
 
 H.Test("queued alerts recheck current context instead of emitting stale eligibility", function()

@@ -152,9 +152,23 @@ function UI.New(app)
     function self:SettingsChanged()
         self.controlsDirty = true
         self.dataPage = nil
-        self:ClearBanners()
+        local profile = self:Profile()
+        if profile.display.streamer then
+            if self.journalSearch then self.journalSearch:SetText(""); self.journalSearch:ClearFocus() end
+            if self.detailsFrame then self.detailsFrame.note:ClearFocus(); self.detailsFrame.note:SetText("") end
+            hideTooltip()
+        end
+        local config = self:AlertConfig(profile)
+        if self.alertProfile ~= profile or self.alertConfig ~= config then self:ClearBanners() end
+        self.alertProfile, self.alertConfig = profile, config
         if self.activeBanner then self:PaintBanner(self.activeBanner) end
         self:Refresh()
+    end
+
+    function self:AlertConfig(profile)
+        if not RG.Codec then return nil end
+        return RG.Codec.Encode({ enabled = profile.enabled, alerts = profile.alerts, context = profile.context,
+            range = profile.range, rules = profile.rules })
     end
 
     local function label(parent, key, size, color)
@@ -176,9 +190,10 @@ function UI.New(app)
     end
 
     local function setList(contact, kind, note)
-        if not contact or not contact.identity then return nil end
+        local identity = M.EditableIdentity(contact)
+        if not identity then return nil end
         if app.SetList then return app:SetList(contact, kind, note) end
-        local ok = app.db.SetList and app.db:SetList(contact.identity, kind, note, contact)
+        local ok = app.db.SetList and app.db:SetList(identity, kind, note, contact)
         if ok then app:ProfileChanged() end
         return ok
     end
@@ -211,6 +226,12 @@ function UI.New(app)
         end
     end
 
+    local function bannerDefaultPoint()
+        local width = M.Number(UIParent:GetWidth(), 1920)
+        if width <= 1150 then return -math.min(108, math.max(0, (width - 465) / 2)) end
+        return 0
+    end
+
     local main = self:Window("RivalGuardNearby", UIParent)
     self.frame = main
     main:SetSize(UI.layout.width, 410)
@@ -218,7 +239,7 @@ function UI.New(app)
     main:SetClampedToScreen(true)
     main:SetMovable(true)
     main:EnableMouseWheel(true)
-    fill(main); outline(main)
+    local mainBackground = fill(main); local mainBorder = outline(main)
     restorePosition(main, "nearby", "RIGHT", -70, 20)
 
     local header = CreateFrame("Button", nil, main)
@@ -281,8 +302,10 @@ function UI.New(app)
         row.icon:SetPoint("LEFT", 6, 0); row.icon:SetSize(22, 22)
         row.nameText = font(row, 13)
         row.nameText:SetPoint("TOPLEFT", 36, -2); row.nameText:SetWidth(252)
+        if row.nameText.SetMaxLines then row.nameText:SetMaxLines(1) end
         row.detailText = font(row, 10, C.muted)
         row.detailText:SetPoint("TOPLEFT", 36, -19); row.detailText:SetWidth(280)
+        if row.detailText.SetMaxLines then row.detailText:SetMaxLines(1) end
         row.mark = font(row, 15, C.gold, "RIGHT")
         row.mark:SetPoint("TOPRIGHT", -8, -3); row.mark:SetText("!")
         row:SetScript("OnClick", function() if row.contact then self:Select(row.contact) end end)
@@ -320,14 +343,15 @@ function UI.New(app)
     self.banner = banner
     banner:SetSize(440, 84); banner:SetFrameStrata("HIGH"); banner:SetClampedToScreen(true)
     banner:SetMovable(true); banner:EnableMouse(false)
-    fill(banner, { 0.035, 0.05, 0.075, 0.97 }); self.bannerOutline = outline(banner, { 0.37, 0.78, 0.92, 1 })
-    restorePosition(banner, "alert", "TOP", 0, -180)
+    fill(banner, { 0.035, 0.05, 0.075, 1 }); self.bannerOutline = outline(banner, { 0.37, 0.78, 0.92, 1 })
+    restorePosition(banner, "alert", "TOP", bannerDefaultPoint(), -180)
     banner.icon = banner:CreateTexture(nil, "ARTWORK")
     banner.icon:SetPoint("LEFT", 14, 0); banner.icon:SetSize(42, 42)
     banner.title = font(banner, 16, C.accent)
     banner.title:SetPoint("TOPLEFT", 70, -14); banner.title:SetWidth(350)
+    if banner.title.SetMaxLines then banner.title:SetMaxLines(1) end
     banner.body = font(banner, 13)
-    banner.body:SetPoint("TOPLEFT", 70, -40); banner.body:SetWidth(350)
+    banner.body:SetPoint("TOPLEFT", 70, -40); banner.body:SetWidth(350); banner.body:SetHeight(38)
     banner:RegisterForDrag("LeftButton")
     banner:SetScript("OnDragStart", function() if self.bannerPreview then banner:StartMoving() end end)
     banner:SetScript("OnDragStop", function() banner:StopMovingOrSizing(); savePosition(banner, "alert") end)
@@ -515,7 +539,7 @@ function UI.New(app)
     local resetPos = localButton(appearance, "resetPosition", 260, function()
         self:Profile().positions = {}
         restorePosition(main, "nearby", "RIGHT", -70, 20)
-        restorePosition(banner, "alert", "TOP", 0, -180)
+        restorePosition(banner, "alert", "TOP", bannerDefaultPoint(), -180)
     end)
     resetPos:SetPoint("TOPLEFT", 0, y - 45)
     appearance.height = -y + 100
@@ -548,6 +572,7 @@ function UI.New(app)
         self:Refresh()
     end)
     createProfile:SetPoint("LEFT", presetButton, "RIGHT", 12, 0)
+    nameInput:SetScript("OnEnterPressed", function() createProfile:Click() end)
     self.profileRows = {}
     for i = 1, 10 do
         local row = CreateFrame("Frame", nil, profiles)
@@ -746,9 +771,11 @@ function UI.New(app)
         local entries, list = {}, app.db:GetList()
         local personal = self.journalMode == "personal"
         local journalEntries = app.db.GetJournal and app.db:GetJournal() or {}
+        local query = profile.display.streamer and "" or self.journalQuery
+        if self.journalSearch.SetEnabled then self.journalSearch:SetEnabled(not profile.display.streamer) end
         if personal then
             for identity, item in pairs(list) do
-                if (self.journalFilter == "all" or self.journalFilter == item.kind) and M.Matches(self.journalQuery, item.name, item.note) then
+                if (self.journalFilter == "all" or self.journalFilter == item.kind) and M.Matches(query, item.name, item.note) then
                     entries[#entries + 1] = { identity = identity, name = item.name, class = item.class, note = item.note, listKind = item.kind, savedOnly = true }
                 end
             end
@@ -760,7 +787,7 @@ function UI.New(app)
         else
             for _, item in ipairs(journalEntries) do
                 local record = list[item.identity]
-                if M.Matches(self.journalQuery, item.name, record and record.note) then entries[#entries + 1] = item end
+                if M.Matches(query, item.name, record and record.note) then entries[#entries + 1] = item end
             end
         end
         self.journalRecent.bg:SetColorTexture(unpack(not personal and { 0.10, 0.22, 0.28, 1 } or C.panel))
@@ -773,7 +800,7 @@ function UI.New(app)
         self.journalFilterButton.label:SetText(self:T(LIST_KIND_KEYS[self.journalFilter] or "allLists") .. "  ›")
         self.journalCount:SetText(self:F("filteredCount", #entries))
         self.journalEmpty:SetShown(#entries == 0)
-        self.journalEmpty:SetText(self:T(self.journalQuery ~= "" and "noMatches" or personal and "listEmpty" or "emptyJournal"))
+        self.journalEmpty:SetText(self:T(query ~= "" and "noMatches" or personal and "listEmpty" or "emptyJournal"))
         self.journalOffset = math.max(0, math.min(self.journalOffset, math.max(0, math.floor((#entries - 1) / 12) * 12)))
         self.journalPrev:SetEnabled(self.journalOffset > 0)
         self.journalNext:SetEnabled(self.journalOffset + 12 < #entries)
@@ -805,11 +832,18 @@ function UI.New(app)
     function self:Refresh()
         if self.destroyed then return end
         local profile = self:Profile()
+        if self.previousContrast ~= profile.display.highContrast then
+            local contrast = profile.display.highContrast
+            mainBackground:SetColorTexture(unpack(contrast and { 0.015, 0.020, 0.026, 1 } or C.bg))
+            for _, edge in ipairs(mainBorder) do edge:SetColorTexture(unpack(contrast and { 0.55, 0.78, 0.90, 1 } or C.border)) end
+            self.previousContrast = contrast
+        end
         self:UpdateClasses()
         if self.lastProfile ~= profile then
             restorePosition(main, "nearby", "RIGHT", -70, 20)
-            restorePosition(banner, "alert", "TOP", 0, -180)
+            restorePosition(banner, "alert", "TOP", bannerDefaultPoint(), -180)
             self.lastProfile = profile
+            self.alertProfile, self.alertConfig = profile, self:AlertConfig(profile)
             self.controlsDirty = true
         end
         local now = self:Now()
@@ -837,7 +871,7 @@ function UI.New(app)
         local untilTime = M.Number(app.engine.pausedUntil)
         local paused = appStatus.state == "paused" or (untilTime and untilTime > now)
         local visibleCount = 0
-        for _, row in ipairs(rows) do if row.visible then visibleCount = visibleCount + 1 end end
+        for _, row in ipairs(rows) do if row.visible and row.contact.behindCamera ~= true then visibleCount = visibleCount + 1 end end
         self.visibleCount = preview and 0 or visibleCount
         local status = preview and self:T("demoLabel") or not profile.enabled and self:T("disabled") or paused and self:T("paused") or self:T(appStatus.state == "limited" and "limited" or "active")
         statusText:SetText(status .. " · " .. self:F("inViewCount", visibleCount))
@@ -855,7 +889,7 @@ function UI.New(app)
                 row.detailText:SetFont(STANDARD_TEXT_FONT or "Fonts\\ARIALN.TTF", math.max(10, profile.display.textSize - 2), "")
                 row.detailText:ClearAllPoints(); row.detailText:SetPoint("TOPLEFT", 36, -profile.display.textSize - 5)
                 row.nameText:SetText(data.name)
-                if data.class then row.nameText:SetTextColor(classColor(data.class)) else row.nameText:SetTextColor(unpack(C.text)) end
+                if data.class and not profile.display.highContrast then row.nameText:SetTextColor(classColor(data.class)) else row.nameText:SetTextColor(unpack(C.text)) end
                 local level = M.Number(data.contact.level)
                 row.detailText:SetText(level and (self:F("levelShort", level) .. " · " .. data.detail) or data.detail)
                 row.detailText:SetTextColor(unpack(profile.display.highContrast and C.text or C.muted))
@@ -930,11 +964,16 @@ function UI.New(app)
 
     function self:PaintBanner(item)
         local kind, class = item.kind, item.class
-        local title = self:T(BANNER_CATEGORIES[kind] or "alertTitle")
+        local title = kind == "stealth" and M.Stealth(item, self:Profile().locale) or self:T(BANNER_CATEGORIES[kind] or "alertTitle")
         if item.preview then title = self:T("demoLabel") .. " · " .. title end
         banner.title:SetText(title)
         local name = self:Profile().display.streamer and self:T("unknownPlayer") or item.name
-        banner.body:SetText(item.count and item.count > 1 and self:F("waveBody", item.count) or name)
+        if item.count and item.count > 1 then
+            local summary = M.Wave(item.classes, self:Profile().locale)
+            banner.body:SetText(self:F("waveBody", item.count) .. (summary ~= "" and ("\n" .. summary) or ""))
+        else
+            banner.body:SetText(name)
+        end
         banner.icon:SetTexture(RG.Defaults.classSet[class] and ("Interface\\Icons\\ClassIcon_" .. class) or "Interface\\Icons\\Ability_Warrior_BattleShout")
         banner.title:SetTextColor(unpack((kind == "watch" or kind == "stealth" or kind == "avoid") and C.gold or C.accent))
     end
@@ -953,6 +992,20 @@ function UI.New(app)
         if self.activeBanner and self.activeBanner.preview then return end
         self.activeBanner, self.bannerUntil, self.bannerPreview = nil, nil, false
         banner:Hide(); banner:EnableMouse(false)
+    end
+
+    function self:SuppressContactBanners(id)
+        id = M.Text(id, "", 256)
+        if id == "" then return end
+        for index = #self.bannerQueue, 1, -1 do
+            local item = self.bannerQueue[index]
+            if not item.preview and item.id == id then table.remove(self.bannerQueue, index) end
+        end
+        local item = self.activeBanner
+        if item and not item.preview and item.id == id then
+            self.bannerUntil = self:Now()
+            self:AdvanceBanner(self.bannerUntil)
+        end
     end
 
     function self:AdvanceBanner(now)
@@ -985,10 +1038,12 @@ function UI.New(app)
         local contact = decision.contact or decision.player or decision
         local kind = M.Text(decision.kind, M.Text(decision.type, "sighting"))
         local priority = M.Number(decision.priority, BANNER_PRIORITY[kind] or 20)
-        local id = M.Text(contact.id, nil)
+        local id = M.Text(contact.id, "", 256)
         local now = self:Now()
         local item = { kind = kind, class = M.Text(contact.class, ""), name = M.Text(contact.name, self:T("unknownPlayer")),
-            count = M.Number(decision.count), preview = preview, priority = priority, at = now,
+            count = M.Number(decision.count), classes = type(decision.classes) == "table" and RG.Util.Copy(decision.classes) or nil,
+            stealthEvidence = M.Text(contact.stealthEvidence, ""), stealthSpell = M.Text(contact.stealthSpell, ""),
+            id = id, preview = preview, priority = priority, at = now,
             key = id ~= "" and (kind .. ":" .. id) or nil }
         self:AdvanceBanner(now)
         local active = self.activeBanner
@@ -1032,6 +1087,7 @@ function UI.New(app)
 
     function self:Select(contact)
         self.selected = contact
+        self.noteDraft = nil
         self.removeEntryAt, self.removeEntryIdentity = nil, nil
         self.selectedOutside = contact.sources and contact.sources.journal == true or false
         self:ShowDetails()
@@ -1041,11 +1097,12 @@ function UI.New(app)
         if not self.detailsFrame then
             local detail = self:Window("RivalGuardDetails", UIParent)
             self.detailsFrame = detail
-            detail:SetSize(470, 500); detail:SetPoint("CENTER", 80, 0)
+            detail:SetSize(470, 525); detail:SetPoint("CENTER", 80, 0)
             detail:SetFrameStrata("DIALOG"); detail:SetClampedToScreen(true); detail:EnableMouse(true)
             fill(detail); outline(detail)
             detail.title = font(detail, 18, C.accent)
             detail.title:SetPoint("TOPLEFT", 18, -16); detail.title:SetWidth(344)
+            if detail.title.SetMaxLines then detail.title:SetMaxLines(1) end
             local close = localButton(detail, "close", 84, function() detail:Hide() end)
             close:SetPoint("TOPRIGHT", -12, -10)
             detail.info = font(detail, 13, C.text)
@@ -1059,10 +1116,11 @@ function UI.New(app)
                 local b = localButton(detail, action, 130, function()
                     local contact = self.selected
                     if not contact then return end
-                    if not contact.identity then notify("identityUnknown") return end
+                    if not M.EditableIdentity(contact) then notify("identityUnknown") return end
                     local entry = app.db:GetList()[contact.identity]
                     local ok = setList(contact, kind, entry and entry.note)
                     if not ok then notify("saveFailed") return end
+                    if kind == "ignore" then self:SuppressContactBanners(contact.id) end
                     self:SettingsChanged(); self:ShowDetails(true)
                 end)
                 b:SetPoint("TOPLEFT", 18 + (i - 1) * 142, -192)
@@ -1070,7 +1128,7 @@ function UI.New(app)
             end
             local remove = localButton(detail, "removeList", 150, function()
                 local contact = self.selected
-                if not contact or not contact.identity then notify("identityUnknown") return end
+                if not M.EditableIdentity(contact) then notify("identityUnknown") return end
                 local entry = app.db:GetList()[contact.identity]
                 if not entry then return end
                 local ok = setList(contact, entry.note and "note" or nil, entry.note)
@@ -1085,25 +1143,53 @@ function UI.New(app)
             noteTitle:SetPoint("TOPLEFT", 18, -275)
             detail.note = CreateFrame("EditBox", nil, detail, "InputBoxTemplate")
             detail.note:SetPoint("TOPLEFT", 25, -304); detail.note:SetSize(420, 28)
-            detail.note:SetAutoFocus(false); detail.note:SetMaxLetters(160)
-            if detail.note.SetMaxBytes then detail.note:SetMaxBytes(160) end
-            detail.note:SetScript("OnEscapePressed", function(box) box:ClearFocus() end)
-            detail:SetScript("OnHide", function() detail.note:ClearFocus() end)
+            detail.note:SetAutoFocus(false); detail.note:SetMaxLetters(512)
+            if detail.note.SetMaxBytes then detail.note:SetMaxBytes(512) end
+            detail.note:SetScript("OnTextChanged", function(box, userInput)
+                local identity = M.EditableIdentity(self.selected)
+                if userInput and identity and not self:Profile().display.streamer then
+                    self.noteDraft = { identity = identity, text = box:GetText() }
+                end
+            end)
+            detail.note:SetScript("OnEscapePressed", function(box)
+                self.noteDraft = nil; box:ClearFocus(); self:ShowDetails()
+            end)
+            detail:SetScript("OnHide", function() self.noteDraft = nil; detail.note:ClearFocus() end)
             local save = localButton(detail, "saveNote", 160, function()
                 local contact = self.selected
-                if not contact or not contact.identity then notify("identityUnknown") return end
+                if not M.EditableIdentity(contact) or self:Profile().display.streamer then return end
                 if not app.SetNote then notify("noListAPI") return end
                 local ok = app:SetNote(contact, detail.note:GetText())
                 detail.note:ClearFocus()
-                notify(ok == false and "saveFailed" or "saved")
+                if ok then self.noteDraft = nil; self:ShowDetails() end
+                notify(ok and "noteSaved" or "saveFailed")
             end)
             save:SetPoint("TOPLEFT", 18, -350)
+            save:SetScript("OnEnter", function() tooltip(save, self:T("saveNote"), self:T("keyboardEditHelp")) end)
+            save:SetScript("OnLeave", hideTooltip)
+            detail.saveNote, detail.noteTitle = save, noteTitle
+            detail.note:SetScript("OnEnterPressed", function() save:Click() end)
+            detail.privateNote = label(detail, "notePrivate", 12, C.muted)
+            detail.privateNote:SetPoint("TOPLEFT", 18, -304); detail.privateNote:SetWidth(432)
+            detail.snooze = button(detail, self:T("snoozeContact"), 274, function()
+                local contact = self.selected
+                if not self:CanSnooze(contact) then notify("snoozeUnavailable") return end
+                local ok = app:Snooze(contact, 600)
+                if ok then self:Refresh() else notify("snoozeUnavailable") end
+            end)
+            detail.snooze:SetPoint("TOPLEFT", 18, -392)
+            detail.snooze:SetScript("OnEnter", function()
+                local remaining = math.max(0, M.Number(self.selected and self.selected.snoozedUntil, 0) - self:Now())
+                local description = remaining > 0 and self:F("snoozedFor", M.Age(remaining, self:Profile().locale)) or self:T("snoozeContact")
+                tooltip(detail.snooze, self:T("alerts"), description)
+            end)
+            detail.snooze:SetScript("OnLeave", hideTooltip)
             local help = label(detail, "identityUnknown", 11, C.muted)
-            help:SetPoint("TOPLEFT", 18, -437); help:SetWidth(432)
+            help:SetPoint("TOPLEFT", 18, -445); help:SetWidth(432)
             detail.identityHelp = help
             detail.removeSaved = localButton(detail, "deleteRecord", 220, function()
                 local contact = self.selected
-                if not contact or not contact.identity or not contact.savedOnly then return end
+                if not M.EditableIdentity(contact) or not contact.savedOnly then return end
                 if self.removeEntryIdentity ~= contact.identity or (self.removeEntryAt or 0) < self:Now() then
                     self.removeEntryIdentity, self.removeEntryAt = contact.identity, self:Now() + 6
                     detail.removeSaved.label:SetText(self:T("deleteRecordNow"))
@@ -1119,8 +1205,10 @@ function UI.New(app)
         end
         local detail, contact = self.detailsFrame, self.selected
         if not contact then detail:Hide() return end
+        local profile = self:Profile()
+        local identity = M.EditableIdentity(contact)
         local name = M.Text(contact.name, self:T(contact.savedOnly and "nameUnavailable" or "unknownPlayer"))
-        if self:Profile().display.streamer then name = self:T("unknownPlayer") end
+        if profile.display.streamer then name = self:T("unknownPlayer") end
         detail.title:SetText(name)
         local class = M.Text(contact.class, "")
         local lines = { RG.Defaults.classSet[class] and RG.Locale.Class(class, self:Profile().locale) or self:T("unknownClass") }
@@ -1142,21 +1230,39 @@ function UI.New(app)
         table.sort(sourceNames)
         lines[#lines + 1] = self:T("reason") .. ": " .. (#sourceNames > 0 and table.concat(sourceNames, ", ") or self:T("observed"))
         detail.info:SetText(table.concat(lines, "\n"))
-        if not refreshOnly or not (detail.note.HasFocus and detail.note:HasFocus()) then
-            detail.note:SetText(M.Text(entry and entry.note, "", 160))
+        if profile.display.streamer then
+            self.noteDraft = nil; detail.note:ClearFocus(); detail.note:SetText("")
+        elseif not refreshOnly or not (detail.note.HasFocus and detail.note:HasFocus()) then
+            local pending = self.noteDraft and self.noteDraft.identity == identity and self.noteDraft.text
+            detail.note:SetText(pending or M.Text(entry and entry.note, "", 512))
         end
-        detail.identityHelp:SetShown(not contact.identity)
-        detail.identityHelp:SetText(self:T(contact.preview and "noPreviewTarget" or "identityUnknown"))
+        detail.noteTitle:SetShown(not profile.display.streamer)
+        detail.note:SetShown(not profile.display.streamer)
+        if detail.note.SetEnabled then detail.note:SetEnabled(identity ~= nil) end
+        detail.saveNote:SetShown(not profile.display.streamer)
+        detail.saveNote:SetEnabled(identity ~= nil)
+        detail.privateNote:SetShown(profile.display.streamer)
+        detail.identityHelp:SetShown(identity == nil)
+        detail.identityHelp:SetText(self:T(contact.preview and "noPreviewTarget" or contact.savedOnly and "legacyIdentity" or "identityUnknown"))
         for kind, buttonFrame in pairs(detail.listActions) do
-            buttonFrame:SetEnabled(contact.identity ~= nil and (not entry or entry.kind ~= kind))
+            buttonFrame:SetEnabled(identity ~= nil and (not entry or entry.kind ~= kind))
             buttonFrame.bg:SetColorTexture(unpack(entry and entry.kind == kind and { 0.10, 0.22, 0.28, 1 } or C.panel))
         end
-        detail.removeMembership:SetEnabled(entry ~= nil and entry.kind ~= "note")
-        detail.removeSaved:SetShown(contact.savedOnly == true and entry ~= nil)
+        detail.removeMembership:SetEnabled(identity ~= nil and entry ~= nil and entry.kind ~= "note")
+        detail.removeSaved:SetShown(contact.savedOnly == true and identity ~= nil and entry ~= nil)
         local confirming = self.removeEntryIdentity == contact.identity and (self.removeEntryAt or 0) >= self:Now()
         detail.removeSaved.label:SetText(self:T(confirming and "deleteRecordNow" or "deleteRecord"))
-        self:FitWindow(detail, 470, 500, 1)
+        local canSnooze = self:CanSnooze(contact)
+        local remaining = math.max(0, M.Number(contact.snoozedUntil, 0) - self:Now())
+        detail.snooze:SetShown(canSnooze)
+        detail.snooze.label:SetText(self:T(remaining > 0 and "resumeContact" or "snoozeContact"))
+        self:FitWindow(detail, 470, 525, 1)
         detail:Show()
+    end
+
+    function self:CanSnooze(contact)
+        return app.Snooze ~= nil and M.EditableIdentity(contact) ~= nil and not self.selectedOutside and not contact.savedOnly
+            and (not contact.sources or not contact.sources.journal) and M.Text(contact.id, "", 256) ~= ""
     end
 
     function self:ShowExplanation()
@@ -1224,7 +1330,10 @@ function UI.New(app)
         if self.updateAcc >= 1 then self.updateAcc = 0; self:Refresh() end
     end)
     ticker:RegisterEvent("PLAYER_LOGOUT")
-    ticker:SetScript("OnEvent", function() savePosition(main, "nearby"); savePosition(banner, "alert") end)
+    ticker:SetScript("OnEvent", function()
+        savePosition(main, "nearby")
+        if self:Profile().positions.alert then savePosition(banner, "alert") end
+    end)
 
     if RG.UIDialogs then
         self.dialogs = RG.UIDialogs.Attach(self, app, { button = button, label = label, localButton = localButton,

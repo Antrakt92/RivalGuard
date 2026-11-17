@@ -33,6 +33,41 @@ function M.Matches(query, name, note)
     return M.SearchText(name):find(query, 1, true) ~= nil or M.SearchText(note):find(query, 1, true) ~= nil
 end
 
+function M.EditableIdentity(contact)
+    if not contact or clean(contact.preview) == true then return nil end
+    local identity = M.Text(contact.identity, "", 256)
+    if not (identity:match("^guid:.+$") or identity:match("^name:.+$")) then return nil end
+    if clean(contact.ambiguousIdentity) == true and not identity:match("^guid:.+$") then return nil end
+    if clean(contact.savedOnly) == true and M.Text(contact.name, "") == "" then return nil end
+    return identity
+end
+
+function M.Wave(classes, locale)
+    if type(classes) ~= "table" then return "" end
+    local items = {}
+    for class, count in pairs(classes) do
+        if RG.Defaults.classSet[class] or class == "UNKNOWN" then
+            local number = M.Number(count)
+            if number and number > 0 and number <= 512 and number % 1 == 0 then
+                items[#items + 1] = { class = class, count = number }
+            end
+        end
+    end
+    table.sort(items, function(a, b)
+        if a.count ~= b.count then return a.count > b.count end
+        return a.class < b.class
+    end)
+    local labels, extra = {}, 0
+    for i, item in ipairs(items) do
+        if i <= 2 then
+            local name = RG.Locale.Class(item.class, locale)
+            labels[#labels + 1] = RG.Locale.Format("waveClassCount", locale, item.count, name)
+        else extra = extra + item.count end
+    end
+    if extra > 0 then labels[#labels + 1] = RG.Locale.Format("waveMore", locale, extra) end
+    return table.concat(labels, " · ")
+end
+
 function M.Number(value, fallback)
     value = clean(value)
     if not RG.Util.IsFinite(value) then return fallback end
@@ -75,13 +110,24 @@ function M.Range(contact, locale)
     return RG.Locale.Get("rangeUnknown", locale)
 end
 
+function M.Stealth(contact, locale)
+    local evidence = clean(contact.stealthEvidence)
+    if evidence == "aura" then return RG.Locale.Get("stealthAura", locale) end
+    if evidence == "cast" then
+        local spell = clean(contact.stealthSpell)
+        local key = ({ Stealth = "spellStealth", Vanish = "spellVanish", Prowl = "spellProwl", Shadowmeld = "spellShadowmeld", Invisibility = "spellInvisibility" })[spell]
+        if key then return RG.Locale.Format("stealthCast", locale, RG.Locale.Get(key, locale)) end
+    end
+    return RG.Locale.Get("stealth", locale)
+end
+
 function M.State(contact, now, locale)
     if clean(contact.visible) == true then
         if clean(contact.dead) == true then return RG.Locale.Get("dead", locale) end
         if clean(contact.hostile) == true and clean(contact.isPlayer) == true then
             if clean(contact.targeting) == true then return RG.Locale.Get("targeting", locale) end
             if clean(contact.stealth) == true or clean(contact.stealth) == "confirmed" then
-                return RG.Locale.Get("stealth", locale)
+                return M.Stealth(contact, locale)
             end
         end
         if clean(contact.behindCamera) == true then return RG.Locale.Get("behindCamera", locale) end

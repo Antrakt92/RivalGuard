@@ -10,6 +10,70 @@ local function setup(raw)
     return state, RG, RG.instance
 end
 
+H.Test("contact snooze removes only its live alerts and resumes without persisting a setting", function()
+    local state, RG, app = setup()
+    local ui = app.ui
+    for index, name in ipairs({ "FirstRival", "SecondRival" }) do
+        local guid = "Player-Snooze-" .. index
+        assert(app.db:SetList("guid:" .. guid, "watch", nil, { name = name, class = "ROGUE" }))
+        local token = "nameplate" .. index
+        state:Unit(token, { guid = guid, name = name, class = "ROGUE", hostile = true, isPlayer = true })
+        state:Fire("NAME_PLATE_UNIT_ADDED", token)
+        state:Advance(1)
+    end
+    H.Equal(ui.banner.body:GetText(), "FirstRival")
+    H.Equal(#ui.bannerQueue, 1)
+    local first = app.engine:Snapshot()[2]
+    H.Equal(first.name, "FirstRival")
+    ui:Select(first)
+    H.True(ui.detailsFrame.snooze:IsShown())
+    local original = assert(RG.Codec.Encode(app.db.root))
+    ui.detailsFrame.snooze:Click()
+    H.Equal(ui.banner.body:GetText(), "SecondRival")
+    H.Equal(ui.detailsFrame.snooze.label:GetText(), ui:T("resumeContact"))
+    H.Equal(app.engine:ExplainView(first.id).reason, "contact_snoozed")
+    local sent = app.engine.counters.alerts
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-Snoozed", 1784)
+    state:Advance(1.5)
+    H.Equal(app.engine.counters.alerts, sent)
+    ui.detailsFrame.snooze:Click()
+    H.Equal(ui.detailsFrame.snooze.label:GetText(), ui:T("snoozeContact"))
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-Resumed", 1784)
+    state:Advance(1)
+    H.Equal(app.engine.counters.alerts, sent + 1)
+    H.Equal(ui.banner.body:GetText(), "FirstRival")
+    H.Equal(assert(RG.Codec.Encode(app.db.root)), original)
+end)
+
+H.Test("contact snooze applies to a retained encounter but not unnamed or saved-only entries", function()
+    local state, _, app = setup()
+    state:Unit("nameplate1", { guid = "Player-NoLongerHere", name = "Retained", class = "ROGUE", hostile = true, isPlayer = true })
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    local contact = app.engine:Snapshot()[1]
+    app.ui:Select(contact)
+    H.True(app.ui.detailsFrame.snooze:IsShown())
+    state.units.nameplate1 = nil
+    state:Fire("NAME_PLATE_UNIT_REMOVED", "nameplate1")
+    state:Advance(1)
+    H.False(app.engine:Snapshot()[1].visible)
+    H.True(app.ui.detailsFrame.snooze:IsShown())
+    H.True(app:Snooze(contact, 60))
+
+    state:Unit("nameplate2", { class = "HUNTER", hostile = true, isPlayer = true })
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+    local anonymous = app.engine:Snapshot()[1]
+    H.Nil(anonymous.identity)
+    app.ui:Select(anonymous)
+    H.False(app.ui.detailsFrame.snooze:IsShown())
+    local applied = app:Snooze(anonymous, 60)
+    H.False(applied == true)
+    assert(app.db:SetList("guid:OfflineFixture", "watch", nil, { name = "OfflineWatch" }))
+    app.ui:OpenSettings("journal")
+    app.ui.journalPersonal:Click()
+    app.ui.journalRows[1]:Click()
+    H.False(app.ui.detailsFrame.snooze:IsShown())
+end)
+
 H.Test("manifest load and addon event initialize once with slash commands", function()
     local state, _, app = setup()
     H.Equal(state.api.RivalGuardDB, app.db.root)
@@ -34,6 +98,21 @@ H.Test("integrated sensors engine and UI deliver one alert with configured sound
     H.Equal(state.sounds[1].channel, "Dialog")
     H.Equal(#app.db:GetJournal(), 1)
     H.Nil(app.diagnostics.counts.errors)
+end)
+
+H.Test("cosmetic streamer setting keeps a queued encounter and applies redaction at delivery", function()
+    local state, _, app = setup()
+    state:Unit("nameplate1", { guid = "Player-Cosmetic", name = "Example Roving Player", class = "ROGUE", hostile = true, isPlayer = true })
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    H.Equal(app.engine.counters.alerts, 0)
+    app.db:GetProfile().display.streamer = true
+    app:OnSettingsChanged()
+    state.units.nameplate1 = nil
+    state:Fire("NAME_PLATE_UNIT_REMOVED", "nameplate1")
+    state:Advance(1.5)
+    H.Equal(app.engine.counters.alerts, 1)
+    H.True(app.ui.banner:IsShown())
+    H.Equal(app.ui.banner.body:GetText(), app.ui:T("unknownPlayer"))
 end)
 
 H.Test("slash pause resume mute and settings operate without hidden side effects", function()
@@ -86,6 +165,57 @@ H.Test("runtime diagnostics report redacts observed identities and error details
     H.Nil(report:find("PrivateEnemy", 1, true)); H.Nil(report:find("PrivateGUID", 1, true)); H.Nil(report:find("PrivateNote", 1, true))
     H.True(report:find("ui_refresh", 1, true) ~= nil)
 end)
+
+for _, locale in ipairs({ "enUS", "ruRU" }) do
+    H.Test("streamer transition redacts open live and saved UI in " .. locale, function()
+        local state, RG, app = setup()
+        local profile, ui = app.db:GetProfile(), app.ui
+        profile.locale = locale
+        app:ProfileChanged()
+        local identity = "guid:Player-StreamerFixture"
+        local name = locale == "ruRU" and "ИгрокПример" or "ExamplePlayer"
+        local note, draft = "Test saved note", "Uncommitted note"
+        assert(app.db:SetList(identity, "watch", note, { name = name, class = "ROGUE" }))
+        state:Unit("nameplate1", { guid = "Player-StreamerFixture", name = name, class = "ROGUE", hostile = true, isPlayer = true })
+        state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+        state:Advance(1)
+        H.Equal(ui.rows[1].nameText:GetText(), name)
+        H.True(ui.banner:IsShown())
+        H.Equal(ui.banner.body:GetText(), name)
+        ui:OpenSettings("journal")
+        ui.journalPersonal:Click()
+        ui.journalSearch:SetText(note)
+        H.True(ui.journalRows[1]:IsShown())
+        ui.journalRows[1]:Click()
+        local detail = ui.detailsFrame
+        H.Equal(detail.title:GetText(), name)
+        H.Equal(detail.note:GetText(), note)
+        detail.note:SetFocus()
+        detail.note:SetText(draft)
+        ui:Refresh()
+        H.Equal(detail.note:GetText(), draft)
+
+        profile.display.streamer = true
+        app:ProfileChanged()
+        H.Nil(ui.rows[1].nameText:GetText():find(name, 1, true))
+        H.True(ui.banner:IsShown())
+        H.Equal(ui.banner.body:GetText(), RG.Locale.Get("unknownPlayer", locale))
+        H.Nil(ui.journalRows[1].label:GetText():find(name, 1, true))
+        H.Equal(ui.journalSearch:GetText(), "")
+        H.False(ui.journalSearch:HasFocus())
+        H.Equal(detail.title:GetText(), RG.Locale.Get("unknownPlayer", locale))
+        H.Equal(detail.note:GetText(), "")
+        H.False(detail.note:HasFocus())
+        H.Equal(app.db:GetList()[identity].note, note)
+
+        profile.display.streamer = false
+        app:ProfileChanged()
+        H.Equal(ui.banner.body:GetText(), name)
+        H.Equal(detail.title:GetText(), name)
+        H.Equal(detail.note:GetText(), note)
+        H.Equal(#app.db:GetJournal(), 1)
+    end)
+end
 
 H.Test("target watch and ignore commands toggle only explicit selected identity", function()
     local state, _, app = setup()

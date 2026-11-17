@@ -169,6 +169,7 @@ function W.New()
     function methods:SetFontObject(value) self.fontObject = value end
     function methods:SetFocus() self.focus = true end
     function methods:ClearFocus() self.focus = false end
+    function methods:HasFocus() return self.focus == true end
     function methods:HighlightText() self.highlighted = true end
     function methods:StartMoving() guard(self, "StartMoving"); assert(self.movable, "frame not movable"); self.moving = true end
     function methods:StopMovingOrSizing() self.moving = false end

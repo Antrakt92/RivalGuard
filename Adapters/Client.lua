@@ -240,12 +240,15 @@ end
 
 function Client:Context()
     local api = self.api
-    local _, instance = self:Safe(api.IsInInstance)
-    instance = self:Text(instance, 30)
-    local kind = "world"
-    if instance == "pvp" then kind = "battleground"
+    local inside, instance = self:Safe(api.IsInInstance)
+    inside, instance = self:Boolean(inside), self:Text(instance, 30)
+    local kind = "unknown"
+    if (inside == false and instance and instance ~= "none") or (inside == true and instance == "none") then
+        self:Count("context_conflicts")
+    elseif instance == "pvp" then kind = "battleground"
     elseif instance == "arena" then kind = "arena"
-    elseif instance and instance ~= "none" then kind = "instance" end
+    elseif inside == true or (instance and instance ~= "none") then kind = "instance"
+    elseif inside == false or instance == "none" then kind = "world" end
     local pvp = api.C_PvP
     local zoneReader = type(pvp) == "table" and pvp.GetZonePVPInfo
     if type(zoneReader) ~= "function" then zoneReader = api.GetZonePVPInfo end

@@ -20,7 +20,7 @@ folder into `Interface/AddOns` for your client. Open `/rg settings` for settings
 or `/rg demo` for a preview that leaves your journal and lists untouched.
 
 - **Nearby:** view current sightings and distinguish them from recently seen
-  players. Click a row for evidence and personal notes.
+  players. Click a row for evidence, personal notes or a temporary alert pause.
 - **Alerts:** choose audible classes independently from display classes. Set
   a sound for each event, control repeat timing and add optional rules for
   particular classes, situations, lists or estimated distances.

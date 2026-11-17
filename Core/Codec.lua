@@ -98,6 +98,7 @@ function C.Decode(text)
         for _ = 1, count do
             local key = decode(depth + 1)
             if type(key) ~= "string" and type(key) ~= "number" then error("invalid_key", 0) end
+            ---@cast key string|number
             if type(key) == "number" and (key < 1 or key > 256 or key % 1 ~= 0) then error("invalid_key", 0) end
             if value[key] ~= nil then error("duplicate_key", 0) end
             value[key] = decode(depth + 1)

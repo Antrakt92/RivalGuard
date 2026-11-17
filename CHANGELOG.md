@@ -11,6 +11,9 @@
 - First-run guide, searchable journal and a browser for personal lists.
 - Adjustable nameplate badge size and spacing, with target and focus markers.
 - Minimap launcher and optional context, list and range conditions for rules.
+- Temporary silence for a specific observed player, without changing personal lists.
+- Streamer mode updates already-open lists, details and banners as soon as it changes.
+- Priority alerts keep their order, and stale targeting warnings are dropped.
 - Package checks load both client interfaces in a simulated client after extraction.
 
 This is a development build. Native client behavior, combat compatibility,

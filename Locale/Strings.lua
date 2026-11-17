@@ -110,6 +110,10 @@ L.enUS = {
     noFiltered = "No sightings match the list filters", noFilteredHelp = "Select more class icons or show unknown classes in Overview.",
     noNameplates = "Enemy nameplates are off", noNameplatesHelp = "You can still get sightings from a target or mouseover. Enable enemy nameplates in the game's options for more coverage.",
     noDisabled = "RivalGuard is disabled", noDisabledHelp = "Open Overview to enable detection. Your settings and saved lists remain.",
+    snoozeContact = "Quiet this player for 10 min", resumeContact = "Resume this player's alerts", snoozedFor = "Silenced for %s", snoozeUnavailable = "Only a current or recent identified player can be silenced.",
+    legacyIdentity = "This older entry has no clear player identity. Editing is unavailable.", notePrivate = "Notes are hidden while streamer mode is on.",
+    waveClassCount = "%d × %s", waveMore = "+%d more", keyboardEditHelp = "Enter saves; Escape leaves the field.",
+    stealthCast = "%s used", stealthAura = "Stealth aura observed", spellStealth = "Stealth", spellVanish = "Vanish", spellProwl = "Prowl", spellShadowmeld = "Shadowmeld", spellInvisibility = "Invisibility",
 }
 
 L.ruRU = {
@@ -221,6 +225,10 @@ L.ruRU = {
     noFiltered = "Нет встреч, подходящих под фильтры", noFilteredHelp = "Выберите больше классов или включите неизвестные классы в обзоре.",
     noNameplates = "Неймплейты противников выключены", noNameplatesHelp = "Цель и наведение всё ещё могут давать сведения. Для большего охвата включите неймплейты противников в настройках игры.",
     noDisabled = "RivalGuard выключен", noDisabledHelp = "Включите обнаружение на странице обзора. Настройки и личные списки сохраняются.",
+    snoozeContact = "Не оповещать об игроке 10 мин", resumeContact = "Возобновить оповещения об игроке", snoozedFor = "Оповещения отключены ещё на %s", snoozeUnavailable = "Отключить оповещения можно для опознанного игрока из текущих или недавних встреч.",
+    legacyIdentity = "В старой записи нет однозначных сведений об игроке. Редактирование недоступно.", notePrivate = "Заметки скрыты в режиме трансляции.",
+    waveClassCount = "%d × %s", waveMore = "ещё %d", keyboardEditHelp = "Enter сохраняет, Esc снимает фокус.",
+    stealthCast = "Замечено применение: %s", stealthAura = "Замечен эффект скрытности", spellStealth = "Незаметность", spellVanish = "Исчезновение", spellProwl = "Крадущийся зверь", spellShadowmeld = "Слиться с тенью", spellInvisibility = "Невидимость",
 }
 
 function L.Get(key, requested)
@@ -263,7 +271,7 @@ local REASONS = {
         class_filtered = "This class is not selected for ordinary alerts.", outputs_disabled = "Neither sound nor a banner is enabled for this event.",
         custom_rule = "Your highest-priority matching custom rule applies.", watch_list = "This player is on your watch or avoid list.",
         event_matched = "This event matches your current alert settings.", cooldown = "The repeat delay is still active for this player and event.",
-        paused = "Alerts are temporarily paused.", dead = "The player is confirmed dead.",
+        paused = "Alerts are temporarily paused.", dead = "The player is confirmed dead.", contact_snoozed = "Alerts for this player are temporarily silenced.",
         unavailable = "No current explanation is available for this record.",
     },
     ruRU = {
@@ -278,7 +286,7 @@ local REASONS = {
         class_filtered = "Этот класс не выбран для обычных оповещений.", outputs_disabled = "Для этого события отключены и звук, и предупреждение.",
         custom_rule = "Действует совпавшее особое правило с наибольшим приоритетом.", watch_list = "Этот игрок в вашем списке наблюдения или опасных игроков.",
         event_matched = "Событие соответствует вашим текущим настройкам.", cooldown = "Ещё действует пауза повторов для этого игрока и события.",
-        paused = "Оповещения временно приостановлены.", dead = "Подтверждено, что игрок мёртв.",
+        paused = "Оповещения временно приостановлены.", dead = "Подтверждено, что игрок мёртв.", contact_snoozed = "Оповещения об этом игроке временно отключены.",
         unavailable = "Для этой записи сейчас нет объяснения.",
     },
 }

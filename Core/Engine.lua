@@ -54,7 +54,7 @@ function E.New(config)
         lists = config.lists or {}, onAlert = config.onAlert or function() end,
         onEncounter = config.onEncounter, onChange = config.onChange,
         contacts = {}, identities = {}, nameOwners = {}, bindings = {}, tokenSerial = 0, contactCount = 0,
-        pending = {}, history = {}, cooldowns = {}, serial = 0, sequence = 0,
+        pending = {}, history = {}, cooldowns = {}, snoozes = {}, serial = 0, sequence = 0,
         counters = { observations = 0, alerts = 0, suppressed = 0, evicted = 0 },
         pausedUntil = nil, lastSound = -math.huge, revision = 0,
     }, E)
@@ -105,6 +105,12 @@ function E:UnindexContact(contact)
     self:IndexName(contact.nameIdentity, contact.id, false)
 end
 
+function E:SnoozedUntil(contact)
+    local at = contact.identity and self.snoozes[contact.identity]
+    if not at and contact.nameIdentity and not contact.ambiguousIdentity then at = self.snoozes[contact.nameIdentity] end
+    if at and at > self:Now() then return at end
+end
+
 function E:View(contact)
     local entry = self:ListEntry(contact)
     local sources = {}
@@ -117,6 +123,7 @@ function E:View(contact)
         class = contact.class, level = contact.level, hostile = contact.hostile, isPlayer = contact.isPlayer,
         visible = next(contact.tokens) ~= nil, firstSeen = contact.firstSeen, lastSeen = contact.lastSeen,
         sources = sources, stealth = contact.stealth, stealthAt = contact.stealthAt,
+        stealthEvidence = contact.stealthEvidence, stealthSpell = contact.stealthSpell,
         targeting = contact.targeting, rangeMin = contact.rangeMin, rangeMax = contact.rangeMax,
         rangeMinExclusive = contact.rangeMinExclusive,
         watched = entry and (entry.kind == "watch" or entry.kind == "avoid") or false,
@@ -125,7 +132,7 @@ function E:View(contact)
         dead = contact.dead,
         ambiguousIdentity = contact.ambiguousIdentity,
         currentTarget = contact.currentTarget, currentFocus = contact.currentFocus,
-        snoozedUntil = contact.snoozedUntil,
+        snoozedUntil = self:SnoozedUntil(contact),
     }
 end
 
@@ -176,7 +183,7 @@ function E:ExplainView(id, event)
     local contact = self.contacts[id]
     if not contact then return { allowed = false, reason = "not_observed" } end
     if next(contact.tokens) == nil then return { allowed = false, reason = "not_observed" } end
-    if contact.snoozedUntil and contact.snoozedUntil > self:Now() then return { allowed = false, reason = "contact_snoozed" } end
+    if self:SnoozedUntil(contact) then return { allowed = false, reason = "contact_snoozed" } end
     local decision, reason = self:Explain(contact, event)
     if not decision then return { allowed = false, reason = reason } end
     if self.pausedUntil and self:Now() < self.pausedUntil then return { allowed = false, reason = "paused" } end
@@ -198,7 +205,7 @@ end
 
 function E:Queue(contact, event)
     local now = self:Now()
-    if contact.snoozedUntil and contact.snoozedUntil > now then return false end
+    if self:SnoozedUntil(contact) then return false end
     local decision, reason = self:Explain(contact, event)
     contact.lastReason = reason or (decision and decision.reason)
     if not decision then self.counters.suppressed = self.counters.suppressed + 1 return false end
@@ -212,11 +219,18 @@ function E:Queue(contact, event)
     end
     for index = #self.pending, 1, -1 do
         local item = self.pending[index]
-        if item.id == contact.id and now - item.at <= self.profile.alerts.waveWindow and item.decision.priority < decision.priority then table.remove(self.pending, index) end
+        if item.id == contact.id and now - item.at <= self.profile.alerts.waveWindow and item.decision.priority < decision.priority then
+            if item.event == "sighting" then contact.arrivalQueued = false end
+            table.remove(self.pending, index)
+        end
     end
     self.sequence = self.sequence + 1
     self.pending[#self.pending + 1] = { id = contact.id, event = event, decision = decision, at = now, sequence = self.sequence, revision = self.revision }
-    if #self.pending > self.profile.retention.maxContacts then table.remove(self.pending, 1) end
+    if #self.pending > self.profile.retention.maxContacts then
+        local dropped = table.remove(self.pending, 1)
+        local owner = self.contacts[dropped.id]
+        if owner and dropped.event == "sighting" then owner.arrivalQueued = false end
+    end
     return true
 end
 
@@ -255,11 +269,13 @@ function E:Merge(target, other)
     target.arrivalQueued = target.arrivalQueued or other.arrivalQueued
     target.encounterRecorded = target.encounterRecorded or other.encounterRecorded
     target.notifiedClass = target.notifiedClass or other.notifiedClass
-    if other.snoozedUntil and (not target.snoozedUntil or other.snoozedUntil > target.snoozedUntil) then target.snoozedUntil = other.snoozedUntil end
     for _, field in ipairs({ "class", "level", "name", "realm", "guid", "identity", "nameIdentity", "rangeMin", "rangeMax", "targeting", "hostile", "isPlayer" }) do
         if target[field] == nil then target[field] = other[field] end
     end
-    if other.stealth and not target.stealth then target.stealth, target.stealthAt = other.stealth, other.stealthAt end
+    if other.stealth and (not target.stealth or (other.stealthAt or 0) > (target.stealthAt or 0)) then
+        target.stealth, target.stealthAt = other.stealth, other.stealthAt
+        target.stealthEvidence, target.stealthSpell = other.stealthEvidence, other.stealthSpell
+    end
     local mergedPending = {}
     for _, item in ipairs(self.pending) do
         if item.id == other.id then item.id = target.id end
@@ -354,8 +370,12 @@ function E:Observe(raw)
     self:Reconcile(contact)
     local oldStealth = contact.stealth
     if obs.stealthReadable then
-        if obs.stealth == true then contact.stealth, contact.stealthAt = "confirmed", contact.stealthAt or now
-        elseif obs.stealth == false then contact.stealth, contact.stealthAt = nil, nil end
+        if obs.stealth == true then
+            if not oldStealth then contact.stealthEvidence, contact.stealthSpell = "aura", nil end
+            contact.stealth, contact.stealthAt = "confirmed", contact.stealthAt or now
+        elseif obs.stealth == false then
+            contact.stealth, contact.stealthAt, contact.stealthEvidence, contact.stealthSpell = nil, nil, nil, nil
+        end
     end
     local returning = not wasVisible and away >= self.profile.alerts.returnAfter
     if returning then contact.encounterRecorded = false end
@@ -399,6 +419,7 @@ function E:Cast(token, spellID)
     local now = self:Now()
     if contact.lastStealthCast and now - contact.lastStealthCast < 1 then return false end
     contact.lastStealthCast, contact.stealth, contact.stealthAt = now, "confirmed", now
+    contact.stealthEvidence, contact.stealthSpell = "cast", SPELLS[spellID]
     self:RecordEncounter(contact)
     self:Queue(contact, "stealth")
     self:Changed()
@@ -432,9 +453,11 @@ function E:Tick()
     local ordinary, accepted = {}, {}
     for _, item in ipairs(ready) do
         local contact = self.contacts[item.id]
-        local decision = contact and self:Explain(contact, item.event)
-        if decision and not (self.pausedUntil and now < self.pausedUntil)
-            and not (contact.snoozedUntil and now < contact.snoozedUntil) then
+        local decision
+        if contact and (item.event ~= "targeting" or contact.targeting == true) then
+            decision = self:Explain(contact, item.event)
+        end
+        if decision and not (self.pausedUntil and now < self.pausedUntil) and not self:SnoozedUntil(contact) then
             local key = contact.id .. ":" .. (decision.dedupKey or decision.kind)
             if not accepted[key] and (not self.cooldowns[key] or now - self.cooldowns[key] >= decision.cooldown) then
                 accepted[key] = true
@@ -442,7 +465,7 @@ function E:Tick()
                 decision.contact = self:View(contact)
                 contact.arrivalNotified, contact.arrivalQueued = true, false
                 if contact.class then contact.notifiedClass = contact.class end
-                if decision.kind == "sighting" or decision.kind == "returning" then ordinary[#ordinary + 1] = decision
+                if decision.priority < 70 and (decision.kind == "sighting" or decision.kind == "returning") then ordinary[#ordinary + 1] = decision
                 else self:Emit(decision, now) end
             end
         elseif contact and item.event == "sighting" then
@@ -466,6 +489,7 @@ function E:Tick()
     end
     for _, id in ipairs(expired) do self:Drop(id) end
     for key, at in pairs(self.cooldowns) do if now - at > 1800 then self.cooldowns[key] = nil end end
+    for identity, at in pairs(self.snoozes) do if at <= now then self.snoozes[identity] = nil end end
     if #expired > 0 then self:Changed() end
 end
 
@@ -484,11 +508,13 @@ function E:Snapshot()
     return result
 end
 
-function E:SetProfile(profile)
+function E:SetProfile(profile, preservePending)
     self.profile = profile
     if not profile.enabled then self:Clear() return end
-    self.pending = {}
-    for _, contact in pairs(self.contacts) do contact.arrivalQueued = false end
+    if not preservePending then
+        self.pending = {}
+        for _, contact in pairs(self.contacts) do contact.arrivalQueued = false end
+    end
     while self.contactCount > profile.retention.maxContacts do self:MakeRoom() end
     while #self.history > profile.retention.maxHistory do table.remove(self.history, 1) end
     self:Changed()
@@ -515,15 +541,26 @@ function E:Resume() self.pausedUntil = nil self:Changed() end
 function E:ToggleContactSnooze(id, seconds)
     local contact = self.contacts[id]
     if not contact then return nil, "not_observed" end
+    if not contact.identity then return nil, "unknown_identity" end
     local now = self:Now()
-    if contact.snoozedUntil and contact.snoozedUntil > now then contact.snoozedUntil = nil
-    else contact.snoozedUntil = now + U.Clamp(seconds, 1, 3600, 600) end
+    local expiry
+    if self:SnoozedUntil(contact) then
+        self.snoozes[contact.identity] = nil
+        if contact.nameIdentity and not contact.ambiguousIdentity then self.snoozes[contact.nameIdentity] = nil end
+    else
+        if U.Count(self.snoozes) >= 256 then
+            for identity, at in pairs(self.snoozes) do if at <= now then self.snoozes[identity] = nil end end
+            if U.Count(self.snoozes) >= 256 then return nil, "snooze_limit" end
+        end
+        expiry = now + U.Clamp(seconds, 1, 3600, 600)
+        self.snoozes[contact.identity] = expiry
+    end
     for index = #self.pending, 1, -1 do
         if self.pending[index].id == id then table.remove(self.pending, index) end
     end
     contact.arrivalQueued = false
     self:Changed()
-    return true, contact.snoozedUntil
+    return true, expiry
 end
 
 function E:ClearRecent()

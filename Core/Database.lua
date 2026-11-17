@@ -313,6 +313,7 @@ function DB:Record(contact, epoch, zone)
     local mode = profile.retention.journalMode
     if mode == "watched" and not contact.watched then return false end
     if mode == "threats" and not contact.watched and not contact.targeting and contact.stealth ~= "confirmed" then return false end
+    if type(zone) == "function" then zone = zone() end
     local record
     for _, item in ipairs(self.root.journal) do if item.identity == contact.identity then record = item break end end
     if not record then

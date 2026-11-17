@@ -15,6 +15,11 @@ local function readClock(api, name)
     return 0
 end
 
+local function alertConfig(profile)
+    return RG.Codec.Encode({ enabled = profile.enabled, alerts = profile.alerts, context = profile.context,
+        range = profile.range, rules = profile.rules, maxContacts = profile.retention.maxContacts })
+end
+
 function App.New(api)
     return setmetatable({ api = api or _G, dirty = true, elapsed = 0, initialized = false }, App)
 end
@@ -32,9 +37,20 @@ end
 
 function App:ProfileChanged()
     local profile = self.db:GetProfile()
-    self.engine:SetProfile(profile)
+    local config = alertConfig(profile)
+    local sameAlerts = config ~= nil and config == self.alertConfig and self.alertProfile == profile
+    self.alertConfig, self.alertProfile = config, profile
+    self.engine:SetProfile(profile, sameAlerts)
     self.engine.lists = self.db:GetList()
     self.db:Prune(readClock(self.api, "time"))
+    if self.sensors then
+        if profile.enabled then
+            if not self.sensors:Start() then self.diagnostics:Error("sensor_start_failed") end
+        else
+            self.sensors:Stop()
+            if self.ui and self.ui.ClearBanners then self.ui:ClearBanners() end
+        end
+    end
     self.dirty = true
     if self.ui then
         if self.ui.SettingsChanged then self.ui:SettingsChanged() else self.ui:Refresh() end
@@ -60,7 +76,7 @@ function App:Status()
     local state = "active"
     if not profile.enabled then state = "disabled"
     elseif self.engine.pausedUntil and self.engine.pausedUntil > self.engine:Now() then state = "paused"
-    elseif plates == false or not self.client:Capabilities().nameplates then state = "limited" end
+    elseif plates == false or not self.client:Capabilities().nameplates or (self.sensors and not self.sensors.running) then state = "limited" end
     return { state = state, nameplates = plates, capabilities = self.client:Capabilities(), context = self.client:Context(),
         contacts = RG.Util.Count(self.engine.contacts), errors = self.diagnostics.counts.errors or 0,
         writable = self.db.writable }
@@ -186,11 +202,13 @@ function App:Initialize()
     self.db = RG.Database.New(self.api.RivalGuardDB)
     self.client = RG.Client.New(self.api, self.diagnostics)
     self.audio = RG.Audio.New(self.api, function() return self.db:GetProfile() end, self.diagnostics)
+    local function zoneName() return self.client:Text(self.client:Safe(self.api.GetRealZoneText), 160) end
+    self.alertProfile = self.db:GetProfile()
+    self.alertConfig = alertConfig(self.alertProfile)
     self.engine = RG.Engine.New({ clock = timeNow, epoch = epochNow, profile = self.db:GetProfile(), context = self.client:Context(), lists = self.db:GetList(),
         onChange = function() self.dirty = true end,
         onEncounter = function(contact, epoch)
-            local zone = self.client:Text(self.client:Safe(self.api.GetRealZoneText), 160)
-            return self.db:Record(contact, epoch, zone)
+            return self.db:Record(contact, epoch, zoneName)
         end,
         onAlert = function(decision)
             if decision.sound then self.audio:Play(decision.kind, false) end
@@ -202,7 +220,7 @@ function App:Initialize()
     })
     self.ui = RG.UI.New(self)
     self.sensors = RG.Sensors.New(self, self.client, self.api)
-    if not self.sensors:Start() then error("sensor_start_failed", 0) end
+    if self.db:GetProfile().enabled and not self.sensors:Start() then error("sensor_start_failed", 0) end
     self.api.SLASH_RIVALGUARD1, self.api.SLASH_RIVALGUARD2 = "/rivalguard", "/rg"
     self.api.SlashCmdList.RIVALGUARD = function(message) self:Command(message) end
     self.db:Prune(epochNow())

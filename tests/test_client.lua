@@ -86,6 +86,22 @@ H.Test("client reads sanctuary state from the supported PvP namespace", function
     H.False(client:Context().sanctuary)
 end)
 
+H.Test("client instance context preserves independent type and membership evidence", function()
+    local client, api, _, secret = fixture()
+    api.IsInInstance = function() return true, secret end
+    H.Equal(client:Context().kind, "instance")
+    api.IsInInstance = function() return false, secret end
+    H.Equal(client:Context().kind, "world")
+    api.IsInInstance = function() return secret, "arena" end
+    H.Equal(client:Context().kind, "arena")
+    api.IsInInstance = function() return secret, secret end
+    H.Equal(client:Context().kind, "unknown")
+    api.IsInInstance = function() return false, "raid" end
+    H.Equal(client:Context().kind, "unknown")
+    api.IsInInstance = nil
+    H.Equal(client:Context().kind, "unknown")
+end)
+
 H.Test("client requests behind-camera geometry only for nameplate tokens", function()
     local client, api = fixture()
     local calls = 0

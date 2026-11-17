@@ -261,6 +261,23 @@ H.Test("sensors refresh new and previous badge selections by the next tick", fun
     H.False(badges.nameplate1.obs.currentTarget); H.True(badges.nameplate2.obs.currentTarget)
 end)
 
+H.Test("sensors refresh merged badge selections when direct unit comparisons are restricted", function()
+    local sensors, units, _, _, _, frames, _, _, badges = fixture(true)
+    units.target = player()
+    units.nameplate1 = player("Other", "Player-B")
+    units.nameplate2 = player()
+    units.nameplate3 = player("Third", "Player-C")
+    sensors:Start()
+    for index = 1, 3 do sensors:OnEvent("NAME_PLATE_UNIT_ADDED", "nameplate" .. index) end
+    H.True(badges.nameplate2.contact.currentTarget)
+    H.False(badges.nameplate3.contact.currentTarget == true)
+    units.target = units.nameplate3
+    sensors:OnEvent("PLAYER_TARGET_CHANGED")
+    frames[1].scripts.OnUpdate(frames[1], 0.25)
+    H.False(badges.nameplate2.contact.currentTarget == true)
+    H.True(badges.nameplate3.contact.currentTarget)
+end)
+
 H.Test("sensors invalidate samples immediately and after synchronous restriction transitions", function()
     local sensors, units, observed, _, _, frames = fixture()
     local invalidated, metadata = 0, 0

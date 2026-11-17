@@ -69,8 +69,11 @@ function Sensors:Record(obs, behindCamera)
     obs.generation = state.generation
     if behindCamera ~= nil then obs.behindCamera = behindCamera end
     state.guid, state.name = obs.guid or state.guid, name or state.name
-    state.priority = obs.targeting == true or obs.currentTarget == true or obs.currentFocus == true
     local contact = self:Call("Observe", obs)
+    local view = type(contact) == "table" and contact or nil
+    state.contactID = view and view.id
+    state.priority = obs.targeting == true or obs.currentTarget == true or obs.currentFocus == true
+        or (view and (view.currentTarget == true or view.currentFocus == true))
     if type(self.app.UIContactUpdated) == "function" then
         local ok = pcall(self.app.UIContactUpdated, self.app, token, obs, contact)
         if not ok then self:Error("sensor_ui_contact") end
@@ -137,9 +140,12 @@ function Sensors:Poll(scheduled)
         self.phase = (self.phase + 1) % PLATE_PHASES
         local targetChanged, focusChanged = self.targetChanged, self.focusChanged
         self.targetChanged, self.focusChanged = nil, nil
+        local target = targetChanged and self.active.target
+        local focus = focusChanged and self.active.focus
         local tokens = {}
         for token, state in pairs(self.active) do
             if not DIRECT[token] and (not scheduled or refresh or state.priority or state.generation % PLATE_PHASES == self.phase
+                or (state.contactID and ((target and target.contactID == state.contactID) or (focus and focus.contactID == state.contactID)))
                 or (targetChanged and self.client:UnitMatch(token, "target") == true)
                 or (focusChanged and self.client:UnitMatch(token, "focus") == true)) then
                 tokens[#tokens + 1] = token
