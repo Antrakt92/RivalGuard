@@ -760,17 +760,25 @@ function E:LastSoundOutcome(id)
     if outcome then return { kind = outcome.kind, status = outcome.status, soundCue = outcome.soundCue } end
 end
 
-local function rememberSoundOutcome(engine, decision, status, soundCue)
-    local contact = decision.contact and engine.contacts[decision.contact.id]
+local function rememberContactSound(engine, id, kind, status, soundCue)
+    local contact = engine.contacts[id]
     if not contact then return end
     engine.soundOutcomeSequence = engine.soundOutcomeSequence + 1
     local outcome = contact.soundOutcome or {}
-    outcome.kind, outcome.status, outcome.sequence = decision.kind, status, engine.soundOutcomeSequence
+    outcome.kind, outcome.status, outcome.sequence = kind, status, engine.soundOutcomeSequence
     outcome.soundCue = status ~= "not_requested" and soundCue or nil
     contact.soundOutcome = outcome
 end
 
-function E:Emit(decision, now)
+local function rememberSoundOutcome(engine, decision, status, cue, group)
+    if group then
+        for _, item in ipairs(group) do rememberContactSound(engine, item.id, decision.kind, status, cue) end
+    elseif decision.contact then
+        rememberContactSound(engine, decision.contact.id, decision.kind, status, cue)
+    end
+end
+
+function E:Emit(decision, now, group)
     local soundStatus = "not_requested"
     local cue
     if decision.sound then
@@ -791,7 +799,7 @@ function E:Emit(decision, now)
         end
     end
     if not decision.sound and not decision.banner then
-        if soundStatus == "sound_gap" then rememberSoundOutcome(self, decision, soundStatus, cue) end
+        if soundStatus == "sound_gap" then rememberSoundOutcome(self, decision, soundStatus, cue, group) end
         return false
     end
     self.counters.alerts = self.counters.alerts + 1
@@ -799,7 +807,7 @@ function E:Emit(decision, now)
     local requestedSound = decision.sound
     local accepted = self.onAlert(decision)
     if requestedSound then soundStatus = accepted == true and "playback_requested" or "playback_unconfirmed" end
-    rememberSoundOutcome(self, decision, soundStatus, cue)
+    rememberSoundOutcome(self, decision, soundStatus, cue, group)
     return true
 end
 
@@ -813,7 +821,7 @@ function E:EmitOrdinary(group, now)
             sound, banner = sound or decision.waveSound, banner or decision.banner
         end
         if sound or banner then
-            self:Emit({ kind = "wave", count = #group, classes = classes, priority = 35, sound = sound, banner = banner, reason = "multiple_sightings" }, now)
+            self:Emit({ kind = "wave", count = #group, classes = classes, priority = 35, sound = sound, banner = banner, reason = "multiple_sightings" }, now, group)
             return
         end
     end

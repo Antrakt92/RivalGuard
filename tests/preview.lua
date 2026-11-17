@@ -105,7 +105,17 @@ elseif view == "details" and page == "sample" then
     app.ui:Select(app.ui.previewContacts[2])
 elseif view == "details" then app.ui:Select(app.engine:Snapshot()[1])
 elseif view == "explanation" then
-    if page == "sound" or page == "sound-changed" then
+    if page == "wave-sound" then
+        app.engine:Clear()
+        for i = 1, 3 do
+            local token = "nameplate" .. (80 + i)
+            local name = locale == "ruRU" and ("Противник " .. i) or ("Opponent " .. i)
+            state:Unit(token, { guid = "Player-WavePreview-" .. i, name = name, class = classes[i], hostile = true, isPlayer = true })
+            state:Fire("NAME_PLATE_UNIT_ADDED", token)
+        end
+        state:Advance(1.2)
+        assert(app.engine.history[1] and app.engine.history[1].kind == "wave", "group preview did not alert")
+    elseif page == "sound" or page == "sound-changed" then
         app.engine:Clear()
         state.api.PlaySound = function() return false end
         local name = locale == "ruRU" and "Пример противника" or "Example opponent"

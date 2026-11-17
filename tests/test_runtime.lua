@@ -475,7 +475,49 @@ H.Test("a single wave-only sighting stays silent", function()
     H.Equal(#state.sounds, 0)
     H.False(app.ui.banner:IsShown())
     H.Equal(#app.engine.history, 0)
+    H.Nil(app.engine:LastSoundOutcome(app.engine:Snapshot()[1].id))
 end)
+
+for _, case in ipairs({ { "unconfirmed", "playback_unconfirmed", "ready" },
+    { "paced", "sound_gap", "ready" }, { "banner only", "not_requested" } }) do
+    H.Test("wave sound outcomes stay with the members (" .. case[1] .. ")", function()
+        local state, app, profile = ruleSoundFixture()
+        profile.alerts.classes = { ROGUE = true }
+        profile.alerts.sounds.sighting = "ping"
+        profile.alerts.sounds.wave = case[3] or "none"
+        app:OnSettingsChanged()
+        if case[1] == "unconfirmed" then
+            local play = state.api.PlaySound
+            state.api.PlaySound = function(...)
+                play(...)
+                return false
+            end
+        elseif case[1] == "paced" then
+            seeSoundRuleRival(state, 5)
+            state.clock.Advance(0.85)
+            app.engine:Tick()
+            H.Equal(app.engine.history[1].kind, "sighting")
+            H.Equal(state.sounds[1].id, RULE_SOUND_KITS.MAP_PING)
+        end
+        for index = 1, 3 do seeSoundRuleRival(state, index) end
+        seeSoundRuleRival(state, 4, "HUNTER")
+        state.clock.Advance(0.85)
+        app.engine:Tick()
+        H.Equal(app.engine.history[#app.engine.history].kind, "wave")
+        H.Equal(app.ui.activeBanner.kind, "wave")
+        H.Equal(#state.sounds, case[1] == "banner only" and 0 or 1)
+        for _, contact in ipairs(app.engine:Snapshot()) do
+            local outcome = app.engine:LastSoundOutcome(contact.id)
+            if contact.name == "Sound rival 4" then H.Nil(outcome)
+            elseif contact.name == "Sound rival 5" then H.Equal(outcome.kind, "sighting")
+            else
+                H.Equal(outcome.kind, "wave")
+                H.Equal(outcome.status, case[2])
+                H.Equal(outcome.soundCue, case[3])
+            end
+        end
+    end)
+end
 
 H.Test("a listed-only rule cue warns for a known Watch identity and keeps ordinary status quiet", function()
     local state, app, profile = ruleSoundFixture()
@@ -2100,9 +2142,17 @@ H.Test("Why shows current custom and inherited cues without rewriting the last c
     H.Equal(#state.sounds, 2)
 end)
 
-H.Test("Why leaves per-contact sound outcome absent on waves previews and saved journal selections", function()
-    local state, _, app = setup()
+H.Test("Why shows a wave member's sound outcome only for a live selection", function()
+    local state, RG, app = setup()
     local ui = app.ui
+    local profile = app.db:GetProfile()
+    profile.alerts.cooldown, profile.locale = 0, "ruRU"
+    app:OnSettingsChanged()
+    local alert, shared = app.engine.onAlert
+    app.engine.onAlert = function(decision)
+        if decision.kind == "wave" then shared = decision end
+        return alert(decision)
+    end
     local function arrive(index)
         local token = "nameplate" .. index
         state:Unit(token, { guid = "Player-WaveOutcome-" .. index, name = "Rival " .. index,
@@ -2113,7 +2163,33 @@ H.Test("Why leaves per-contact sound outcome absent on waves previews and saved 
     state:Advance(1.25)
     H.Equal(app.engine.history[1].kind, "wave")
     H.Equal(#state.sounds, 1)
-    for _, view in ipairs(app.engine:Snapshot()) do H.Nil(app:Explain(view).lastSound) end
+    local members = app.engine:Snapshot()
+    local function containsParticipant(value)
+        if type(value) == "table" then
+            for key, child in pairs(value) do if containsParticipant(key) or containsParticipant(child) then return true end end
+        elseif type(value) == "string" then
+            for _, member in ipairs(members) do
+                if value == member.id or value == member.identity or value == member.name then return true end
+            end
+        end
+        return false
+    end
+    H.Equal(shared.count, 3)
+    H.False(containsParticipant(shared)); H.False(containsParticipant(app.engine.history[1]))
+    for _, view in ipairs(members) do
+        local explanation = app:Explain(view)
+        H.Equal(explanation.lastSound.kind, "wave")
+        H.Equal(explanation.lastSound.status, "playback_requested")
+        H.Equal(explanation.lastSound.soundCue, "ready")
+        H.Equal(explanation.soundCue, "ping")
+    end
+    ui:Select(members[1]); ui:ShowExplanation()
+    H.Equal(ui.explanationFrame.lastSoundHeading:GetText(), ui:F("lastSoundHeading", ui:T("eventWave")))
+    H.Equal(ui.explanationFrame.lastSound:GetText(), ui:T("lastSoundRequested") .. "\n" .. ui:F("soundCueEvidence", ui:T("soundReady")))
+    local report = app:ExportDiagnostics()
+    for _, member in ipairs(members) do
+        H.Nil(report:find(member.identity, 1, true)); H.Nil(report:find(member.name, 1, true))
+    end
     arrive(4)
     state:Advance(1.25)
     local identity = "guid:Player-WaveOutcome-4"

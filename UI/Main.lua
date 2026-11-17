@@ -9,7 +9,7 @@ local BANNER_ORDINARY_MAX_AGE, BANNER_URGENT_MAX_AGE = 2, 5
 local LIST_KIND_KEYS = { watch = "watched", avoid = "avoided", ignore = "ignored", note = "notesOnly" }
 local LIST_FILTERS = { "all", "watch", "avoid", "ignore", "note" }
 local SOUND_EVENT_KEYS = { sighting = "eventSighting", returning = "eventReturning", targeting = "eventTargeting",
-    stealth = "eventStealth", watch = "eventWatch" }
+    stealth = "eventStealth", watch = "eventWatch", wave = "eventWave" }
 local SOUND_STATUS_KEYS = { not_requested = "lastSoundNotRequested", sound_gap = "lastSoundGap",
     playback_requested = "lastSoundRequested", playback_unconfirmed = "lastSoundUnconfirmed" }
 local WINDOW_MARGIN = 12
