@@ -49,6 +49,13 @@ if view == "settings" then
         assert(app.db:CreateProfile(RG.Locale.Get("quiet", locale), "quiet"))
         assert(app.db:CreateProfile(RG.Locale.Get("farming", locale), "farming"))
         app.ui.nearbySettingsButton:Click("RightButton")
+    elseif page == "alerts-returning" then
+        local alerts = app.db:GetProfile().alerts
+        alerts.banner = false
+        for event in pairs(alerts.sounds) do alerts.sounds[event] = "none" end
+        alerts.sounds.returning = "ready"
+        app:OnSettingsChanged()
+        app.ui:OpenSettings("alerts")
     elseif page == "alerts-context" or page == "alerts-muted" then
         local name = RG.Locale.Get("battleground", locale)
         local profile = assert(app.db:CreateProfile(name, "battleground"))

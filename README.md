@@ -38,8 +38,8 @@ current profile would handle that new sighting in the open world.
   **Check draft** shows which rule would win for sample opponents before you save.
   Try near, far, a distance estimate across the limit, or an unknown distance.
   Group warnings use the wave sound.
-  Below the class buttons, see the active profile and any global setting
-  currently blocking warnings for new sightings outside your personal lists.
+  Below the class buttons, see the active profile and which settings block
+  first sightings or returning encounters outside your personal lists.
   Turn on **Highlight opponents targeting you** to mark an available nameplate
   when a targeting warning fires.
 - **Profiles:** choose a ready-made setup and enter a name. **Create and use**

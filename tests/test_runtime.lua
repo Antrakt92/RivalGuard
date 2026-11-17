@@ -4847,6 +4847,65 @@ local function returnFixtureRival(state, seconds)
     state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
 end
 
+for _, locale in ipairs({ "enUS", "ruRU" }) do
+    H.Test("Alerts reports returning rivals separately from new sightings in " .. locale, function()
+        local state, app, profile = ruleSoundFixture()
+        local ui, L = app.ui, state.RG.Locale
+        local alerts = profile.alerts
+        profile.locale, alerts.banner = locale, false
+        alerts.sounds.returning = "ready"
+        app:OnSettingsChanged()
+        ui:OpenSettings("alerts")
+        local function status(sighting, returning)
+            H.Equal(app:AlertBlock(true), sighting)
+            H.Equal(app:AlertBlock(true, "returning"), returning)
+            local result = returning and L.Format("returningAlertStatus", locale, L.Reason(returning, locale))
+                or L.Get("returningAlertReady", locale)
+            H.Equal(ui.returningAlertStatus:GetText(), result)
+        end
+        status("outputs_disabled", nil)
+        seeSoundRuleRival(state, 1)
+        state:Advance(1.25)
+        H.Equal(#state.sounds, 0)
+        returnFixtureRival(state, alerts.returnAfter + 1)
+        state:Advance(1.25)
+        H.Equal(app.engine.history[1].kind, "returning")
+        H.Equal(#state.sounds, 1)
+        H.Equal(state.sounds[1].id, RULE_SOUND_KITS.READY_CHECK)
+
+        alerts.sounds.returning, alerts.sounds.sighting = "none", "ping"
+        app:OnSettingsChanged()
+        status(nil, "outputs_disabled")
+        local rule = soundRule("Return cue", "quest", 80)
+        rule.event = "returning"
+        profile.rules = { rule }
+        app:OnSettingsChanged()
+        status(nil, nil)
+
+        rule.list = "listed"
+        app:OnSettingsChanged()
+        status(nil, "outputs_disabled")
+        H.Nil(app:AlertBlock())
+        rule.list, rule.context = "unlisted", "battleground"
+        app:OnSettingsChanged()
+        status(nil, "outputs_disabled")
+        changeFixtureZone(state, "pvp")
+        state:Advance(0.3)
+        status(nil, nil)
+
+        settingButton(ui, "alerts.muteOrdinary"):Click()
+        status("ordinary_muted", "ordinary_muted")
+        settingButton(ui, "alerts.muteOrdinary"):Click()
+        settingButton(ui, "alerts.watchedOnly"):Click()
+        status("watch_only", "watch_only")
+        settingButton(ui, "alerts.watchedOnly"):Click()
+        state.api.RivalGuard_Binding("pause")
+        status("paused", "paused")
+        state.api.RivalGuard_Binding("pause")
+        status(nil, nil)
+    end)
+end
+
 H.Test("a return-only sound plays after a silent first encounter", function()
     local state, app, profile = ruleSoundFixture()
     profile.alerts.banner = false

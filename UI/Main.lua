@@ -776,7 +776,9 @@ function UI.New(app)
     if self.alertProfileStatus.SetMaxLines then self.alertProfileStatus:SetMaxLines(1) end
     self.ordinaryAlertStatus = font(alerts, 12, C.text)
     self.ordinaryAlertStatus:SetPoint("TOPLEFT", 0, y - 25); self.ordinaryAlertStatus:SetWidth(550)
-    y = section(alerts, "alertRange", y - 76)
+    self.returningAlertStatus = font(alerts, 12, C.text)
+    self.returningAlertStatus:SetPoint("TOPLEFT", 0, y - 69); self.returningAlertStatus:SetWidth(550)
+    y = section(alerts, "alertRange", y - 120)
     y = check(alerts, "rangeFilter", "range.enabled", y, "rangeFilterTip")
     local firstRangeControl = #self.controls + 1
     y = slider(alerts, "rangeYards", "range.yards", y - 6, 5, 100, 5)
@@ -1284,6 +1286,9 @@ function UI.New(app)
                 paintText(self.alertProfileStatus, self:T("selectedProfile") .. ": " .. M.Text(name, "Default"))
                 paintText(self.ordinaryAlertStatus, blocked and self:F("ordinaryAlertStatus", RG.Locale.Reason(blocked, profile.locale))
                     or self:T("ordinaryAlertReady"))
+                local returning = app.AlertBlock and app:AlertBlock(true, "returning")
+                paintText(self.returningAlertStatus, returning and self:F("returningAlertStatus", RG.Locale.Reason(returning, profile.locale))
+                    or self:T("returningAlertReady"))
             end
             if self.currentPage == "profiles" and (needsStatus or self.dataPage ~= "profiles") then self:RefreshProfiles() end
             if self.currentPage == "journal" and (needsStatus or self.dataPage ~= "journal") then self:RefreshJournal() end
