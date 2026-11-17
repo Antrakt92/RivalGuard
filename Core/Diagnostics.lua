@@ -36,6 +36,9 @@ local contextKinds = { world = true, battleground = true, arena = true, instance
 local detectionStates = { active = true, limited = true, disabled = true }
 local alertBlocks = { disabled = true, paused = true, context_disabled = true, sanctuary = true,
     resting = true, flight = true, outputs_disabled = true }
+local queueBlocks = { "class_filtered", "contact_snoozed", "context_disabled", "cooldown", "custom_suppressed", "dead",
+    "disabled", "event_disabled", "flight", "identity_unconfirmed", "ignored", "ordinary_muted", "outputs_disabled", "paused",
+    "range_conflict", "range_outside", "range_unconfirmed", "range_unknown", "resting", "sanctuary", "unknown", "watch_only" }
 
 local function knownValue(value, choices)
     return type(value) == "string" and choices[value] and value or "unknown"
@@ -70,6 +73,16 @@ function Diag:Export(capabilities, engine, state)
         for _, key in ipairs(U.SortedKeys(engine.counters)) do lines[#lines + 1] = "  " .. key .. "=" .. engine.counters[key] end
         lines[#lines + 1] = "  contacts=" .. U.Count(engine.contacts)
         lines[#lines + 1] = "  pending=" .. #engine.pending
+        if engine.queueBlocks then
+            local heading = "Alert attempts blocked before queueing:"
+            for _, reason in ipairs(queueBlocks) do
+                local count = engine.queueBlocks[reason]
+                if U.IsFinite(count) and count > 0 and count % 1 == 0 then
+                    if heading then lines[#lines + 1] = heading; heading = nil end
+                    lines[#lines + 1] = "  " .. reason .. "=" .. count
+                end
+            end
+        end
     end
     lines[#lines + 1] = "Recent error codes:"
     for _, item in ipairs(self.errors) do lines[#lines + 1] = "  " .. item.code end

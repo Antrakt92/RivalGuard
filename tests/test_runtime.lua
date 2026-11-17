@@ -3680,6 +3680,44 @@ H.Test("the copied diagnostics include sanitized context coverage and global ale
     end
 end)
 
+H.Test("copied diagnostics explain blocked queue attempts without disclosing identities or rules", function()
+    local state, _, app = setup()
+    local profile = app.db:GetProfile()
+    profile.alerts.classes = { ROGUE = true }
+    profile.rules = {{ name = "PrivateQueueRule", enabled = true, event = "sighting", priority = 20,
+        action = "suppress", classes = { HUNTER = true }, sound = true, banner = true, cooldown = 30 }}
+    app:ProfileChanged()
+    local function arrive(index, class)
+        local token = "nameplate" .. index
+        state:Unit(token, { guid = "Player-PrivateQueue-" .. index, name = "PrivateQueueEnemy", class = class,
+            hostile = true, isPlayer = true })
+        state:Fire("NAME_PLATE_UNIT_ADDED", token)
+    end
+    arrive(1, "MAGE")
+    arrive(2, "HUNTER")
+    app.engine:Pause(30)
+    arrive(3, "ROGUE")
+    app.engine:Resume()
+    app.ui:ShowDiagnostics()
+    local report = app.ui.copyFrame.edit:GetText()
+    H.True(report:find("Alert attempts blocked before queueing:", 1, true) ~= nil)
+    for _, reason in ipairs({ "class_filtered", "custom_suppressed", "paused" }) do
+        H.True(report:find("  " .. reason .. "=1\n", 1, true) ~= nil, reason)
+    end
+    H.Nil(report:find("PrivateQueue", 1, true))
+    H.True(report:find("  alertBlock=none\n", 1, true) ~= nil)
+    H.Equal(#state.sounds, 0)
+
+    arrive(4, "ROGUE")
+    state:Advance(1.25)
+    local contact = assert(app.engine.contacts[app.engine.identities["guid:Player-PrivateQueue-4"]])
+    H.False(app.engine:Queue(contact, "sighting"))
+    H.True(app:ExportDiagnostics():find("  cooldown=1\n", 1, true) ~= nil)
+    assert(app.engine:ToggleContactSnooze(contact.id, 30))
+    H.False(app.engine:Queue(contact, "sighting"))
+    H.True(app:ExportDiagnostics():find("  contact_snoozed=1\n", 1, true) ~= nil)
+end)
+
 H.Test("the first-run guide shows disabled and automatic nameplate hints only where relevant", function()
     local writes = 0
     local function writeCVar() writes = writes + 1 end

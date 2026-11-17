@@ -11,6 +11,7 @@ H.Test("diagnostic report excludes names GUIDs notes and arbitrary strings", fun
     diagnostics:Error("Private Player Name: secret failure")
     local report = diagnostics:Export({ nameplates = true, classReadable = false, private = "PrivatePlayer" }, {
         counters = { alerts = 3 }, contacts = { ["PrivateGUID"] = { name = "PrivatePlayer", note = "PrivateNote" } }, pending = {},
+        queueBlocks = { PrivateReason = 12, class_filtered = 2, cooldown = "PrivateValue", paused = math.huge, ignored = 0 },
     })
     H.True(report:find("observations=2", 1, true) ~= nil)
     H.Nil(report:find("PrivatePlayer", 1, true))
@@ -18,6 +19,10 @@ H.Test("diagnostic report excludes names GUIDs notes and arbitrary strings", fun
     H.Nil(report:find("PrivateNote", 1, true))
     H.Nil(report:find("secret failure", 1, true))
     H.True(report:find("other", 1, true) ~= nil)
+    H.True(report:find("\n  class_filtered=2\n", 1, true) ~= nil)
+    for _, value in ipairs({ "PrivateReason", "PrivateValue", "cooldown=", "paused=", "ignored=" }) do
+        H.Nil(report:find(value, 1, true))
+    end
 end)
 
 H.Test("copied state accepts only recognized status codes and booleans", function()

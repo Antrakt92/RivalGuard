@@ -72,8 +72,10 @@ see how your current profile would handle that new sighting in the open world.
 - **Support:** see available sensors, why alerts are quiet here and which
   nameplate options affect coverage. The copyable report includes the current
   detection status, nameplates waiting for a free slot, incomplete recent
-  sightings and any global alert blocker. Player identities and notes stay
-  private. You can also replay the first-run guide.
+  sightings and any global alert blocker. It also counts alert attempts blocked
+  by class filters, rules, pauses and other settings during the session.
+  A player can account for several attempts. Player identities, rule names and
+  notes stay private. You can also replay the first-run guide.
 
 Click the minimap button to show or hide Nearby. Right-click it to open
 settings, or drag it around the minimap to move it.

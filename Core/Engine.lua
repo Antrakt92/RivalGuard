@@ -74,6 +74,7 @@ function E.New(config)
         pending = {}, history = {}, cooldowns = {}, snoozes = {}, serial = 0, sequence = 0,
         evictedEncounters = {}, evictionSlots = {}, evictionCursor = 0,
         counters = { observations = 0, alerts = 0, suppressed = 0, evicted = 0, queueOverflow = 0, rangeAliasConflicts = 0 },
+        queueBlocks = {},
         pausedUntil = nil, lastSound = -math.huge, lastSoundPriority = 0, soundOutcomeSequence = 0, revision = 0,
     }, E)
 end
@@ -341,17 +342,28 @@ function E:CancelTargeting(contact)
     end
 end
 
+local function blockQueue(engine, reason)
+    engine.queueBlocks[reason] = math.min(1000000000, (engine.queueBlocks[reason] or 0) + 1)
+    return false
+end
+
 function E:Queue(contact, event)
     local now = self:Now()
     if self.pendingNameChanges and self.pendingNameChanges[contact.id] then self:RevalidateContactPending(contact, now) end
-    if self:SnoozedUntil(contact) then return false end
+    if self:SnoozedUntil(contact) then return blockQueue(self, "contact_snoozed") end
     local decision, reason = self:Explain(contact, event, now)
     contact.lastReason = reason or (decision and decision.reason)
-    if not decision then self.counters.suppressed = self.counters.suppressed + 1 return false end
-    if self.pausedUntil and now < self.pausedUntil then return false end
+    if not decision then
+        self.counters.suppressed = self.counters.suppressed + 1
+        return blockQueue(self, reason or "unknown")
+    end
+    if self.pausedUntil and now < self.pausedUntil then return blockQueue(self, "paused") end
     local key = contact.id .. ":" .. (decision.dedupKey or decision.kind)
     local cooldown = self.cooldowns[key]
-    if cooldown and now - cooldown < decision.cooldown then contact.lastReason = "cooldown" return false end
+    if cooldown and now - cooldown < decision.cooldown then
+        contact.lastReason = "cooldown"
+        return blockQueue(self, "cooldown")
+    end
     for _, item in ipairs(self.pending) do
         if item.id == contact.id then
             local age = now - item.at
