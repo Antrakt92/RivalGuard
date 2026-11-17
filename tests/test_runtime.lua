@@ -6573,14 +6573,21 @@ H.Test("Personal lists avoid copying history and still apply exact name note and
     ui:Refresh()
     local unchangedReads, unchangedFolds = reads, folds
     local function query(text, expected)
+        local before = folds
         ui.journalSearch:SetText(text)
         H.Equal(ui.journalCount:GetText(), ui:F("filteredCount", #expected))
         for index, identity in ipairs(expected) do H.Equal(ui.journalRows[index].contact.identity, identity) end
         H.Nil(ui.journalRows[#expected + 1].contact)
+        H.Equal(folds - before, 1, "typing should normalize the query only")
     end
     query("  ALPHA  ", { alphaA, alphaB })
     query("ЁЖ СЕВЕР", { cyrillic })
     query("eVaC mArKeR", { noteOnly })
+    local settledFolds = folds
+    assert(db:SetList(noteOnly, "watch", "Local Evac Marker", { name = "Zeta", class = "MAGE" }))
+    state.clock.Advance(1.1)
+    ui:Refresh()
+    H.Equal(folds, settledFolds, "an unchanged searched list should reuse its result")
     ui.journalRows[1]:Click()
     ui.detailsFrame.note:SetText("New route")
     ui.detailsFrame.saveNote:Click()
@@ -6595,9 +6602,20 @@ H.Test("Personal lists avoid copying history and still apply exact name note and
     ui.journalFilterChoices.avoid:Click()
     H.Equal(ui.journalRows[1].contact.identity, noteOnly)
     H.Equal(ui.journalRows[1].contact.note, "New route")
+    app.db:GetProfile().display.streamer = true
+    app:ProfileChanged()
+    H.Equal(ui.journalSearch:GetText(), "")
+    H.Nil(ui.journalRows[1].label:GetText():find("Zeta", 1, true))
+    app.db:GetProfile().display.streamer = false
+    app:ProfileChanged()
+    query("new route", { noteOnly })
+    assert(db:SetList(noteOnly, nil))
+    state.clock.Advance(1.1)
+    ui:Refresh()
+    H.Nil(ui.journalRows[1].contact)
 
     H.Equal(unchangedReads, 0, string.format("Personal refresh copied journal %d time(s) and folded %d names", unchangedReads, unchangedFolds))
-    H.True(unchangedFolds <= 1000, string.format("Personal refresh folded %d names for 1000 entries", unchangedFolds))
+    H.Equal(unchangedFolds, 0, "unchanged Personal refresh should reuse the search index")
 end)
 
 H.Test("direct Personal filters preserve an off-page search and leave the saved list unchanged", function()

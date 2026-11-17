@@ -387,7 +387,6 @@ function UI.New(app)
     end
 
     local function journalCard(entry, epoch, now)
-        entry.searchName = nil
         entry.id, entry.visible, entry.sources = entry.identity, false, { journal = true }
         if not entry.savedOnly then
             local recorded = M.Number(entry.lastSeen)
@@ -1198,9 +1197,39 @@ function UI.New(app)
         end
     end
 
+    function self:PersonalResults(list, query)
+        local revision, filter = app.db:ListRevision(), self.journalFilter
+        local index = self.personalIndex
+        if not index or index.revision ~= revision then
+            index = { revision = revision, entries = {} }
+            for identity, item in pairs(list) do
+                index.entries[#index.entries + 1] = {
+                    identity = identity, kind = item.kind, searchName = M.SearchText(item.name), searchNote = M.SearchText(item.note),
+                }
+            end
+            table.sort(index.entries, function(a, b)
+                if a.searchName ~= b.searchName then return a.searchName < b.searchName end
+                return a.identity < b.identity
+            end)
+            self.personalIndex = index
+        end
+        if index.query ~= query or index.filter ~= filter then
+            local results = {}
+            for _, item in ipairs(index.entries) do
+                if (filter == "all" or filter == item.kind) and (query == ""
+                    or item.searchName:find(query, 1, true) or item.searchNote:find(query, 1, true)) then
+                    results[#results + 1] = item.identity
+                end
+            end
+            index.query, index.filter, index.results = query, filter, results
+        end
+        return index.results
+    end
+
     function self:RefreshJournal()
         local profile = self:Profile()
-        local entries, list = {}, app.db:GetList()
+        local entries
+        local list = app.db:GetList()
         local personal = self.journalMode == "personal"
         local pageSize = #self.journalRows
         local count, entryOffset = 0, 0
@@ -1208,19 +1237,7 @@ function UI.New(app)
         local query = profile.display.streamer and "" or self.journalQuery
         if self.journalSearch.SetEnabled then self.journalSearch:SetEnabled(not profile.display.streamer) end
         if personal then
-            for identity, item in pairs(list) do
-                if self.journalFilter == "all" or self.journalFilter == item.kind then
-                    local searchName = M.SearchText(item.name)
-                    if M.Matches(query, item.name, item.note, searchName) then
-                        entries[#entries + 1] = { identity = identity, name = item.name, class = item.class, note = item.note,
-                            listKind = item.kind, savedOnly = true, searchName = searchName }
-                    end
-                end
-            end
-            table.sort(entries, function(a, b)
-                if a.searchName ~= b.searchName then return a.searchName < b.searchName end
-                return a.identity < b.identity
-            end)
+            entries = self:PersonalResults(list, query)
             count = #entries
             local lastPage = math.max(0, math.floor((count - 1) / pageSize) * pageSize)
             self.journalOffset = math.max(0, math.min(self.journalOffset, lastPage))
@@ -1272,6 +1289,11 @@ function UI.New(app)
         local now = self:Now()
         for i, row in ipairs(self.journalRows) do
             local entry = entries[entryOffset + i]
+            if personal and entry then
+                local identity, item = entry, list[entry]
+                entry = { identity = identity, name = item.name, class = item.class, note = item.note,
+                    listKind = item.kind, savedOnly = true }
+            end
             if entry then journalCard(entry, epoch, now) end
             row.contact = entry
             paintShown(row, entry ~= nil)

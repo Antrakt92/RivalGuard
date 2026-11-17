@@ -193,7 +193,7 @@ local function encounterPosition(journal, record)
 end
 
 function DB.New(raw)
-    local self = setmetatable({ root = newRoot(), journalByIdentity = {}, writable = true, recovered = false }, DB)
+    local self = setmetatable({ root = newRoot(), journalByIdentity = {}, listRevision = 0, writable = true, recovered = false }, DB)
     if raw == nil then return self end
     if type(raw) ~= "table" then self.recovered = true return self end
     if U.IsFinite(raw.schemaVersion) and raw.schemaVersion > RG.schemaVersion then
@@ -262,6 +262,7 @@ function DB:GetProfile(name) return self.root.profiles[name or self.root.activeP
 function DB:GetActiveProfileName() return self.root.activeProfile end
 function DB:ListProfiles() return U.SortedKeys(self.root.profiles) end
 function DB:GetList() return self.root.lists end
+function DB:ListRevision() return self.listRevision end
 function DB:GetJournal() return U.Copy(self.root.journal) end
 function DB:GetJournalEntry(identity) return U.Copy(self.journalByIdentity[identity]) end
 function DB:HasJournalEntry(identity) return self.journalByIdentity[identity] ~= nil end
@@ -360,23 +361,31 @@ end
 function DB:SetList(identity, kind, note, metadata)
     identity = U.Text(identity, 256)
     if not identity or not (identity:match("^guid:") or identity:match("^name:")) then return nil, "unknown_identity" end
-    if kind == nil then self.root.lists[identity] = nil return true end
-    if kind ~= "watch" and kind ~= "avoid" and kind ~= "ignore" and kind ~= "note" then return nil, "invalid_list" end
-    local savedNote = U.Text(note, 512)
-    if note ~= nil and not savedNote and (type(note) ~= "string" or #note > 512 or not note:match("^ *$")) then
+    if kind ~= nil and kind ~= "watch" and kind ~= "avoid" and kind ~= "ignore" and kind ~= "note" then return nil, "invalid_list" end
+    local savedNote = kind and U.Text(note, 512)
+    if kind and note ~= nil and not savedNote and (type(note) ~= "string" or #note > 512 or not note:match("^ *$")) then
         return nil, "invalid_note"
     end
     local existing = self.root.lists[identity]
-    if kind == "note" and not savedNote then
-        self.root.lists[identity] = nil
-        return true, nil, existing ~= nil
+    if kind == nil or (kind == "note" and not savedNote) then
+        if existing then
+            self.root.lists[identity] = nil
+            self.listRevision = self.listRevision + 1
+        end
+        if kind == "note" then return true, nil, existing ~= nil end
+        return true
     end
     if not existing and U.Count(self.root.lists) >= MAX_LISTS then return nil, "list_limit" end
     metadata = type(metadata) == "table" and metadata or {}
-    self.root.lists[identity] = {
+    local updated = {
         kind = kind, note = savedNote, name = U.Text(metadata.name, 160) or (existing and existing.name),
         class = D.classSet[metadata.class] and metadata.class or (existing and existing.class),
     }
+    if not existing or existing.kind ~= kind or existing.note ~= updated.note
+        or existing.name ~= updated.name or existing.class ~= updated.class then
+        self.root.lists[identity] = updated
+        self.listRevision = self.listRevision + 1
+    end
     return true
 end
 
