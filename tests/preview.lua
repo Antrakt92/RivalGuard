@@ -89,7 +89,16 @@ elseif view == "journal" then
     app.ui:OpenSettings("journal")
     if page == "last-page" then app.ui.journalNext:Click() end
 elseif view == "diagnostics" then app.ui:ShowDiagnostics()
-elseif view == "personal" then app.ui:OpenSettings("journal"); app.ui.journalPersonal:Click()
+elseif view == "personal" then
+    if page == "filters" then
+        for i, kind in ipairs({ "avoid", "ignore", "note" }) do
+            local name = locale == "ruRU" and ("Противник " .. i) or ("Opponent " .. i)
+            assert(app.db:SetList("guid:Player-PersonalPreview-" .. kind, kind, "Patrol", { name = name, class = "ROGUE" }))
+        end
+    end
+    app.ui:OpenSettings("journal")
+    app.ui.journalPersonal:Click()
+    if page == "filters" then app.ui.journalFilterChoices.avoid:Click() end
 elseif view == "rules" then
     app.ui:OpenRules()
     if page == "sound-picker" then app.ui.rulesDialog.soundCue:Click() end

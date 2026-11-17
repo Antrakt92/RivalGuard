@@ -1029,7 +1029,7 @@ H.Test("personal browser includes unseen saved entries and filters by list kind"
     H.Equal(ui.journalRows[1].contact.name, "Alpha")
     H.True(ui.journalRows[1].contact.savedOnly)
     H.Equal(ui.journalRows[2].contact.name, "Beta")
-    ui.journalFilterButton:Click()
+    ui.journalFilterChoices.watch:Click()
     H.Equal(ui.journalRows[1].contact.name, "Alpha")
     H.Nil(ui.journalRows[2].contact)
     ui.journalRows[1]:Click()

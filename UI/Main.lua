@@ -7,7 +7,8 @@ local BANNER_CATEGORIES = { returning = "returningTitle", watch = "watchTitle", 
 local BANNER_QUEUE_LIMIT, BANNER_URGENT_PRIORITY = 8, 70
 local BANNER_ORDINARY_MAX_AGE, BANNER_URGENT_MAX_AGE = 2, 5
 local LIST_KIND_KEYS = { watch = "watched", avoid = "avoided", ignore = "ignored", note = "notesOnly" }
-local LIST_FILTERS = { "all", "watch", "avoid", "ignore", "note" }
+local LIST_FILTERS = { { "all", "allLists", 102 }, { "watch", "watched", 103 }, { "avoid", "filterAvoid", 88 },
+    { "ignore", "filterIgnored", 91 }, { "note", "notesOnly", 136 } }
 local SOUND_EVENT_KEYS = { sighting = "eventSighting", returning = "eventReturning", targeting = "eventTargeting",
     stealth = "eventStealth", watch = "eventWatch", wave = "eventWave" }
 local SOUND_STATUS_KEYS = { not_requested = "lastSoundNotRequested", sound_gap = "lastSoundGap",
@@ -949,6 +950,8 @@ function UI.New(app)
         self:RefreshJournal()
     end)
     self.journalPersonal:SetPoint("LEFT", self.journalRecent, "RIGHT", 9, 0)
+    self.journalCount = font(journal, 12, C.muted, "RIGHT")
+    self.journalCount:SetPoint("TOPRIGHT", -8, y - 6); self.journalCount:SetWidth(170)
     y = y - 43
     local searchLabel = label(journal, "searchLabel", 12, C.muted)
     searchLabel:SetPoint("TOPLEFT", 0, y); searchLabel:SetWidth(550)
@@ -965,13 +968,19 @@ function UI.New(app)
     local clearSearch = localButton(journal, "searchClear", 130, function() search:SetText(""); search:ClearFocus() end)
     clearSearch:SetPoint("TOPLEFT", 356, y - 24)
     y = y - 58
-    self.journalFilterButton = button(journal, "", 300, function()
-        local index = 1
-        for i, value in ipairs(LIST_FILTERS) do if value == self.journalFilter then index = i break end end
-        self.journalFilter, self.journalOffset = LIST_FILTERS[index % #LIST_FILTERS + 1], 0
-        self:RefreshJournal()
-    end)
-    self.journalFilterButton:SetPoint("TOPLEFT", 0, y)
+    self.journalFilterChoices = {}
+    local filterX = 0
+    for _, filter in ipairs(LIST_FILTERS) do
+        local kind, key, width = unpack(filter)
+        local choice = localButton(journal, key, width, function()
+            self.journalFilter, self.journalOffset = kind, 0
+            self:RefreshJournal()
+            scrollbar:SetValue(0)
+        end)
+        choice:SetPoint("TOPLEFT", filterX, y)
+        filterX = filterX + width + 7
+        self.journalFilterChoices[kind] = choice
+    end
     self.journalClear = localButton(journal, "clearJournal", 300, function()
         if not app.db.ClearJournal then return end
         if not self.clearJournalUntil or self.clearJournalUntil < self:Now() then
@@ -986,8 +995,6 @@ function UI.New(app)
         if app.Notify then app:Notify(self:T("journalCleared")) end
     end)
     self.journalClear:SetPoint("TOPLEFT", 0, y)
-    self.journalCount = font(journal, 12, C.muted, "RIGHT")
-    self.journalCount:SetPoint("TOPRIGHT", -16, y - 6); self.journalCount:SetWidth(220)
     y = y - 43
     local firstJournalRowY, journalRowSpacing = y, 39
     self.journalEmpty = label(journal, "emptyJournal", 14, C.muted)
@@ -1155,12 +1162,19 @@ function UI.New(app)
         end
         self.journalRecent.bg:SetColorTexture(unpack(not personal and { 0.10, 0.22, 0.28, 1 } or C.panel))
         self.journalPersonal.bg:SetColorTexture(unpack(personal and { 0.10, 0.22, 0.28, 1 } or C.panel))
-        self.journalFilterButton:SetShown(personal)
+        for kind, choice in pairs(self.journalFilterChoices) do
+            local selected = kind == self.journalFilter
+            paintShown(choice, personal)
+            paintEnabled(choice, not selected)
+            if choice.paintedSelected ~= selected then
+                choice.bg:SetColorTexture(unpack(selected and { 0.10, 0.22, 0.28, 1 } or C.panel))
+                choice.paintedSelected = selected
+            end
+        end
         self.journalClear:SetShown(not personal)
         self.journalClear:SetEnabled(hasJournalEntries)
         local confirming = self.clearJournalUntil and self.clearJournalUntil >= self:Now()
         self.journalClear.label:SetText(self:T(confirming and "clearJournalNow" or "clearJournal"))
-        self.journalFilterButton.label:SetText(self:T(LIST_KIND_KEYS[self.journalFilter] or "allLists") .. "  ›")
         paintText(self.journalCount, self:F("filteredCount", count))
         paintShown(self.journalEmpty, count == 0)
         self.journalEmpty:SetText(self:T(query ~= "" and "noMatches" or personal and "listEmpty" or "emptyJournal"))

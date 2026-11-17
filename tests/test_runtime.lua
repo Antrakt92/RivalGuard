@@ -4018,17 +4018,74 @@ H.Test("Personal lists avoid copying history and still apply exact name note and
     H.True(ui.journalEmpty:IsShown())
     H.Nil(ui.journalRows[1].contact)
     query("new ROUTE", { noteOnly })
-    ui.journalFilterButton:Click()
+    ui.journalFilterChoices.watch:Click()
     ui.journalRows[1]:Click()
     ui.detailsFrame.listActions.avoid:Click()
     H.True(ui.journalEmpty:IsShown())
     H.Nil(ui.journalRows[1].contact)
-    ui.journalFilterButton:Click()
+    ui.journalFilterChoices.avoid:Click()
     H.Equal(ui.journalRows[1].contact.identity, noteOnly)
     H.Equal(ui.journalRows[1].contact.note, "New route")
 
     H.Equal(unchangedReads, 0, string.format("Personal refresh copied journal %d time(s) and folded %d names", unchangedReads, unchangedFolds))
     H.True(unchangedFolds <= 1000, string.format("Personal refresh folded %d names for 1000 entries", unchangedFolds))
+end)
+
+H.Test("direct Personal filters preserve an off-page search and leave the saved list unchanged", function()
+    local _, RG, app = setup()
+    local db, ui = app.db, app.ui
+    for index = 1, 13 do
+        assert(db:SetList("guid:Player-FilterWatch" .. index, "watch", "Shared search",
+            { name = string.format("Watched rival %02d", index), class = "HUNTER" }))
+    end
+    for _, kind in ipairs({ "avoid", "ignore", "note" }) do
+        assert(db:SetList("guid:Player-Filter-" .. kind, kind, "Shared search " .. kind,
+            { name = "Special " .. kind, class = "ROGUE" }))
+    end
+    assert(db:SetList("guid:Player-NonMatchingFilter", "avoid", "Unrelated text", { name = "Unrelated rival" }))
+    local saved = assert(RG.Codec.Encode(db:GetList()))
+    ui:OpenSettings("journal")
+    local filters = assert(ui.journalFilterChoices, "missing direct Personal filters")
+    local kinds = { "all", "watch", "avoid", "ignore", "note" }
+    for _, kind in ipairs(kinds) do H.False(filters[kind]:IsVisible()) end
+    ui.journalPersonal:Click()
+    local function selected(expected)
+        H.Equal(ui.journalFilter, expected)
+        for _, kind in ipairs(kinds) do
+            H.True(filters[kind]:IsVisible())
+            H.Equal(filters[kind].enabled, kind ~= expected)
+        end
+    end
+    selected("all")
+    local query = "  ShArEd SeArCh  "
+    ui.journalSearch:SetText(query)
+    H.Equal(ui.journalCount:GetText(), ui:F("filteredCount", 16))
+    ui.journalNext:Click()
+    H.Equal(ui.journalOffset, 12)
+
+    for _, kind in ipairs({ "note", "ignore", "avoid" }) do
+        filters[kind]:Click()
+        selected(kind)
+        H.Equal(ui.journalOffset, 0)
+        H.Equal(ui.journalSearch:GetText(), query)
+        H.Equal(ui.journalCount:GetText(), ui:F("filteredCount", 1))
+        H.Equal(ui.journalRows[1].contact.identity, "guid:Player-Filter-" .. kind)
+        H.Equal(ui.journalRows[1].contact.note, "Shared search " .. kind)
+        H.Nil(ui.journalRows[2].contact)
+    end
+    ui.journalRecent:Click()
+    for _, kind in ipairs(kinds) do H.False(filters[kind]:IsVisible()) end
+    ui.journalPersonal:Click()
+    selected("avoid")
+    H.Equal(ui.journalSearch:GetText(), query)
+    H.Equal(ui.journalRows[1].contact.listKind, "avoid")
+    filters.watch:Click()
+    selected("watch")
+    H.Equal(ui.journalCount:GetText(), ui:F("filteredCount", 13))
+    filters.all:Click()
+    selected("all")
+    H.Equal(ui.journalCount:GetText(), ui:F("filteredCount", 16))
+    H.Equal(RG.Codec.Encode(db:GetList()), saved)
 end)
 
 H.Test("a promoted GUID keeps editing the same existing name-based watch record", function()

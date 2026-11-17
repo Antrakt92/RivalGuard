@@ -49,8 +49,8 @@ current profile would handle that new sighting in the open world.
   the list for later. Imports require a preview and a new name. They do not
   include personal lists or history. Right-click **…** on Nearby or use `/rg profile` to switch
   quickly. `/rg profile NAME` activates an exact saved profile name.
-- **Journal:** search recent encounters or open your watch, avoid and ignore
-  lists. Retain all eligible encounters, listed players or observed threats.
+- **Journal:** search names or notes and select a personal list directly.
+  Retain all eligible encounters, listed players or observed threats.
 - **Support:** see available sensors, why alerts are quiet here and which
   nameplate options affect coverage. The copyable report includes the current
   detection status and any global alert blocker. Player identities and notes
