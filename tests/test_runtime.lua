@@ -100,6 +100,31 @@ H.Test("integrated sensors engine and UI deliver one alert with configured sound
     H.Nil(app.diagnostics.counts.errors)
 end)
 
+for _, scenario in ipairs({ { kind = "sighting", count = 1 }, { kind = "wave", count = 3 } }) do
+    H.Test("a silent " .. scenario.kind .. " banner leaves sound budget for the next warning", function()
+        local state, _, app = setup()
+        local alerts = app.db:GetProfile().alerts
+        alerts.sounds[scenario.kind] = "none"
+        alerts.waveThreshold = 3
+        alerts.soundGap = 10
+        app:ProfileChanged()
+        assert(app.db:SetList("guid:Player-Important", "watch", nil, { name = "Watch Rival" }))
+        for index = 1, scenario.count do
+            local token = "nameplate" .. index
+            state:Unit(token, { guid = "Player-Silent-" .. index, name = "Ordinary " .. index, class = "ROGUE", hostile = true, isPlayer = true })
+            state:Fire("NAME_PLATE_UNIT_ADDED", token)
+        end
+        state:Advance(1.5)
+        H.Equal(app.ui.activeBanner.kind, scenario.kind)
+        H.Equal(#state.sounds, 0)
+        state:Unit("nameplate9", { guid = "Player-Important", name = "Watch Rival", class = "ROGUE", hostile = true, isPlayer = true })
+        state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate9")
+        state:Advance(0.5)
+        H.Equal(app.ui.activeBanner.kind, "watch")
+        H.Equal(#state.sounds, 1)
+    end)
+end
+
 H.Test("cosmetic streamer setting keeps a queued encounter and applies redaction at delivery", function()
     local state, _, app = setup()
     state:Unit("nameplate1", { guid = "Player-Cosmetic", name = "Example Roving Player", class = "ROGUE", hostile = true, isPlayer = true })
@@ -224,9 +249,13 @@ H.Test("target watch and ignore commands toggle only explicit selected identity"
     H.Equal(app.db:GetList()["guid:Player-Target"].kind, "watch")
     state.api.SlashCmdList.RIVALGUARD("watch")
     H.Nil(app.db:GetList()["guid:Player-Target"])
+    state:Fire("PLAYER_TARGET_CHANGED")
+    state:Advance(1.5)
+    H.Equal(app.ui.activeBanner.kind, "sighting")
     state.api.SlashCmdList.RIVALGUARD("ignore")
     H.Equal(app.db:GetList()["guid:Player-Target"].kind, "ignore")
     H.Equal(#app.engine:Snapshot(), 0)
+    H.Nil(app.ui.activeBanner)
 end)
 
 H.Test("simulated combat UI refresh never mutates protected action attributes", function()
@@ -276,6 +305,73 @@ H.Test("failed constructed UI is torn down without orphaned update scripts", fun
     H.Nil(partial.ticker:GetScript("OnUpdate"), "partially constructed UI ticker still owns live work")
     H.False(partial.frame:IsShown())
     H.Nil(next(partial.ticker.events))
+end)
+
+H.Test("late startup failure leaves no slash aliases or native category until a successful retry", function()
+    local state = W.New()
+    local raw = { schemaVersion = 1, activeProfile = "Default", profiles = {} }
+    state.api.RivalGuardDB = raw
+    local RG = state:LoadTOC()
+    local registrations, category = {}, { ID = 401 }
+    state.api.Settings = {
+        RegisterCanvasLayoutCategory = function(panel, title)
+            H.True(RG.instance.initialized)
+            H.Equal(title, "RivalGuard")
+            registrations[#registrations + 1] = panel
+            return category
+        end,
+        RegisterAddOnCategory = function(registered)
+            H.Equal(registered, category)
+            registrations[#registrations + 1] = registered
+        end,
+    }
+    local create, fail = RG.UI.New, true
+    RG.UI.New = function(app)
+        local ui = create(app)
+        if fail then
+            fail = false
+            ui.Refresh = function() error("injected final UI refresh failure") end
+        end
+        return ui
+    end
+    state:Fire("ADDON_LOADED", "RivalGuard")
+    H.False(RG.instance.initialized)
+    H.Equal(state.api.RivalGuardDB, raw)
+    H.Nil(state.api.SLASH_RIVALGUARD1)
+    H.Nil(state.api.SLASH_RIVALGUARD2)
+    H.Nil(state.api.SlashCmdList.RIVALGUARD)
+    H.Equal(#registrations, 0)
+
+    state:Fire("ADDON_LOADED", "RivalGuard")
+    H.True(RG.instance.initialized)
+    H.Equal(state.api.SLASH_RIVALGUARD2, "/rg")
+    H.Equal(#registrations, 2)
+    local panel = registrations[1]
+    H.Equal(RG.instance.ui.nativeSettingsPanel, panel)
+    panel.open:Click()
+    H.True(RG.instance.ui.settings:IsShown())
+    state:Fire("ADDON_LOADED", "RivalGuard")
+    H.Equal(#registrations, 2)
+end)
+
+H.Test("unavailable native Settings registration preserves the custom settings entry", function()
+    local state = W.New()
+    local RG = state:LoadTOC()
+    local attempts = 0
+    state.api.Settings = {
+        RegisterCanvasLayoutCategory = function()
+            attempts = attempts + 1
+            error("simulated blocked native registration")
+        end,
+        RegisterAddOnCategory = function() error("category step must not run") end,
+    }
+    state:Fire("ADDON_LOADED", "RivalGuard")
+    H.True(RG.instance.initialized)
+    H.Equal(attempts, 1)
+    state.api.SlashCmdList.RIVALGUARD("settings")
+    H.True(RG.instance.ui.settings:IsShown())
+    state:Fire("ADDON_LOADED", "RivalGuard")
+    H.Equal(attempts, 1)
 end)
 
 H.Test("sensor startup refusal rolls back UI and does not claim initialization", function()

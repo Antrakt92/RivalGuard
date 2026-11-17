@@ -6,6 +6,7 @@ local BANNER_CATEGORIES = { watch = "watchTitle", watched = "watchTitle", avoid 
 local BANNER_QUEUE_LIMIT, BANNER_MAX_AGE = 8, 5
 local LIST_KIND_KEYS = { watch = "watched", avoid = "avoided", ignore = "ignored", note = "notesOnly" }
 local LIST_FILTERS = { "all", "watch", "avoid", "ignore", "note" }
+local nativeSettings = {}
 
 UI.layout = { width = 348, header = 88, footer = 58, rowPadding = 20, settingsWidth = 800, settingsHeight = 610 }
 
@@ -106,6 +107,10 @@ function UI.New(app)
         if self.ticker then self.ticker:SetScript("OnUpdate", nil); self.ticker:UnregisterAllEvents() end
         if self.badges then self.badges:Destroy() end
         if self.launcher then self.launcher:Destroy() end
+        if nativeSettings.owner == self then
+            nativeSettings.owner = nil
+            if nativeSettings.panel and nativeSettings.panel.open then nativeSettings.panel.open:SetEnabled(false) end
+        end
         for name, frame in pairs(self.windows) do
             frame:Hide()
             if _G[name] == frame then _G[name] = nil end
@@ -130,6 +135,53 @@ function UI.New(app)
         local screenHeight = M.Number(UIParent:GetHeight(), 1080)
         local scale = math.min(requested or 1, math.max(0.1, (screenWidth - 24) / width), math.max(0.1, (screenHeight - 24) / height))
         frame:SetScale(scale)
+    end
+
+    function self:RegisterNativeSettings()
+        if self.destroyed or not app.initialized then return false end
+        if nativeSettings.registered then
+            nativeSettings.owner = self
+            self.nativeSettingsPanel = nativeSettings.panel
+            self.nativeSettingsPanel.OnRefresh()
+            return true
+        end
+        if nativeSettings.attempted then return false end
+        local api = app.api and app.api.Settings or Settings
+        if type(api) ~= "table" or type(api.RegisterCanvasLayoutCategory) ~= "function" or type(api.RegisterAddOnCategory) ~= "function" then
+            return false
+        end
+        -- Settings cannot unregister a category. Never replay an attempt with an uncertain outcome.
+        nativeSettings.attempted = true
+        local ok, panel = pcall(function()
+            local frame = CreateFrame("Frame", nil, UIParent)
+            frame:Hide()
+            frame.title = font(frame, 23, C.accent)
+            frame.title:SetPoint("TOPLEFT", 24, -32); frame.title:SetText("RivalGuard")
+            frame.description = font(frame, 14, C.text)
+            frame.description:SetPoint("TOPLEFT", 24, -76); frame.description:SetPoint("TOPRIGHT", -24, -76)
+            frame.open = button(frame, "", 280, function()
+                local owner = nativeSettings.owner
+                if owner and not owner.destroyed then owner:OpenSettings() end
+            end)
+            frame.open:SetPoint("TOPLEFT", 24, -155)
+            frame.OnRefresh = function()
+                local owner = nativeSettings.owner
+                local available = owner and not owner.destroyed
+                frame.description:SetText(available and owner:T("nativeSettingsHelp") or RG.Locale.Get("nativeUnavailable"))
+                frame.open.label:SetText(available and owner:T("openSettings") or RG.Locale.Get("openSettings"))
+                frame.open:SetEnabled(available == true)
+            end
+            frame:SetScript("OnShow", frame.OnRefresh)
+            local category = api.RegisterCanvasLayoutCategory(frame, "RivalGuard")
+            if type(category) ~= "table" then return nil end
+            api.RegisterAddOnCategory(category)
+            return frame
+        end)
+        if not ok or not panel then return false end
+        nativeSettings.registered, nativeSettings.panel, nativeSettings.owner = true, panel, self
+        self.nativeSettingsPanel = panel
+        panel.OnRefresh()
+        return true
     end
 
     function self:Profile() return app.db:GetProfile() end
@@ -344,7 +396,17 @@ function UI.New(app)
     banner:SetSize(440, 84); banner:SetFrameStrata("HIGH"); banner:SetClampedToScreen(true)
     banner:SetMovable(true); banner:EnableMouse(false)
     fill(banner, { 0.035, 0.05, 0.075, 1 }); self.bannerOutline = outline(banner, { 0.37, 0.78, 0.92, 1 })
-    restorePosition(banner, "alert", "TOP", bannerDefaultPoint(), -180)
+    local function restoreBanner()
+        self.bannerDefaultOffset = bannerDefaultPoint()
+        restorePosition(banner, "alert", "TOP", self.bannerDefaultOffset, -180)
+    end
+    local function cancelBannerMove()
+        if not self.bannerMoveProfile then return end
+        banner:StopMovingOrSizing()
+        self.bannerMoveProfile = nil
+        restoreBanner()
+    end
+    restoreBanner()
     banner.icon = banner:CreateTexture(nil, "ARTWORK")
     banner.icon:SetPoint("LEFT", 14, 0); banner.icon:SetSize(42, 42)
     banner.title = font(banner, 16, C.accent)
@@ -353,8 +415,16 @@ function UI.New(app)
     banner.body = font(banner, 13)
     banner.body:SetPoint("TOPLEFT", 70, -40); banner.body:SetWidth(350); banner.body:SetHeight(38)
     banner:RegisterForDrag("LeftButton")
-    banner:SetScript("OnDragStart", function() if self.bannerPreview then banner:StartMoving() end end)
-    banner:SetScript("OnDragStop", function() banner:StopMovingOrSizing(); savePosition(banner, "alert") end)
+    banner:SetScript("OnDragStart", function()
+        if self.bannerPreview then self.bannerMoveProfile = self:Profile(); banner:StartMoving() end
+    end)
+    banner:SetScript("OnDragStop", function()
+        if not self.bannerMoveProfile then return end
+        local originalProfile = self.bannerMoveProfile
+        self.bannerMoveProfile = nil
+        banner:StopMovingOrSizing()
+        if originalProfile == self:Profile() and self.bannerPreview then savePosition(banner, "alert") end
+    end)
     banner:Hide()
 
     local settings = self:Window("RivalGuardSettings", UIParent)
@@ -539,7 +609,7 @@ function UI.New(app)
     local resetPos = localButton(appearance, "resetPosition", 260, function()
         self:Profile().positions = {}
         restorePosition(main, "nearby", "RIGHT", -70, 20)
-        restorePosition(banner, "alert", "TOP", bannerDefaultPoint(), -180)
+        cancelBannerMove(); restoreBanner()
     end)
     resetPos:SetPoint("TOPLEFT", 0, y - 45)
     appearance.height = -y + 100
@@ -841,10 +911,12 @@ function UI.New(app)
         self:UpdateClasses()
         if self.lastProfile ~= profile then
             restorePosition(main, "nearby", "RIGHT", -70, 20)
-            restorePosition(banner, "alert", "TOP", bannerDefaultPoint(), -180)
+            cancelBannerMove(); restoreBanner()
             self.lastProfile = profile
             self.alertProfile, self.alertConfig = profile, self:AlertConfig(profile)
             self.controlsDirty = true
+        elseif not self.bannerMoveProfile and not profile.positions.alert and self.bannerDefaultOffset ~= bannerDefaultPoint() then
+            restoreBanner()
         end
         local now = self:Now()
         local preview = self.previewUntil and self.previewUntil > now
@@ -979,6 +1051,7 @@ function UI.New(app)
     end
 
     function self:ShowBanner(item, now)
+        if not item.preview then cancelBannerMove() end
         self.activeBanner = item
         self.bannerPreview = item.preview
         banner:EnableMouse(self.bannerPreview)
@@ -994,15 +1067,18 @@ function UI.New(app)
         banner:Hide(); banner:EnableMouse(false)
     end
 
-    function self:SuppressContactBanners(id)
+    function self:SuppressContactBanners(id, identity)
         id = M.Text(id, "", 256)
-        if id == "" then return end
+        identity = M.Text(identity, "", 256)
+        if id == "" and identity == "" then return end
+        local function matches(item)
+            return not item.preview and ((id ~= "" and item.id == id) or (identity ~= "" and item.identity == identity))
+        end
         for index = #self.bannerQueue, 1, -1 do
-            local item = self.bannerQueue[index]
-            if not item.preview and item.id == id then table.remove(self.bannerQueue, index) end
+            if matches(self.bannerQueue[index]) then table.remove(self.bannerQueue, index) end
         end
         local item = self.activeBanner
-        if item and not item.preview and item.id == id then
+        if item and matches(item) then
             self.bannerUntil = self:Now()
             self:AdvanceBanner(self.bannerUntil)
         end
@@ -1022,7 +1098,7 @@ function UI.New(app)
             return
         end
         self.activeBanner, self.bannerUntil, self.bannerPreview = nil, nil, false
-        if active then banner:Hide(); banner:EnableMouse(false) end
+        if active then cancelBannerMove(); banner:Hide(); banner:EnableMouse(false) end
         local queue = self.bannerQueue
         while #queue > 0 do
             local item = table.remove(queue, 1)
@@ -1043,7 +1119,7 @@ function UI.New(app)
         local item = { kind = kind, class = M.Text(contact.class, ""), name = M.Text(contact.name, self:T("unknownPlayer")),
             count = M.Number(decision.count), classes = type(decision.classes) == "table" and RG.Util.Copy(decision.classes) or nil,
             stealthEvidence = M.Text(contact.stealthEvidence, ""), stealthSpell = M.Text(contact.stealthSpell, ""),
-            id = id, preview = preview, priority = priority, at = now,
+            id = id, identity = M.Text(contact.identity, "", 256), preview = preview, priority = priority, at = now,
             key = id ~= "" and (kind .. ":" .. id) or nil }
         self:AdvanceBanner(now)
         local active = self.activeBanner
@@ -1120,7 +1196,6 @@ function UI.New(app)
                     local entry = app.db:GetList()[contact.identity]
                     local ok = setList(contact, kind, entry and entry.note)
                     if not ok then notify("saveFailed") return end
-                    if kind == "ignore" then self:SuppressContactBanners(contact.id) end
                     self:SettingsChanged(); self:ShowDetails(true)
                 end)
                 b:SetPoint("TOPLEFT", 18 + (i - 1) * 142, -192)
@@ -1332,7 +1407,7 @@ function UI.New(app)
     ticker:RegisterEvent("PLAYER_LOGOUT")
     ticker:SetScript("OnEvent", function()
         savePosition(main, "nearby")
-        if self:Profile().positions.alert then savePosition(banner, "alert") end
+        if self:Profile().positions.alert and not self.bannerMoveProfile then savePosition(banner, "alert") end
     end)
 
     if RG.UIDialogs then

@@ -73,6 +73,7 @@ function C.Decode(text)
         if count > LIMIT_BYTES then error("invalid_length", 0) end
         return count
     end
+    ---@return boolean|string|number|table
     local function decode(depth)
         nodes = nodes + 1
         if nodes > LIMIT_NODES or depth > LIMIT_DEPTH then error("data_too_complex", 0) end
@@ -88,7 +89,7 @@ function C.Decode(text)
             if tag == "s" then return value end
             if not value:match("^[%+%-]?%d*%.?%d+[eE]?[%+%-]?%d*$") then error("invalid_number", 0) end
             local number = tonumber(value)
-            if not RG.Util.IsFinite(number) then error("invalid_number", 0) end
+            if not number or not RG.Util.IsFinite(number) then error("invalid_number", 0) end
             return number
         end
         if tag ~= "{" then error("invalid_tag", 0) end
@@ -98,7 +99,6 @@ function C.Decode(text)
         for _ = 1, count do
             local key = decode(depth + 1)
             if type(key) ~= "string" and type(key) ~= "number" then error("invalid_key", 0) end
-            ---@cast key string|number
             if type(key) == "number" and (key < 1 or key > 256 or key % 1 ~= 0) then error("invalid_key", 0) end
             if value[key] ~= nil then error("duplicate_key", 0) end
             value[key] = decode(depth + 1)

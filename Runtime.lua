@@ -132,9 +132,7 @@ function App:Ignore(contact)
     local entry = self.db:GetList()[contact.identity]
     local kind = "ignore"
     if entry and entry.kind == "ignore" then kind = entry.note and "note" or nil end
-    local ok, err = self.db:SetList(contact.identity, kind, entry and entry.note, contact)
-    if ok then self:ProfileChanged() end
-    return ok, err
+    return self:SetList(contact, kind)
 end
 
 function App:SetNote(contact, note)
@@ -150,7 +148,12 @@ function App:SetList(contact, kind, note)
     local entry = self.db:GetList()[contact.identity]
     if note == nil then note = entry and entry.note end
     local ok, err = self.db:SetList(contact.identity, kind, note, contact)
-    if ok then self:ProfileChanged() end
+    if ok then
+        if kind == "ignore" and self.ui and self.ui.SuppressContactBanners then
+            self.ui:SuppressContactBanners(contact.id, contact.identity)
+        end
+        self:ProfileChanged()
+    end
     return ok, err
 end
 
@@ -221,13 +224,22 @@ function App:Initialize()
     self.ui = RG.UI.New(self)
     self.sensors = RG.Sensors.New(self, self.client, self.api)
     if self.db:GetProfile().enabled and not self.sensors:Start() then error("sensor_start_failed", 0) end
-    self.api.SLASH_RIVALGUARD1, self.api.SLASH_RIVALGUARD2 = "/rivalguard", "/rg"
-    self.api.SlashCmdList.RIVALGUARD = function(message) self:Command(message) end
     self.db:Prune(epochNow())
     if not self.db.writable then self:Notify("Saved settings belong to a newer version. Session defaults are in use; your saved data is preserved.") end
     self.ui:Refresh()
+    local commands = self.api.SlashCmdList
+    if type(commands) == "table" then
+        commands.RIVALGUARD = function(message) self:Command(message) end
+        self.api.SLASH_RIVALGUARD1, self.api.SLASH_RIVALGUARD2 = "/rivalguard", "/rg"
+    else
+        self.diagnostics:Count("slash_unavailable")
+    end
     if self.db.writable then self.api.RivalGuardDB = self.db.root end
     self.initializing, self.initialized = false, true
+    if self.ui.RegisterNativeSettings then
+        local ok = pcall(self.ui.RegisterNativeSettings, self.ui)
+        if not ok then self.diagnostics:Error("ui_native_settings") end
+    end
     if self.db.writable and not self.db:HasSeenGuide() and self.ui.ShowGuide then
         local ok = pcall(self.ui.ShowGuide, self.ui, false)
         if not ok then self.diagnostics:Error("ui_guide") end

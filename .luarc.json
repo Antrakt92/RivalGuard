@@ -1,0 +1,10 @@
+{
+  "runtime.version": "Lua 5.1",
+  "workspace.ignoreDir": [".git", "dist", "tests"],
+  "diagnostics.globals": [
+    "ChatFontNormal", "CreateFrame", "GameFontNormal", "GameTooltip",
+    "GetCursorPosition", "GetLocale", "InCombatLockdown", "issecretvalue",
+    "LOCALIZED_CLASS_NAMES_MALE", "Minimap", "RAID_CLASS_COLORS", "Settings",
+    "STANDARD_TEXT_FONT", "time", "UIParent", "UISpecialFrames"
+  ]
+}

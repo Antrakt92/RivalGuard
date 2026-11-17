@@ -428,7 +428,8 @@ end
 
 function E:Emit(decision, now)
     if decision.sound then
-        if now - self.lastSound < self.profile.alerts.soundGap then decision.sound = false
+        if self.profile.alerts.sounds[decision.kind] == "none"
+            or now - self.lastSound < self.profile.alerts.soundGap then decision.sound = false
         else self.lastSound = now end
     end
     if not decision.sound and not decision.banner then return end

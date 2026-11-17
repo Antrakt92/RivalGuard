@@ -332,8 +332,7 @@ function D.Attach(ui, app, H)
         self.loadingTransfer = true
         local text = ""
         if self.transferMode == "export" then
-            text = app.db.ExportProfile and app.db:ExportProfile() or nil
-            if not text then text = t("error") end
+            text = (app.db.ExportProfile and app.db:ExportProfile()) or t("error")
         end
         f.edit:SetText(text)
         self.loadingTransfer = false

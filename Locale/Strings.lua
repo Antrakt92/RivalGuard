@@ -114,6 +114,8 @@ L.enUS = {
     legacyIdentity = "This older entry has no clear player identity. Editing is unavailable.", notePrivate = "Notes are hidden while streamer mode is on.",
     waveClassCount = "%d × %s", waveMore = "+%d more", keyboardEditHelp = "Enter saves; Escape leaves the field.",
     stealthCast = "%s used", stealthAura = "Stealth aura observed", spellStealth = "Stealth", spellVanish = "Vanish", spellProwl = "Prowl", spellShadowmeld = "Shadowmeld", spellInvisibility = "Invisibility",
+    nativeSettingsHelp = "Set up class alerts, the Nearby panel, profiles and your personal lists. You can also open RivalGuard settings with /rg settings.",
+    openSettings = "Open RivalGuard settings", nativeUnavailable = "RivalGuard settings are currently unavailable.",
 }
 
 L.ruRU = {
@@ -229,6 +231,8 @@ L.ruRU = {
     legacyIdentity = "В старой записи нет однозначных сведений об игроке. Редактирование недоступно.", notePrivate = "Заметки скрыты в режиме трансляции.",
     waveClassCount = "%d × %s", waveMore = "ещё %d", keyboardEditHelp = "Enter сохраняет, Esc снимает фокус.",
     stealthCast = "Замечено применение: %s", stealthAura = "Замечен эффект скрытности", spellStealth = "Незаметность", spellVanish = "Исчезновение", spellProwl = "Крадущийся зверь", spellShadowmeld = "Слиться с тенью", spellInvisibility = "Невидимость",
+    nativeSettingsHelp = "Настройте оповещения по классам, окно «Рядом», профили и личные списки. Настройки RivalGuard также открываются командой /rg settings.",
+    openSettings = "Открыть настройки RivalGuard", nativeUnavailable = "Настройки RivalGuard сейчас недоступны.",
 }
 
 function L.Get(key, requested)

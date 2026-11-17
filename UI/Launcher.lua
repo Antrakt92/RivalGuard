@@ -67,8 +67,7 @@ function L.New(ui, tooltip, hideTooltip)
 
     function self:UpdateDrag()
         if not self.dragging or combatLocked() or not safeMinimap(map) then return end
-        local cursor = C_Cursor and C_Cursor.GetCursorPosition or GetCursorPosition
-        local cursorX, cursorY = call(cursor)
+        local cursorX, cursorY = call(GetCursorPosition)
         local centerX, centerY = call(map.GetCenter, map)
         local scale = M.Number(call(map.GetEffectiveScale, map))
         cursorX, cursorY = M.Number(cursorX), M.Number(cursorY)
