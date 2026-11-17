@@ -4804,6 +4804,55 @@ local function automaticLocatorFixture(enabled, configure)
     return state, app, add, target
 end
 
+for _, source in ipairs({ "command", "button", "binding" }) do
+    H.Test("pausing from the " .. source .. " retires displayed and queued live warnings", function()
+        local state, app, add = automaticLocatorFixture(true)
+        local ui, engine = app.ui, app.engine
+        add(1, true)
+        engine:Tick()
+        H.Equal(ui.activeBanner.kind, "targeting")
+        H.True(ui.badges.highlight.automatic)
+        add(2, true)
+        state.clock.Advance(0.25)
+        engine:Tick()
+        H.True(#ui.bannerQueue > 0)
+        add(3, false)
+        state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate3", "Cast-BeforePause", 1856)
+        H.True(#engine.pending > 0)
+        local delivered, sounds, now = #engine.history, #state.sounds, state.clock.Now()
+        if source == "command" then state.api.SlashCmdList.RIVALGUARD("pause 2")
+        elseif source == "button" then ui.pauseButton:Click()
+        else state.api.RivalGuard_Binding("pause") end
+        H.Equal(engine.pausedUntil, now + (source == "command" and 120 or 600))
+        H.Equal(app:AlertBlock(), "paused")
+        H.Nil(ui.activeBanner)
+        H.False(ui.banner:IsShown())
+        H.Nil(ui.badges.highlight)
+        H.Equal(#ui.bannerQueue, 0)
+        H.Equal(#engine.pending, 0)
+        state.api.SlashCmdList.RIVALGUARD("resume")
+        state:Advance(0.5)
+        H.Nil(ui.activeBanner)
+        H.Equal(#engine.history, delivered)
+        H.Equal(#state.sounds, sounds)
+    end)
+end
+
+H.Test("pausing live alerts preserves a manual highlight and sample banner", function()
+    local state, app, add = automaticLocatorFixture(false)
+    local ui = app.ui
+    ui:Select(assert(add(1, false)))
+    ui.detailsFrame.locate:Click()
+    local mark = assert(ui.badges.highlight)
+    H.False(mark.automatic)
+    app:Demo()
+    local sample = assert(ui.activeBanner)
+    H.True(sample.preview)
+    state.api.SlashCmdList.RIVALGUARD("pause")
+    H.Equal(ui.activeBanner, sample)
+    H.Equal(ui.badges.highlight, mark)
+end)
+
 local function changeFixtureZone(state, instance, zonePVP)
     state.instance, state.zonePVP = instance, zonePVP
     state:Fire("ZONE_CHANGED_NEW_AREA")

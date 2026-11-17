@@ -68,7 +68,7 @@ function E.New(config)
         profile = config.profile or D.NewProfile(), context = config.context or { kind = "world" },
         lists = config.lists or {}, onAlert = config.onAlert or function() end,
         retailStealth = config.retailStealth == true,
-        onEncounter = config.onEncounter, onChange = config.onChange, onContextBlocked = config.onContextBlocked,
+        onEncounter = config.onEncounter, onChange = config.onChange, onAlertsBlocked = config.onAlertsBlocked,
         onIdentityResolved = config.onIdentityResolved,
         contacts = {}, identities = {}, nameOwners = {}, bindings = {}, tokenSerial = 0, contactCount = 0,
         pending = {}, history = {}, cooldowns = {}, snoozes = {}, serial = 0, sequence = 0,
@@ -1191,7 +1191,7 @@ function E:SetContext(context)
     local allowed = Rules.ContextMatches(self.profile.context, context)
     if previous.kind ~= context.kind or wasAllowed ~= allowed then self:RevalidatePending() end
     self:Changed()
-    if wasAllowed and not allowed and self.onContextBlocked then self.onContextBlocked() end
+    if wasAllowed and not allowed and self.onAlertsBlocked then self.onAlertsBlocked() end
 end
 
 function E:Pause(seconds)
@@ -1199,6 +1199,7 @@ function E:Pause(seconds)
     self.pending = {}
     for _, contact in pairs(self.contacts) do contact.arrivalQueued = false end
     self:Changed()
+    if self.onAlertsBlocked then self.onAlertsBlocked() end
 end
 
 function E:Resume() self.pausedUntil = nil self:Changed() end

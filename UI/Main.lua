@@ -583,7 +583,7 @@ function UI.New(app)
     function self:TogglePause()
         local untilTime = M.Number(app.engine.pausedUntil)
         local paused = untilTime and untilTime > self:Now()
-        if paused then app.engine:Resume() else app.engine:Pause(600); self:ClearBanners() end
+        if paused then app.engine:Resume() else app.engine:Pause(600) end
         self:Refresh()
     end
     local pauseButton = button(main, self:T("pause"), 118, function() self:TogglePause() end)
