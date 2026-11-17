@@ -2683,6 +2683,113 @@ H.Test("a promoted GUID keeps editing the same existing name-based watch record"
     H.Equal(app.db:GetList()[identity].note, "Revised note")
 end)
 
+for _, scenario in ipairs({
+    { name = "a confirmed Rogue correction expedites its original sighting", before = "MAGE", after = "ROGUE", urgent = true },
+    { name = "resolving an unknown class can defer an urgent visual sighting", before = "UNKNOWN_FIXTURE", after = "HUNTER", urgent = false },
+}) do
+    H.Test(scenario.name, function()
+        local state, app, profile = ruleSoundFixture()
+        local rule = soundRule("Urgent rogue cue", "quest", 90)
+        rule.classes = { ROGUE = true }
+        profile.rules = { rule }
+        app:OnSettingsChanged()
+        local observedAt = state.clock.Now()
+        seeSoundRuleRival(state, 1, scenario.before)
+        local before = app.engine:Snapshot()[1]
+        H.Equal(before.class, scenario.before == "MAGE" and "MAGE" or nil)
+        H.Equal(app.engine.counters.alerts, 0)
+        state.clock.Advance(0.2)
+        state.units.nameplate1.class = scenario.after
+        state:Fire("UNIT_NAME_UPDATE", "nameplate1")
+        local current = app.engine:Snapshot()[1]
+        H.Equal(current.id, before.id)
+        H.Equal(current.class, scenario.after)
+        H.Equal(app.engine.pending[1].at, observedAt)
+        state.clock.Advance(0.05)
+        app.engine:Tick()
+        H.Equal(app.engine.counters.alerts, scenario.urgent and 1 or 0)
+        H.Equal(#state.sounds, scenario.urgent and 1 or 0)
+        if scenario.urgent then H.Equal(state.sounds[1].id, RULE_SOUND_KITS.IG_QUEST_LIST_COMPLETE) end
+
+        state.clock.Advance(0.6)
+        app.engine:Tick()
+        H.Equal(app.engine.counters.alerts, 1)
+        H.Equal(app.engine.history[1].kind, "sighting")
+        H.Equal(app.engine.history[1].reason, scenario.urgent and "custom_rule" or "event_matched")
+        H.Equal(app.engine.history[1].id, before.id)
+    end)
+end
+
+H.Test("readable GUID resolves a pending sighting to Watch without expediting another player", function()
+    local state, _, app = setup({ schemaVersion = 1, onboardingSeen = true, lists = {
+        ["guid:Player-ResolvedWatch"] = { kind = "watch", name = "Watched-FixtureRealm", class = "ROGUE" },
+    } })
+    local watched = { name = "Watched", realm = "FixtureRealm", class = "ROGUE", hostile = true, isPlayer = true }
+    state:Unit("nameplate1", watched)
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    local first = app.engine:Snapshot()[1]
+    H.Equal(first.identity, "name:Watched-FixtureRealm")
+    H.Nil(first.listKind)
+    seeSoundRuleRival(state, 2, "MAGE")
+    local second
+    for _, view in ipairs(app.engine:Snapshot()) do if view.identity == "guid:Player-RuleCue2" then second = view end end
+    assert(second)
+
+    state.clock.Advance(0.2)
+    watched.guid = "Player-ResolvedWatch"
+    state:Fire("UNIT_NAME_UPDATE", "nameplate1")
+    local current = assert(app.engine:SelectedContact(first.id, first.identity))
+    H.Equal(current.identity, "guid:Player-ResolvedWatch")
+    H.Equal(current.listKind, "watch")
+    state.clock.Advance(0.05)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(app.engine.history[1].kind, "watch")
+    H.Equal(app.engine.history[1].id, first.id)
+
+    state.clock.Advance(0.6)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 2)
+    H.Equal(app.engine.history[2].kind, "sighting")
+    H.Equal(app.engine.history[2].id, second.id)
+end)
+
+H.Test("merging a queued anonymous plate into a retained GUID keeps its original Watch event", function()
+    local identity = "guid:Player-MergedWatch"
+    local state, _, app = setup({ schemaVersion = 1, onboardingSeen = true, lists = {
+        [identity] = { kind = "watch", name = "Known-FixtureRealm", class = "ROGUE" },
+    } }, function(mock) mock.instance = "arena" end)
+    local verified = { guid = "Player-MergedWatch", name = "Known", realm = "FixtureRealm",
+        class = "ROGUE", hostile = true, isPlayer = true }
+    state:Unit("nameplate2", verified)
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+    local remembered = app.engine:Snapshot()[1]
+    H.Equal(remembered.identity, identity)
+    state.units.nameplate2 = nil
+    state:Fire("NAME_PLATE_UNIT_REMOVED", "nameplate2")
+    changeFixtureZone(state)
+
+    local observedAt = state.clock.Now()
+    state:Unit("nameplate1", { class = "ROGUE", hostile = true, isPlayer = true })
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    H.Equal(#app.engine:Snapshot(), 2)
+    local queued = app.engine.pending[1]
+    H.True(queued.id ~= remembered.id)
+    H.Equal(queued.at, observedAt)
+    state.clock.Advance(0.2)
+    state:Unit("nameplate1", verified)
+    state:Fire("UNIT_NAME_UPDATE", "nameplate1")
+    H.Equal(#app.engine:Snapshot(), 1)
+    H.Equal(#app.engine.pending, 1)
+    H.Equal(app.engine.pending[1].at, observedAt)
+    H.Equal(app.engine.pending[1].id, remembered.id)
+    state.clock.Advance(0.05)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(app.engine.history[1].kind, "watch")
+    H.Equal(app.engine.history[1].id, remembered.id)
+end)
+
 H.Test("a collision invalidates a draft for a name alias without hiding explicit GUID records", function()
     local identity = "name:Same-FixtureRealm"
     local state, _, app = setup({ schemaVersion = 1, onboardingSeen = true, lists = {

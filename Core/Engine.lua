@@ -592,7 +592,7 @@ function E:Observe(raw)
         local namedContact = nameOwner and self.contacts[nameOwner]
         if namedContact and (not obs.guid or not namedContact.guid or namedContact.guid == obs.guid) then known = nameOwner end
     end
-    local returning
+    local returning, merged
     local matched = known and self.contacts[known]
     if matched then
         if contact and contact.id ~= known then
@@ -600,10 +600,12 @@ function E:Observe(raw)
             -- stale evidence on the old identity before inheriting any of it.
             returning = self:ResetReturningEncounter(matched, now)
             contact = self:Merge(matched, contact)
+            merged = true
         else
             contact = matched
         end
     end
+    local existing = contact ~= nil
     if not contact then
         self:MakeRoom()
         self.serial = self.serial + 1
@@ -640,6 +642,12 @@ function E:Observe(raw)
         elseif obs.stealth == false then
             contact.stealth, contact.stealthAt, contact.stealthEvidence, contact.stealthSpell = nil, nil, nil, nil
         end
+    end
+    -- Class rules and personal lists can change an already queued event's
+    -- priority when this observation identifies its owner more precisely.
+    if existing and #self.pending > 0 and (merged or oldClass ~= contact.class
+        or oldGuid ~= contact.guid or oldNameIdentity ~= contact.nameIdentity) then
+        self:RevalidateContactPending(contact, now)
     end
     self:RecordEncounter(contact, now)
     if not contact.arrivalNotified and not contact.arrivalQueued then
@@ -937,9 +945,9 @@ function E:SetProfile(profile, preservePending)
     self:Changed()
 end
 
-function E:RevalidateContactPending(contact)
+function E:RevalidateContactPending(contact, now)
     contact.arrivalQueued = false
-    local now = self:Now()
+    now = now or self:Now()
     for index = #self.pending, 1, -1 do
         local item = self.pending[index]
         if item.id == contact.id then
