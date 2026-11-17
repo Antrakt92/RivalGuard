@@ -124,7 +124,11 @@ function App:Explain(contact)
         result.sound, result.banner = decision.sound, decision.banner
         return result
     end
-    return self.engine:ExplainView(contact.id, "sighting")
+    local result = self.engine:ExplainView(contact.id, "sighting")
+    if not contact.savedOnly and not (contact.sources and contact.sources.journal) then
+        result.lastSound = self.engine:LastSoundOutcome(contact.id)
+    end
+    return result
 end
 
 function App:HasTargetingEvidence(id)
@@ -320,11 +324,13 @@ function App:Initialize()
             return self.db:Record(contact, epoch, zoneName)
         end,
         onAlert = function(decision)
-            if decision.sound then self.audio:Play(decision.kind, false) end
+            local soundAccepted
+            if decision.sound then soundAccepted = self.audio:Play(decision.kind, false) end
             if self.ui then
                 local ok = pcall(self.ui.Alert, self.ui, decision)
                 if not ok then self.diagnostics:Error("ui_alert") end
             end
+            return soundAccepted
         end,
     })
     self.ui = RG.UI.New(self)

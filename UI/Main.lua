@@ -8,6 +8,10 @@ local BANNER_QUEUE_LIMIT, BANNER_URGENT_PRIORITY = 8, 70
 local BANNER_ORDINARY_MAX_AGE, BANNER_URGENT_MAX_AGE = 2, 5
 local LIST_KIND_KEYS = { watch = "watched", avoid = "avoided", ignore = "ignored", note = "notesOnly" }
 local LIST_FILTERS = { "all", "watch", "avoid", "ignore", "note" }
+local SOUND_EVENT_KEYS = { sighting = "eventSighting", returning = "eventReturning", targeting = "eventTargeting",
+    stealth = "eventStealth", watch = "eventWatch" }
+local SOUND_STATUS_KEYS = { not_requested = "lastSoundNotRequested", sound_gap = "lastSoundGap",
+    playback_requested = "lastSoundRequested", playback_unconfirmed = "lastSoundUnconfirmed" }
 local nativeSettings = {}
 
 UI.layout = { width = 348, header = 88, footer = 58, rowPadding = 20, settingsWidth = 800, settingsHeight = 610 }
@@ -295,7 +299,6 @@ function UI.New(app)
         self.alertProfile, self.alertConfig = profile, config
         if self.activeBanner then self:PaintBanner(self.activeBanner) end
         self:Refresh()
-        if self.explanationFrame and self.explanationFrame:IsShown() then self:ShowExplanation() end
     end
 
     function self:AlertConfig(profile)
@@ -1178,6 +1181,7 @@ function UI.New(app)
             self.selectedOutside = current == nil
         end
         if detailsShown then self:ShowDetails(true) end
+        if self.explanationFrame and self.explanationFrame:IsShown() then self:ShowExplanation() end
     end
 
     function self:OpenSettings(page)
@@ -1608,6 +1612,10 @@ function UI.New(app)
             frame.rangeEvidence:SetPoint("TOPLEFT", 18, -150); frame.rangeEvidence:SetWidth(420)
             frame.outputs = font(frame, 13, C.accent)
             frame.outputs:SetPoint("TOPLEFT", 18, -178); frame.outputs:SetWidth(420)
+            frame.lastSoundHeading = font(frame, 13, C.accent)
+            frame.lastSoundHeading:SetPoint("TOPLEFT", 18, -226); frame.lastSoundHeading:SetWidth(420)
+            frame.lastSound = font(frame, 14, C.text)
+            frame.lastSound:SetPoint("TOPLEFT", 18, -253); frame.lastSound:SetWidth(420)
             frame.help = font(frame, 12, C.muted)
             frame.help:SetPoint("BOTTOMLEFT", 18, 24); frame.help:SetWidth(420)
             if UISpecialFrames then UISpecialFrames[#UISpecialFrames + 1] = "RivalGuardExplanation" end
@@ -1617,20 +1625,33 @@ function UI.New(app)
         result = type(result) == "table" and result or {}
         local locale = self:Profile().locale
         local preview = result.preview == true or self.selected and self.selected.preview == true
-        frame.event:SetText(self:T(preview and "demoSighting" or "explanationSighting"))
-        frame.help:SetText(self:T(preview and "demoExplanationHelp" or "explanationHelp"))
-        frame.reason:SetText(RG.Locale.Reason(result.reason or "unavailable", locale))
+        paintText(frame.event, self:T(preview and "demoSighting" or "explanationSighting"))
+        paintText(frame.help, self:T(preview and "demoExplanationHelp" or "explanationHelp"))
+        paintText(frame.reason, RG.Locale.Reason(result.reason or "unavailable", locale))
         local rangeEvidence = result.reason ~= "range_conflict" and result.reason ~= "not_observed" and M.RangeProvenance(result.rangeEvidence, locale)
-        frame.rangeEvidence:SetText(rangeEvidence or "")
+        paintText(frame.rangeEvidence, rangeEvidence or "")
         local output
         if result.allowed == true then
             if result.sound == true and result.banner == true then output = "explanationSoundBanner"
             elseif result.sound == true then output = "explanationSoundOnly"
             elseif result.banner == true then output = "explanationBannerOnly" end
         end
-        frame.outputs:SetText(output and self:T(output) or "")
-        self:FitWindow(frame, 460, 290, 1)
-        frame:Show()
+        paintText(frame.outputs, output and self:T(output) or "")
+        local lastSound = type(result.lastSound) == "table" and result.lastSound or nil
+        local soundEvent = lastSound and SOUND_EVENT_KEYS[lastSound.kind]
+        local soundStatus = lastSound and SOUND_STATUS_KEYS[lastSound.status]
+        local showSound = not preview and not self.selectedFromJournal and soundEvent ~= nil and soundStatus ~= nil
+        paintShown(frame.lastSoundHeading, showSound)
+        paintShown(frame.lastSound, showSound)
+        paintText(frame.lastSoundHeading, showSound and self:F("lastSoundHeading", self:T(soundEvent)) or "")
+        paintText(frame.lastSound, showSound and self:T(soundStatus) or "")
+        local height = showSound and 370 or 290
+        if frame.soundSectionShown ~= showSound then
+            frame:SetHeight(height)
+            frame.soundSectionShown = showSound
+        end
+        self:FitWindow(frame, 460, height, 1)
+        if not frame:IsShown() then frame:Show() end
     end
 
     function self:ShowDiagnostics()

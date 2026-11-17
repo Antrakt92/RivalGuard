@@ -580,6 +580,132 @@ for _, scenario in ipairs({ { kind = "sighting", count = 1 }, { kind = "wave", c
     end)
 end
 
+H.Test("Why shows a live contact's last sound outcome separately from current alert rules", function()
+    local playback, requests = false, 0
+    local state, RG, app = setup(nil, function(fixture)
+        fixture.api.PlaySound = function()
+            requests = requests + 1
+            return playback
+        end
+    end)
+    local ui, profile = app.ui, app.db:GetProfile()
+    profile.alerts.waveThreshold = 20
+    app:ProfileChanged()
+    local function contact(index)
+        local identity = "guid:Player-SoundOutcome-" .. index
+        for _, view in ipairs(app.engine:Snapshot()) do if view.identity == identity then return view end end
+        error("missing live sound outcome contact")
+    end
+    local function arrive(index)
+        local token = "nameplate" .. index
+        state:Unit(token, { guid = "Player-SoundOutcome-" .. index, name = "Private Sound " .. index,
+            class = "ROGUE", hostile = true, isPlayer = true })
+        state:Fire("NAME_PLATE_UNIT_ADDED", token)
+    end
+    local function show(index, status, key)
+        local current = contact(index)
+        local result = app:Explain(current)
+        H.True(type(result.lastSound) == "table")
+        H.Equal(result.lastSound.kind, "sighting")
+        H.Equal(result.lastSound.status, status)
+        ui:Select(current)
+        ui:ShowExplanation()
+        H.Equal(ui.explanationFrame.lastSound:GetText(), ui:T(key))
+        H.True(ui.explanationFrame.lastSoundHeading:IsShown())
+        H.Equal(ui.explanationFrame.lastSoundHeading:GetText(), ui:F("lastSoundHeading", ui:T("eventSighting")))
+        return result
+    end
+
+    arrive(1)
+    H.Nil(app:Explain(contact(1)).lastSound)
+    state:Advance(1.25)
+    H.Equal(requests, 1)
+    H.Equal(show(1, "playback_unconfirmed", "lastSoundUnconfirmed").reason, "cooldown")
+
+    playback = true
+    state.clock.Advance(2)
+    arrive(2)
+    state:Advance(1.25)
+    H.Equal(requests, 2)
+    show(2, "playback_requested", "lastSoundRequested")
+    arrive(3)
+    state:Advance(1.1)
+    H.Equal(requests, 2)
+    show(3, "sound_gap", "lastSoundGap")
+    H.Equal(app.engine.history[#app.engine.history].kind, "sighting")
+
+    profile.alerts.sounds.sighting = "none"
+    app:ProfileChanged()
+    arrive(4)
+    state:Advance(1.25)
+    H.Equal(requests, 2)
+    show(4, "not_requested", "lastSoundNotRequested")
+    profile.alerts.enabled = false
+    app:ProfileChanged()
+    H.Equal(show(2, "playback_requested", "lastSoundRequested").reason, "disabled")
+    H.Equal(ui.explanationFrame.reason:GetText(), RG.Locale.Reason("disabled", profile.locale))
+    profile.locale = "ruRU"
+    app:ProfileChanged()
+    H.Equal(show(2, "playback_requested", "lastSoundRequested").reason, "disabled")
+    H.Equal(ui.explanationFrame.reason:GetText(), RG.Locale.Reason("disabled", "ruRU"))
+
+    ui:ShowDiagnostics()
+    local report = ui.copyFrame.edit:GetText()
+    H.Nil(report:find("Private Sound", 1, true))
+    H.Nil(report:find("Player-SoundOutcome-", 1, true))
+    H.Nil(report:find("lastSound=", 1, true))
+    for _, status in ipairs({ "not_requested", "sound_gap", "playback_requested", "playback_unconfirmed" }) do
+        H.Nil(report:find(status, 1, true))
+    end
+end)
+
+H.Test("Why leaves per-contact sound outcome absent on waves previews and saved journal selections", function()
+    local state, _, app = setup()
+    local ui = app.ui
+    local function arrive(index)
+        local token = "nameplate" .. index
+        state:Unit(token, { guid = "Player-WaveOutcome-" .. index, name = "Rival " .. index,
+            class = "ROGUE", hostile = true, isPlayer = true })
+        state:Fire("NAME_PLATE_UNIT_ADDED", token)
+    end
+    for index = 1, 3 do arrive(index) end
+    state:Advance(1.25)
+    H.Equal(app.engine.history[1].kind, "wave")
+    H.Equal(#state.sounds, 1)
+    for _, view in ipairs(app.engine:Snapshot()) do H.Nil(app:Explain(view).lastSound) end
+    arrive(4)
+    state:Advance(1.25)
+    local identity = "guid:Player-WaveOutcome-4"
+    local live
+    for _, view in ipairs(app.engine:Snapshot()) do if view.identity == identity then live = view break end end
+    H.True(type(app:Explain(assert(live)).lastSound) == "table")
+
+    local function assertNoSection()
+        ui:ShowExplanation()
+        H.False(ui.explanationFrame.lastSoundHeading:IsShown())
+        H.Equal(ui.explanationFrame.lastSound:GetText(), "")
+    end
+    ui:OpenSettings("journal")
+    H.Equal(ui.journalRows[1].contact.identity, identity)
+    H.Nil(app:Explain(ui.journalRows[1].contact).lastSound)
+    ui.journalRows[1]:Click()
+    ui:Refresh()
+    assertNoSection()
+
+    assert(app.db:SetList(identity, "watch", nil, { name = "Rival 4" }))
+    ui.journalPersonal:Click()
+    H.True(ui.journalRows[1].contact.savedOnly)
+    H.Nil(app:Explain(ui.journalRows[1].contact).lastSound)
+    ui.journalRows[1]:Click()
+    assertNoSection()
+
+    app:Demo()
+    ui.rows[1]:Click()
+    H.True(ui.selected.preview)
+    H.Nil(app:Explain(ui.selected).lastSound)
+    assertNoSection()
+end)
+
 H.Test("cosmetic streamer setting keeps a queued encounter and applies redaction at delivery", function()
     local state, _, app = setup()
     state:Unit("nameplate1", { guid = "Player-Cosmetic", name = "Example Roving Player", class = "ROGUE", hostile = true, isPlayer = true })

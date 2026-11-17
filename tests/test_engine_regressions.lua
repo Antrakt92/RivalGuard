@@ -191,6 +191,80 @@ local function playOrdinarySound(engine, observe, clock, alerts)
     H.True(alerts[1].sound)
 end
 
+H.Test("last sound outcome records a silent gap and changes on a later playback attempt", function()
+    local engine, observe, clock, alerts = fixture()
+    local dispatch = engine.onAlert
+    local accepted = true
+    engine.onAlert = function(decision)
+        dispatch(decision)
+        return accepted
+    end
+    engine.profile.alerts.banner, engine.profile.alerts.muteOrdinary = false, true
+    engine.profile.alerts.cooldown = 0
+    observe("nameplate1", { guid = "Player-SoundFirst", class = "ROGUE", targeting = true })
+    engine:Tick()
+    H.Equal(#alerts, 1)
+
+    local sample = { guid = "Player-SoundNext", class = "HUNTER", targeting = true }
+    clock.Advance(0.2)
+    local second = observe("nameplate2", sample)
+    engine:Tick()
+    H.Equal(#alerts, 1)
+    H.Equal(#engine.history, 1)
+    H.Equal(engine.counters.alerts, 1)
+    local blocked = engine:LastSoundOutcome(second.id)
+    H.Equal(blocked.kind, "targeting")
+    H.Equal(blocked.status, "sound_gap")
+    blocked.status = "mutated"
+    H.Equal(engine:LastSoundOutcome(second.id).status, "sound_gap")
+
+    accepted = false
+    clock.Advance(engine.profile.alerts.soundGap)
+    observe("nameplate2", sample)
+    engine:Tick()
+    H.Equal(#alerts, 2)
+    H.True(alerts[2].sound)
+    H.Equal(engine:LastSoundOutcome(second.id).status, "playback_unconfirmed")
+
+    accepted = true
+    clock.Advance(engine.profile.alerts.soundGap)
+    sample.targeting = false
+    observe("nameplate2", sample)
+    sample.targeting = true
+    observe("nameplate2", sample)
+    engine:Tick()
+    H.Equal(#alerts, 3)
+    H.Equal(engine:LastSoundOutcome(second.id).status, "playback_requested")
+end)
+
+H.Test("last sound outcome follows alias merge and clears with recent sightings", function()
+    local engine, observe, clock = fixture()
+    engine.onAlert = function() return true end
+    engine.profile.alerts.muteOrdinary, engine.profile.alerts.soundGap = true, 0
+    local identity = { guid = "Player-SharedSound", class = "ROGUE" }
+    local known = observe("nameplate1", identity)
+    H.True(engine:Cast("nameplate1", 1856))
+    engine:Tick()
+    H.Equal(engine:LastSoundOutcome(known.id).kind, "stealth")
+
+    clock.Advance(0.2)
+    local anonymous = observe("target", { class = "ROGUE", targeting = true })
+    H.True(anonymous.id ~= known.id)
+    engine:Tick()
+    H.Equal(engine:LastSoundOutcome(anonymous.id).kind, "targeting")
+
+    local merged = observe("target", identity)
+    H.Equal(merged.id, known.id)
+    H.Nil(engine:LastSoundOutcome(anonymous.id))
+    local outcome = engine:LastSoundOutcome(merged.id)
+    H.Equal(outcome.kind, "targeting")
+    H.Equal(outcome.status, "playback_requested")
+    H.Equal(engine:ClearRecent(), 0)
+    H.Equal(#engine:Snapshot(), 1)
+    H.Nil(engine:LastSoundOutcome(merged.id))
+    H.Nil(engine:LastSoundOutcome("missing"))
+end)
+
 H.Test("one urgent sound may interrupt an ordinary gap without escalating into a rapid third sound", function()
     local engine, observe, clock, alerts = fixture()
     playOrdinarySound(engine, observe, clock, alerts)

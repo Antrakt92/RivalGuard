@@ -69,7 +69,7 @@ function E.New(config)
         pending = {}, history = {}, cooldowns = {}, snoozes = {}, serial = 0, sequence = 0,
         evictedEncounters = {}, evictionSlots = {}, evictionCursor = 0,
         counters = { observations = 0, alerts = 0, suppressed = 0, evicted = 0, queueOverflow = 0, rangeAliasConflicts = 0 },
-        pausedUntil = nil, lastSound = -math.huge, lastSoundPriority = 0, revision = 0,
+        pausedUntil = nil, lastSound = -math.huge, lastSoundPriority = 0, soundOutcomeSequence = 0, revision = 0,
     }, E)
 end
 
@@ -455,6 +455,9 @@ function E:Merge(target, other)
     target.arrivalQueued = target.arrivalQueued or other.arrivalQueued
     target.encounterRecorded = target.encounterRecorded or other.encounterRecorded
     target.notifiedClass = target.notifiedClass or other.notifiedClass
+    if other.soundOutcome and (not target.soundOutcome or other.soundOutcome.sequence > target.soundOutcome.sequence) then
+        target.soundOutcome = other.soundOutcome
+    end
     if target.targetingNotified ~= true and other.targetingNotified ~= nil then
         target.targetingNotified = other.targetingNotified
     end
@@ -505,6 +508,7 @@ function E:ResetReturningEncounter(contact, now)
     if next(contact.tokens) ~= nil or now - contact.lastSeen < self.profile.alerts.returnAfter then return false end
     contact.encounterRecorded = false
     contact.targetingNotified = nil
+    contact.soundOutcome = nil
     contact.stealth, contact.stealthAt, contact.stealthEvidence, contact.stealthSpell = nil, nil, nil, nil
     return true
 end
@@ -653,23 +657,48 @@ function E:Cast(token, spellID)
     return true
 end
 
+function E:LastSoundOutcome(id)
+    local contact = self.contacts[id]
+    local outcome = contact and contact.soundOutcome
+    if outcome then return { kind = outcome.kind, status = outcome.status } end
+end
+
+local function rememberSoundOutcome(engine, decision, status)
+    local contact = decision.contact and engine.contacts[decision.contact.id]
+    if not contact then return end
+    engine.soundOutcomeSequence = engine.soundOutcomeSequence + 1
+    local outcome = contact.soundOutcome or {}
+    outcome.kind, outcome.status, outcome.sequence = decision.kind, status, engine.soundOutcomeSequence
+    contact.soundOutcome = outcome
+end
+
 function E:Emit(decision, now)
+    local soundStatus = "not_requested"
     if decision.sound then
         local gapReady = now >= self.lastSound + self.profile.alerts.soundGap
         -- An urgent cue may interrupt the ordinary cooldown once. Recording
         -- its priority closes the exception until the full gap passes again.
         local escalation = decision.priority >= URGENT_PRIORITY and self.lastSoundPriority < URGENT_PRIORITY
             and now >= self.lastSound + SOUND_ESCALATION_GAP
-        if self.profile.alerts.sounds[decision.kind] == "none" or not (gapReady or escalation) then
+        if self.profile.alerts.sounds[decision.kind] == "none" then
             decision.sound = false
+        elseif not (gapReady or escalation) then
+            decision.sound = false
+            soundStatus = "sound_gap"
         else
             self.lastSound, self.lastSoundPriority = now, decision.priority
         end
     end
-    if not decision.sound and not decision.banner then return false end
+    if not decision.sound and not decision.banner then
+        if soundStatus == "sound_gap" then rememberSoundOutcome(self, decision, soundStatus) end
+        return false
+    end
     self.counters.alerts = self.counters.alerts + 1
     U.ArrayPush(self.history, { at = now, kind = decision.kind, id = decision.contact and decision.contact.id, reason = decision.reason }, self.profile.retention.maxHistory)
-    self.onAlert(decision)
+    local requestedSound = decision.sound
+    local accepted = self.onAlert(decision)
+    if requestedSound then soundStatus = accepted == true and "playback_requested" or "playback_unconfirmed" end
+    rememberSoundOutcome(self, decision, soundStatus)
     return true
 end
 
@@ -888,6 +917,7 @@ function E:ClearRecent()
     local discarded = {}
     for id, contact in pairs(self.contacts) do
         if next(contact.tokens) == nil then discarded[#discarded + 1] = id end
+        contact.soundOutcome = nil
     end
     for _, id in ipairs(discarded) do self:Drop(id) end
     self.evictedEncounters, self.evictionSlots, self.evictionCursor = {}, {}, 0
