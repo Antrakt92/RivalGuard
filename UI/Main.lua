@@ -116,7 +116,7 @@ local function classColor(token)
     return unpack(C.text)
 end
 
-local function paintNearbyRow(row, data, index, profile)
+local function paintNearbyRow(row, data, index, profile, inset)
     if row.contact and (not data or row.contact.id ~= data.contact.id or row.nameText.paintedText ~= data.name) then
         hideOwnedTooltip(row)
     end
@@ -126,9 +126,13 @@ local function paintNearbyRow(row, data, index, profile)
     local display = profile.display
     local textSize = display.textSize
     local face = STANDARD_TEXT_FONT or "Fonts\\ARIALN.TTF"
+    local height = textSize + UI.layout.rowPadding
+    local y = -UI.layout.header - (index - 1) * height - (inset or 0)
+    if row.paintedY ~= y then
+        row:ClearAllPoints(); row:SetPoint("TOPLEFT", 8, y)
+        row.paintedY = y
+    end
     if row.paintedSize ~= textSize then
-        local height = textSize + UI.layout.rowPadding
-        row:ClearAllPoints(); row:SetPoint("TOPLEFT", 8, -UI.layout.header - (index - 1) * height)
         row:SetHeight(height)
         row.detailText:ClearAllPoints(); row.detailText:SetPoint("TOPLEFT", 36, -textSize - 5)
     end
@@ -615,6 +619,48 @@ function UI.New(app)
     emptyHelp:SetHeight(63)
     self.empty, self.emptyHelp = empty, emptyHelp
 
+    local inlineNoteHeight = 34
+    local inlineNote = CreateFrame("Frame", nil, body)
+    inlineNote:SetSize(UI.layout.width - 16, inlineNoteHeight)
+    inlineNote:Hide()
+    local inlineInput = CreateFrame("EditBox", nil, inlineNote, "InputBoxTemplate")
+    inlineInput:SetPoint("LEFT", 15, 1); inlineInput:SetSize(207, 24)
+    inlineInput:SetAutoFocus(false); inlineInput:SetMaxLetters(512)
+    if inlineInput.SetMaxBytes then inlineInput:SetMaxBytes(512) end
+    local inlineDraft, inlineRow
+    local function closeInlineNote()
+        if not inlineDraft then return end
+        inlineDraft, inlineRow = nil, nil
+        inlineNote:Hide()
+        inlineInput:ClearFocus(); inlineInput:SetText("")
+    end
+    local function saveInlineNote()
+        if not inlineDraft or self:Profile().display.streamer then return end
+        local contact = inlineRow and inlineRow.contact
+        local _, key = listEntry(contact)
+        if not contact or contact.id ~= inlineDraft.id or key ~= inlineDraft.key then
+            closeInlineNote(); self:Refresh(); notify("identityUnknown")
+            return
+        end
+        local ok, _, feedback = app:SetNote(contact, inlineInput:GetText())
+        if ok then closeInlineNote(); self:Refresh() end
+        notify(ok and (feedback or "noteSaved") or "saveFailed")
+    end
+    local inlineSave = localButton(inlineNote, "saveNote", 73, saveInlineNote)
+    inlineSave:SetPoint("RIGHT", -27, 1); inlineSave:SetHeight(24)
+    local function cancelInlineNote()
+        closeInlineNote(); self:Refresh()
+    end
+    local inlineCancel = button(inlineNote, "×", 23, cancelInlineNote)
+    inlineCancel:SetPoint("RIGHT", -1, 1); inlineCancel:SetHeight(24)
+    inlineCancel:SetScript("OnEnter", function(frame) tooltip(frame, self:T("cancel")) end)
+    inlineCancel:SetScript("OnLeave", hideOwnedTooltip)
+    inlineCancel:SetScript("OnHide", hideOwnedTooltip)
+    inlineInput:SetScript("OnEnterPressed", saveInlineNote)
+    inlineInput:SetScript("OnEscapePressed", cancelInlineNote)
+    inlineNote.input, inlineNote.save, inlineNote.cancel = inlineInput, inlineSave, inlineCancel
+    self.nearbyNote = inlineNote
+
     for i = 1, 20 do
         local row = CreateFrame("Button", nil, body)
         row:SetPoint("TOPLEFT", 8, -UI.layout.header - (i - 1) * 33)
@@ -624,13 +670,30 @@ function UI.New(app)
         row.icon = row:CreateTexture(nil, "ARTWORK")
         row.icon:SetPoint("LEFT", 6, 0); row.icon:SetSize(22, 22)
         row.nameText = font(row, 13)
-        row.nameText:SetPoint("TOPLEFT", 36, -2); row.nameText:SetWidth(252)
+        row.nameText:SetPoint("TOPLEFT", 36, -2); row.nameText:SetWidth(208)
         if row.nameText.SetMaxLines then row.nameText:SetMaxLines(1) end
         row.detailText = font(row, 10, C.muted)
-        row.detailText:SetPoint("TOPLEFT", 36, -19); row.detailText:SetWidth(280)
+        row.detailText:SetPoint("TOPLEFT", 36, -19); row.detailText:SetWidth(220)
         if row.detailText.SetMaxLines then row.detailText:SetMaxLines(1) end
         row.mark = font(row, 15, C.gold, "RIGHT")
-        row.mark:SetPoint("TOPRIGHT", -8, -3); row.mark:SetText("!")
+        row.mark:SetPoint("TOPRIGHT", -71, -3); row.mark:SetText("!")
+        row.noteButton = localButton(row, "noteShort", 62, function()
+            local contact = row.contact
+            if not app.SetNote or not M.EditableIdentity(contact) or self:Profile().display.streamer then return end
+            local entry, key = listEntry(contact)
+            if not key then return end
+            if inlineDraft and inlineDraft.id == contact.id then cancelInlineNote(); return end
+            inlineDraft = { id = contact.id, key = key, identity = M.EditableIdentity(contact) }
+            inlineInput:SetText(entry and entry.note or "")
+            hideOwnedTooltip(row.noteButton)
+            self:Refresh()
+            if inlineNote:IsShown() then inlineInput:SetFocus() end
+        end)
+        row.noteButton:SetPoint("RIGHT", -4, 0); row.noteButton:SetHeight(24)
+        row.noteButton:SetScript("OnEnter", function(frame) tooltip(frame, self:T("note")) end)
+        row.noteButton:SetScript("OnLeave", hideOwnedTooltip)
+        row.noteButton:SetScript("OnHide", hideOwnedTooltip)
+        paintShown(row.noteButton, false)
         row:RegisterForClicks("RightButtonUp")
         row:SetScript("OnClick", function(_, mouseButton)
             if mouseButton == "RightButton" and row.contact then self:Select(row.contact) end
@@ -1391,6 +1454,7 @@ function UI.New(app)
         end
         self:UpdateClasses()
         if self.lastProfile ~= profile then
+            closeInlineNote()
             nearbyOpened = false
             self.nearbyMoveMode = nil
             restoreNearby()
@@ -1417,7 +1481,8 @@ function UI.New(app)
             livePage, nearbyCount, nearbyVisible, self.offset, nearbyIds = app.engine:NearbyPage(self.offset, maxRows, profile.display.streamer)
         end
         local expanded = not compact and (preview == true or moving or (profile.display.showList
-            and (nearbyOpened or profile.display.showEmpty or (nearbyVisible or 0) > 0)))
+            and (nearbyOpened or inlineDraft ~= nil or profile.display.showEmpty or (nearbyVisible or 0) > 0)))
+        if not expanded or preview or profile.display.streamer then closeInlineNote() end
         local untilTime = M.Number(app.engine.pausedUntil)
         local paused = untilTime ~= nil and untilTime > now
         local supportShown = settings:IsShown() and self.currentPage == "support"
@@ -1443,8 +1508,6 @@ function UI.New(app)
             self.renderedCount = rowCount
             local rowHeight = profile.display.textSize + UI.layout.rowPadding
             local shownRows = rowCount > 0 and math.min(maxRows, rowCount) or 3
-            local mainHeight = UI.layout.header + shownRows * rowHeight + UI.layout.footer
-            fitNearby(UI.layout.width, mainHeight, profile)
             local visibleCount = nearbyVisible
             if not paged then
                 self.offset = math.max(0, math.min(self.offset, math.max(0, rowCount - maxRows)))
@@ -1457,9 +1520,33 @@ function UI.New(app)
             paintText(statusText, status)
             paintShown(empty, rowCount == 0); paintShown(emptyHelp, rowCount == 0)
             local rowOffset = paged and 0 or self.offset
+            local noteIndex
+            if inlineDraft then
+                for i = 1, math.min(shownRows, #rows - rowOffset) do
+                    local contact = rows[rowOffset + i].contact
+                    if contact.id == inlineDraft.id and M.EditableIdentity(contact) == inlineDraft.identity then
+                        noteIndex = i
+                        break
+                    end
+                end
+                if not noteIndex then closeInlineNote() end
+            end
+            local mainHeight = UI.layout.header + shownRows * rowHeight + UI.layout.footer
+            fitNearby(UI.layout.width, mainHeight + (noteIndex and inlineNoteHeight or 0), profile)
             for i, row in ipairs(self.rows) do
                 local data = i <= maxRows and rows[rowOffset + i] or nil
-                paintNearbyRow(row, data, i, profile)
+                paintNearbyRow(row, data, i, profile, noteIndex and i > noteIndex and inlineNoteHeight or 0)
+                paintShown(row.noteButton, data ~= nil and app.SetNote ~= nil and not profile.display.streamer
+                    and M.EditableIdentity(data.contact) ~= nil)
+            end
+            if noteIndex then
+                local row = self.rows[noteIndex]
+                if inlineRow ~= row then
+                    inlineNote:ClearAllPoints()
+                    inlineNote:SetPoint("TOPLEFT", row, "BOTTOMLEFT", 0, 0)
+                    inlineRow = row
+                end
+                if not inlineNote:IsShown() then inlineNote:Show() end
             end
             paintText(more, self.nearbyMoveMode == profile and self:T("nearbyDragHelp")
                 or rowCount > maxRows and self:F("moreContacts", rowCount - maxRows) or self:T("rowHint"))

@@ -27,7 +27,8 @@ that leaves your journal and lists untouched. Open **Why?** on a sample row to
 see how your current profile would handle that new sighting in the open world.
 
 - **Nearby:** view current sightings and distinguish them from recently seen
-  players. Right-click a row for evidence, personal notes or a temporary alert pause.
+  players. Click **Note** to edit a note under a player. Right-click a row for
+  evidence and additional options.
   **Why?** checks what the current settings would do for a new sighting and
   shows the matching rule, fresh distance, applicable global and rule limits,
   configured sound and the latest individual or group sound result when available.
