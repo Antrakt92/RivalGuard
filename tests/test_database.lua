@@ -3,6 +3,21 @@ local function addon()
     return H.Addon({ "Core/Bootstrap.lua", "Core/Util.lua", "Core/Defaults.lua", "Core/Codec.lua", "Core/Database.lua" })
 end
 
+H.Test("renaming a custom profile works at capacity and preserves the active object", function()
+    local RG = addon()
+    local db = RG.Database.New()
+    for i = 1, 19 do assert(db:CreateProfile("Profile " .. i)) end
+    local profile = assert(db:SetProfile("Profile 1"))
+    H.Nil(db:CreateProfile("Another profile"))
+    H.Nil(db:RenameProfile("Default", "Another default"))
+    H.Nil(db:RenameProfile("Profile 1", "Profile 2"))
+    H.Equal(db:RenameProfile("Profile 1", "  Патруль  "), profile)
+    H.Equal(db:GetActiveProfileName(), "Патруль")
+    H.Equal(db:GetProfile(), profile)
+    H.Nil(db:GetProfile("Profile 1"))
+    H.Equal(#db:ListProfiles(), 20)
+end)
+
 H.Test("profile create copy switch reset delete preserve unrelated settings", function()
     local RG = addon()
     local db = RG.Database.New()

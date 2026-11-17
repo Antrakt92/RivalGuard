@@ -52,6 +52,7 @@ current profile would handle that new sighting in the open world.
   immediately. They do not include personal lists or history. Right-click
   **…** on Nearby or use `/rg profile` to switch
   quickly. `/rg profile NAME` activates an exact saved profile name.
+  **Rename** updates the name of a custom profile in place.
 - **Journal:** search names or notes and select a personal list directly.
   Retain all eligible encounters, listed players or observed threats.
 - **Support:** see available sensors, why alerts are quiet here and which

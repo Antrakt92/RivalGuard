@@ -45,6 +45,11 @@ app.ui:Refresh()
 if view == "settings" then
     if page == "support-limited" then
         app.ui:OpenSettings("support")
+    elseif page == "profile-rename" then
+        local name = locale == "ruRU" and "Патруль" or "Patrol"
+        assert(app.db:CreateProfile(name, "farming"))
+        app.ui:OpenSettings("profiles")
+        app.ui.profileRows[2].rename:Click()
     elseif page == "profile-picker" then
         assert(app.db:CreateProfile(RG.Locale.Get("quiet", locale), "quiet"))
         assert(app.db:CreateProfile(RG.Locale.Get("farming", locale), "farming"))

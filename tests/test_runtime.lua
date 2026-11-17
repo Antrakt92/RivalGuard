@@ -2907,6 +2907,108 @@ H.Test("direct preset choices distinguish saving a paginated profile from creati
     H.True(state.messages[#state.messages]:find(ui:T("profileLimit"), 1, true) ~= nil)
 end)
 
+local function profileSettingsRow(ui, name)
+    for _, row in ipairs(ui.profileRows) do
+        if row:IsShown() and row.profileName == name then return row end
+    end
+    error("missing profile row " .. name)
+end
+
+H.Test("renaming the active profile preserves its object and queued alert and reloads by the new exact name", function()
+    local state, RG, app = setup(nil, function(mock) mock.locale = "ruRU" end)
+    local db, ui = app.db, app.ui
+    local active = assert(db:CreateProfile("Before rename"))
+    active.alerts.classes = { ROGUE = true }
+    assert(app:UseProfile("Before rename"))
+    seeSoundRuleRival(state, 1)
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-BeforeProfileRename", 1856)
+    H.Equal(#app.engine.pending, 1)
+    local pending, frame = RG.Codec.Encode(app.engine.pending), app.sensors.frame
+    local generation = app.sensors.active.nameplate1.generation
+    local original = RG.Codec.Encode(db:GetProfile("Default"))
+
+    ui:OpenSettings("profiles")
+    H.False(profileSettingsRow(ui, "Default").rename.enabled)
+    profileSettingsRow(ui, "Before rename").rename:Click()
+    local dialog = assert(ui.profileRenameDialog)
+    H.True(dialog:IsShown())
+    H.Equal(dialog.input:GetText(), "Before rename")
+    for _, invalid in ipairs({ "Default", "Invalid\tname", "   " }) do
+        dialog.input:SetText(invalid)
+        dialog.apply:Click()
+        H.True(dialog:IsShown())
+        H.Equal(dialog.input:GetText(), invalid)
+        H.Equal(db:GetActiveProfileName(), "Before rename")
+        H.Equal(db:GetProfile(), active)
+        H.Equal(#db:ListProfiles(), 2)
+        H.Equal(dialog.feedback:GetText(), ui:T("profileError"))
+    end
+
+    local name = "Новый боевой профиль"
+    dialog.input:SetText("  " .. name .. "  ")
+    dialog.input.scripts.OnEnterPressed(dialog.input)
+    H.False(dialog:IsShown())
+    H.Nil(db:GetProfile("Before rename"))
+    H.Equal(db:GetProfile(name), active)
+    H.Equal(db:GetActiveProfileName(), name)
+    H.Equal(app.engine.profile, active)
+    H.Equal(app.sensors.frame, frame)
+    H.Equal(app.sensors.active.nameplate1.generation, generation)
+    H.True(app.sensors.running)
+    H.Equal(RG.Codec.Encode(app.engine.pending), pending)
+    H.Equal(RG.Codec.Encode(db:GetProfile("Default")), original)
+    H.True(ui.activeProfileText:GetText():find(name, 1, true) ~= nil)
+    H.True(state.messages[#state.messages]:find(ui:F("profileRenamed", name), 1, true) ~= nil)
+    state:Advance(0.5)
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(app.engine.history[1].kind, "stealth")
+
+    local slash = state.api.SlashCmdList.RIVALGUARD
+    slash("profile Default")
+    slash("profile Before rename")
+    H.Equal(db:GetActiveProfileName(), "Default")
+    H.True(state.messages[#state.messages]:find(ui:T("profileMissing"), 1, true) ~= nil)
+    slash("profile " .. name)
+    H.Equal(db:GetActiveProfileName(), name)
+    state:Fire("PLAYER_LOGOUT")
+    local _, _, fresh = setup(state.api.RivalGuardDB)
+    H.Equal(fresh.db:GetActiveProfileName(), name)
+    H.True(fresh.db:GetProfile().alerts.classes.ROGUE)
+    H.Nil(fresh.db:GetProfile("Before rename"))
+end)
+
+H.Test("renaming an inactive profile preserves the active selection and rejects a stale source", function()
+    local _, _, app = setup()
+    local db, ui = app.db, app.ui
+    local active = db:GetProfile()
+    local quiet = assert(db:CreateProfile("Inactive original", "quiet"))
+    assert(db:CreateProfile("Stale original", "battleground"))
+    ui:OpenSettings("profiles")
+    profileSettingsRow(ui, "Inactive original").rename:Click()
+    local dialog = assert(ui.profileRenameDialog)
+    dialog.input:SetText("Inactive renamed")
+    dialog.apply:Click()
+    H.Equal(db:GetProfile("Inactive renamed"), quiet)
+    H.Nil(db:GetProfile("Inactive original"))
+    H.Equal(db:GetProfile(), active); H.Equal(app.engine.profile, active)
+    H.True(app.sensors.running)
+    H.True(profileSettingsRow(ui, "Inactive renamed").use.enabled)
+
+    profileSettingsRow(ui, "Stale original").rename:Click()
+    H.True(dialog:IsShown())
+    assert(db:DeleteProfile("Stale original"))
+    local replacement = assert(db:CreateProfile("Stale original", "farming"))
+    dialog.input:SetText("Must not replace")
+    dialog.apply:Click()
+    H.Equal(db:GetProfile("Stale original"), replacement)
+    H.Nil(db:GetProfile("Must not replace"))
+    H.Equal(db:GetProfile(), active)
+    H.Equal(dialog.feedback:GetText(), ui:T("profileMissing"))
+    H.False(dialog.apply.enabled)
+    dialog.input.scripts.OnEscapePressed(dialog.input)
+    H.False(dialog:IsShown())
+end)
+
 local function profileImportPayload(RG, detectionEnabled)
     local detached = RG.Database.New()
     local profile = detached:GetProfile()

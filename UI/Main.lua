@@ -929,19 +929,30 @@ function UI.New(app)
     for i = 1, profilePageSize do
         local row = CreateFrame("Frame", nil, profiles)
         row:SetPoint("TOPLEFT", 0, firstProfileRowY - (i - 1) * profileRowSpacing); row:SetSize(550, 34)
-        row.nameText = font(row, 13); row.nameText:SetPoint("LEFT", 0, 0); row.nameText:SetWidth(300); row.nameText:SetJustifyV("MIDDLE")
-        row.use = localButton(row, "useProfile", 95, function()
+        row.nameText = font(row, 13); row.nameText:SetPoint("LEFT", 0, 0); row.nameText:SetWidth(220); row.nameText:SetJustifyV("MIDDLE")
+        if row.nameText.SetMaxLines then row.nameText:SetMaxLines(1) end
+        row:EnableMouse(true)
+        row:SetScript("OnEnter", function() if row.profileName then tooltip(row, row.profileName) end end)
+        row:SetScript("OnLeave", hideTooltip)
+        row.use = localButton(row, "useProfile", 82, function()
             if row.profileName then app:UseProfile(row.profileName) end
         end)
-        row.use:SetPoint("RIGHT", -105, 0)
+        row.use:SetPoint("RIGHT", -237, 0)
+        row.rename = localButton(row, "renameProfile", 122, function()
+            if row.profileName then self:OpenProfileRename(row.profileName) end
+        end)
+        row.rename:SetPoint("RIGHT", -105, 0)
         row.delete = localButton(row, "deleteProfile", 95, function()
             if not row.profileName or not app.db.DeleteProfile then return end
-            if self.deleteProfileName ~= row.profileName or (self.deleteProfileAt or 0) < self:Now() then
+            local profile = app.db:GetProfile(row.profileName)
+            if not profile then return end
+            if self.deleteProfileName ~= row.profileName or self.deleteProfileObject ~= profile or (self.deleteProfileAt or 0) < self:Now() then
                 self.deleteProfileName, self.deleteProfileAt = row.profileName, self:Now() + 5
+                self.deleteProfileObject = profile
                 notify("deleteConfirm"); return
             end
             local ok = app.db:DeleteProfile(row.profileName)
-            self.deleteProfileName = nil
+            self.deleteProfileName, self.deleteProfileObject = nil, nil
             if ok then app:ProfileChanged(); notify("profileDeleted") else notify("profileError") end
             self:Refresh()
         end)
@@ -1142,6 +1153,7 @@ function UI.New(app)
                 row.nameText:SetText(M.Text(name, ""))
                 row.nameText:SetTextColor(unpack(name == activeName and C.accent or C.text))
                 row.use:SetEnabled(name ~= activeName)
+                row.rename:SetEnabled(name ~= "Default")
                 row.delete:SetEnabled(name ~= "Default" and name ~= activeName)
             end
         end

@@ -164,6 +164,54 @@ function D.Attach(ui, app, H)
         return edit
     end
 
+    function self:OpenProfileRename(name)
+        local profile = app.db:GetProfile(name)
+        if not profile or name == "Default" or not app.db.RenameProfile then return end
+        local f = ui.profileRenameDialog
+        if not f then
+            f = dialog("RivalGuardProfileRename", "renameProfile", 450, 218)
+            f:SetFrameStrata("FULLSCREEN_DIALOG")
+            f.current = H.font(f, 13, H.C.muted)
+            f.current:SetPoint("TOPLEFT", 18, -55); f.current:SetWidth(414)
+            if f.current.SetMaxLines then f.current:SetMaxLines(1) end
+            local label = H.label(f, "renameProfileName", 13)
+            label:SetPoint("TOPLEFT", 18, -83)
+            f.input = textInput(f, 408, 64)
+            f.input:SetPoint("TOPLEFT", 25, -107)
+            f.feedback = H.font(f, 12, H.C.muted)
+            f.feedback:SetPoint("TOPLEFT", 18, -145); f.feedback:SetWidth(414)
+            f.apply = H.localButton(f, "renameProfile", 160, function()
+                if not f:IsShown() or not f.owner then return end
+                if app.db:GetProfile(f.sourceName) ~= f.owner then
+                    f.feedback:SetText(t("profileMissing")); f.apply:SetEnabled(false)
+                    return
+                end
+                local newName = RG.Util.Text(f.input:GetText(), 64)
+                if newName == f.sourceName then f:Hide(); return end
+                if not app.db:RenameProfile(f.sourceName, newName) then f.feedback:SetText(t("profileError")); return end
+                f:Hide()
+                if ui.profilePicker then ui.profilePicker:Hide() end
+                ui:RevealProfile(newName)
+                if app.Notify then app:Notify(ui:F("profileRenamed", newName)) end
+            end)
+            f.apply:SetPoint("BOTTOMLEFT", 18, 18)
+            f.input:SetScript("OnEnterPressed", function() f.apply:Click() end)
+            f.input:SetScript("OnEscapePressed", function() f:Hide() end)
+            f.input:SetScript("OnTextChanged", function() f.feedback:SetText("") end)
+            f:SetScript("OnHide", function()
+                f.owner, f.sourceName = nil, nil
+                f.input:ClearFocus()
+            end)
+            ui.profileRenameDialog = f
+        end
+        f.sourceName, f.owner = name, profile
+        f.current:SetText(name); f.input:SetText(name); f.feedback:SetText("")
+        f.apply:SetEnabled(true)
+        H.hideTooltip()
+        showDialog(f)
+        f.input:SetFocus(); f.input:HighlightText()
+    end
+
     function self:RuleDraft(index)
         local profile = ui:Profile()
         self.ruleIndex, self.ruleProfile = index, profile
@@ -810,6 +858,7 @@ function D.Attach(ui, app, H)
 
     function ui:OpenRules() self.dialogs:OpenRules() end
     function ui:OpenProfilePicker() self.dialogs:OpenProfilePicker() end
+    function ui:OpenProfileRename(name) self.dialogs:OpenProfileRename(name) end
     function ui:OpenSoundPicker(...) self.dialogs:OpenSoundPicker(...) end
     function ui:OpenTransfer(mode) self.dialogs:OpenTransfer(mode) end
     function ui:ShowGuide(replay) return self.dialogs:ShowGuide(replay) end

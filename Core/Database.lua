@@ -306,6 +306,20 @@ function DB:SetProfile(name)
 end
 DB.UseProfile = DB.SetProfile
 
+function DB:RenameProfile(name, newName)
+    local profile = self.root.profiles[name]
+    if not profile then return nil, "profile_missing" end
+    if name == "Default" then return nil, "default_profile" end
+    newName = profileName(newName)
+    if not newName then return nil, "invalid_name" end
+    if name == newName then return profile end
+    if self.root.profiles[newName] then return nil, "profile_exists" end
+    self.root.profiles[newName] = profile
+    self.root.profiles[name] = nil
+    if self.root.activeProfile == name then self.root.activeProfile = newName end
+    return profile
+end
+
 function DB:CopyProfile(name, source)
     name = profileName(name)
     if not name then return nil, "invalid_name" end
