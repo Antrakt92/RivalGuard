@@ -745,12 +745,16 @@ function D.Attach(ui, app, H)
         showDialog(self.rulesFrame)
     end
 
+    local function clearImportFeedback(frame)
+        frame.feedback:SetText("")
+        frame.manageProfiles:Hide()
+    end
+
     function self:ResetImportPreview(message)
         local f = self.transferFrame
         self.importText, self.importPreview = nil, nil
         f.apply:SetEnabled(false); f.applyAndUse:SetEnabled(false)
-        f.feedback:SetText("")
-        f.manageProfiles:Hide()
+        clearImportFeedback(f)
         if message then f.summary:SetText(t(message)) end
     end
 
@@ -772,10 +776,7 @@ function D.Attach(ui, app, H)
             ui:OpenSettings("profiles")
         end)
         f.manageProfiles:SetPoint("LEFT", f.nameInput, "RIGHT", 14, 0)
-        f.nameInput:SetScript("OnTextChanged", function()
-            f.feedback:SetText("")
-            f.manageProfiles:Hide()
-        end)
+        f.nameInput:SetScript("OnTextChanged", function() clearImportFeedback(f) end)
         local scroll = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
         local edit = CreateFrame("EditBox", nil, scroll)
         edit:SetMultiLine(true); edit:SetAutoFocus(false); edit:SetWidth(665); edit:SetHeight(280)
@@ -842,6 +843,7 @@ function D.Attach(ui, app, H)
             return
         end
         self.importText, self.importPreview = text, clean
+        clearImportFeedback(f)
         local function state(enabled) return t(enabled and "importOn" or "importOff") end
         local areas = {}
         for _, kind in ipairs({ "world", "battleground", "arena", "instance" }) do
