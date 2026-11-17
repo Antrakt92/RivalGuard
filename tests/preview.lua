@@ -30,7 +30,9 @@ for index, class in ipairs(classes) do
 end
 app.ui:Refresh()
 if view == "settings" then app.ui:OpenSettings(page)
-elseif view == "guide" then app.ui:ShowGuide(true)
+elseif view == "guide" then
+    app.ui:ShowGuide(true)
+    if page == "rules" then app.ui.guideDialog.next:Click() end
 elseif view == "journal" then app.ui:OpenSettings("journal")
 elseif view == "personal" then app.ui:OpenSettings("journal"); app.ui.journalPersonal:Click()
 elseif view == "rules" then app.ui:OpenRules()
@@ -38,6 +40,9 @@ elseif view == "conditions" then app.ui:OpenRules(); app.ui.rulesDialog.conditio
 elseif view == "appearance" then app.ui:OpenSettings("appearance")
 elseif view == "import" then app.ui:OpenTransfer("import")
 elseif view == "export" then app.ui:OpenTransfer("export")
+elseif view == "details" and page == "sample" then
+    app:Demo()
+    app.ui:Select(app.ui.previewContacts[2])
 elseif view == "details" then app.ui:Select(app.engine:Snapshot()[1])
 elseif view == "explanation" then
     app.ui:Select(app.engine:Snapshot()[1])

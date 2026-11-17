@@ -602,6 +602,14 @@ function UI.New(app)
     local alerts = CreateFrame("Frame", nil, content); self.pages.alerts = alerts; alerts:SetAllPoints()
     y = section(alerts, "alerts", 0, "classesTip")
     y = classSelector(alerts, "alerts", y)
+    y = section(alerts, "alertRange", y - 8)
+    y = check(alerts, "rangeFilter", "range.enabled", y, "rangeFilterTip")
+    local firstRangeControl = #self.controls + 1
+    y = slider(alerts, "rangeYards", "range.yards", y - 6, 5, 100, 5)
+    y = choice(alerts, "rangePolicy", "range.policy", { { "possible", "possible" }, { "confirmed", "confirmed" } }, y)
+    y = check(alerts, "unknownRange", "range.unknown", y)
+    for index = firstRangeControl, #self.controls do self.controls[index].requiresRange = true end
+    y = section(alerts, "alertOutput", y - 8)
     for _, entry in ipairs({ { "alertsEnabled", "alerts.enabled" }, { "sound", "alerts.sound" }, { "banner", "alerts.banner" }, { "alertStealth", "alerts.stealth", "alertStealthTip" }, { "alertTargeting", "alerts.targeting", "alertTargetingTip" }, { "watchedOnly", "alerts.watchedOnly", "watchedOnlyTip" }, { "muteOrdinary", "alerts.muteOrdinary", "muteOrdinaryTip" } }) do
         y = check(alerts, entry[1], entry[2], y, entry[3])
     end
@@ -617,10 +625,6 @@ function UI.New(app)
         local listen = localButton(alerts, "previewSound", 150, function() if app.PreviewSound then app:PreviewSound(kind) end end)
         listen:SetPoint("TOPLEFT", 395, rowY - 25)
     end
-    y = check(alerts, "rangeFilter", "range.enabled", y, "rangeFilterTip")
-    y = slider(alerts, "rangeYards", "range.yards", y - 6, 5, 100, 5)
-    y = choice(alerts, "rangePolicy", "range.policy", { { "possible", "possible" }, { "confirmed", "confirmed" } }, y)
-    y = check(alerts, "unknownRange", "range.unknown", y)
     local previewAlert = localButton(alerts, "previewBanner", 200, function() self:PreviewAlert() end)
     previewAlert:SetPoint("TOPLEFT", 0, y - 6)
     local advancedRules = localButton(alerts, "rules", 240, function() if self.OpenRules then self:OpenRules() end end)
@@ -832,8 +836,13 @@ function UI.New(app)
 
     function self:RefreshControls()
         self.refreshingControls = true
+        local profile = self:Profile()
         for _, entry in ipairs(self.localized) do entry.text:SetText(self:T(entry.key)) end
         for _, control in ipairs(self.controls) do
+            if control.requiresRange then
+                control.frame:SetEnabled(profile.range.enabled)
+                control.frame:SetAlpha(profile.range.enabled and 1 or 0.5)
+            end
             if control.kind == "check" then
                 control.frame:SetChecked(pathGet(self:Profile(), control.path) == true)
                 if control.path == "display.minimap" then control.frame:SetEnabled(self.launcher ~= nil) end
@@ -1235,6 +1244,7 @@ function UI.New(app)
 
     function self:Preview(contacts, decision)
         self:ClosePreviewDetails()
+        self.settings:Hide()
         self.previewContacts = RG.Util.Copy(contacts or {
             { id = "preview-rogue", name = self:T("demoRogue"), class = "ROGUE", visible = true, lastSeen = self:Now(), rangeMin = 10, rangeMax = 20 },
             { id = "preview-hunter", name = self:T("demoHunter"), class = "HUNTER", visible = true, lastSeen = self:Now(), rangeMin = 20, rangeMax = 40 },
@@ -1288,7 +1298,7 @@ function UI.New(app)
             detail.info = font(detail, 13, C.text)
             detail.info:SetPoint("TOPLEFT", 18, -57); detail.info:SetWidth(432)
             detail.notice = font(detail, 11, C.muted)
-            detail.notice:SetPoint("TOPLEFT", 18, -185); detail.notice:SetWidth(432)
+            detail.notice:SetWidth(432)
             local function selectedList()
                 local contact = self.selected
                 local entry, identity = listEntry(contact)
@@ -1322,8 +1332,7 @@ function UI.New(app)
             end)
             remove:SetPoint("TOPLEFT", 18, -261)
             detail.removeMembership = remove
-            local why = localButton(detail, "why", 150, function() self:ShowExplanation() end)
-            why:SetPoint("TOPLEFT", 185, -261)
+            detail.why = localButton(detail, "why", 150, function() self:ShowExplanation() end)
             local noteTitle = label(detail, "note", 13)
             noteTitle:SetPoint("TOPLEFT", 18, -305)
             detail.note = CreateFrame("EditBox", nil, detail, "InputBoxTemplate")
@@ -1394,6 +1403,15 @@ function UI.New(app)
         local detail, contact = self.detailsFrame, self.selected
         if not contact then detail:Hide() return end
         local profile = self:Profile()
+        local preview = contact.preview == true
+        if detail.previewLayout ~= preview then
+            detail.previewLayout = preview
+            detail:SetHeight(preview and 245 or 555)
+            detail.notice:ClearAllPoints()
+            detail.notice:SetPoint("TOPLEFT", 18, preview and -145 or -185)
+            detail.why:ClearAllPoints()
+            detail.why:SetPoint("TOPLEFT", preview and 18 or 185, preview and -197 or -261)
+        end
         local entry, identity = listEntry(contact)
         if detail.listIdentity ~= identity then
             detail.listIdentity = identity
@@ -1411,6 +1429,10 @@ function UI.New(app)
         end
         local stateText = contact.savedOnly and self:T("noCurrentEvidence") or M.State(state, self:Now(), profile.locale)
         local rangeDetail, range = M.RangeDetails(state, profile.locale)
+        if preview then
+            range = M.Range(contact, profile.locale)
+            rangeDetail = self:F("demoRange", range)
+        end
         lines[#lines + 1] = rangeDetail and stateText == range and rangeDetail or stateText
         if rangeDetail and stateText ~= range then lines[#lines + 1] = rangeDetail end
         if entry then lines[#lines + 1] = self:F("currentList", self:T(LIST_KIND_KEYS[entry.kind] or "unlisted")) end
@@ -1433,18 +1455,21 @@ function UI.New(app)
             local pending = self.noteDraft and self.noteDraft.identity == identity and self.noteDraft.text
             detail.note:SetText(pending or M.Text(entry and entry.note, "", 512))
         end
-        detail.noteTitle:SetShown(not profile.display.streamer)
-        detail.note:SetShown(not profile.display.streamer)
+        local showNote = not preview and not profile.display.streamer
+        detail.noteTitle:SetShown(showNote)
+        detail.note:SetShown(showNote)
         if detail.note.SetEnabled then detail.note:SetEnabled(identity ~= nil) end
-        detail.saveNote:SetShown(not profile.display.streamer)
+        detail.saveNote:SetShown(showNote)
         detail.saveNote:SetEnabled(identity ~= nil)
-        detail.privateNote:SetShown(profile.display.streamer)
-        detail.identityHelp:SetShown(identity == nil)
-        detail.identityHelp:SetText(self:T(contact.preview and "noPreviewTarget" or contact.savedOnly and "legacyIdentity" or "identityUnknown"))
+        detail.privateNote:SetShown(not preview and profile.display.streamer)
+        detail.identityHelp:SetShown(not preview and identity == nil)
+        detail.identityHelp:SetText(self:T(contact.savedOnly and "legacyIdentity" or "identityUnknown"))
         for kind, buttonFrame in pairs(detail.listActions) do
+            buttonFrame:SetShown(not preview)
             buttonFrame:SetEnabled(identity ~= nil and (not entry or entry.kind ~= kind))
             buttonFrame.bg:SetColorTexture(unpack(entry and entry.kind == kind and { 0.10, 0.22, 0.28, 1 } or C.panel))
         end
+        detail.removeMembership:SetShown(not preview)
         detail.removeMembership:SetEnabled(identity ~= nil and entry ~= nil and entry.kind ~= "note")
         detail.removeSaved:SetShown(contact.savedOnly == true and identity ~= nil and entry ~= nil)
         local confirming = self.removeEntryIdentity == identity and (self.removeEntryAt or 0) >= self:Now()
@@ -1453,7 +1478,7 @@ function UI.New(app)
         local remaining = math.max(0, M.Number(contact.snoozedUntil, 0) - self:Now())
         detail.snooze:SetShown(canSnooze)
         detail.snooze.label:SetText(self:T(remaining > 0 and "resumeContact" or "snoozeContact"))
-        self:FitWindow(detail, 470, 555, 1)
+        self:FitWindow(detail, 470, detail:GetHeight(), 1)
         detail:Show()
     end
 
