@@ -251,7 +251,7 @@ function DB.New(raw)
     return self
 end
 
-function DB:GetProfile() return self.root.profiles[self.root.activeProfile] end
+function DB:GetProfile(name) return self.root.profiles[name or self.root.activeProfile] end
 function DB:GetActiveProfileName() return self.root.activeProfile end
 function DB:ListProfiles() return U.SortedKeys(self.root.profiles) end
 function DB:GetList() return self.root.lists end

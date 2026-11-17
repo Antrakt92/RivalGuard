@@ -28,6 +28,81 @@ function D.Attach(ui, app, H)
         frame:Show()
     end
 
+    function self:ProfilePickerIsCurrent(frame)
+        return frame:IsShown() and frame.owner == ui:Profile() and not ui.destroyed
+    end
+
+    function self:OpenProfilePicker()
+        local frame = ui.profilePicker
+        if not frame then
+            frame = dialog("RivalGuardProfilePicker", "profilePicker", 408, 404)
+            ui.profilePicker = frame
+            frame:SetFrameStrata("FULLSCREEN_DIALOG")
+            frame.rows = {}
+            frame:SetScript("OnHide", function()
+                frame.owner, frame.profiles = nil, nil
+                for _, row in ipairs(frame.rows) do row.profileName, row.profile = nil, nil end
+                H.hideTooltip()
+            end)
+            for i = 1, 8 do
+                local row
+                row = H.button(frame, "", 372, function()
+                    if not self:ProfilePickerIsCurrent(frame) or not row.profileName
+                        or app.db:GetProfile(row.profileName) ~= row.profile then frame:Hide(); return end
+                    local name = row.profileName
+                    frame:Hide()
+                    app:UseProfile(name)
+                end)
+                row:SetPoint("TOPLEFT", 18, -55 - (i - 1) * 35)
+                if row.label.SetMaxLines then row.label:SetMaxLines(1) end
+                row:SetScript("OnEnter", function() if row.profileName then H.tooltip(row, row.profileName) end end)
+                row:SetScript("OnLeave", H.hideTooltip)
+                frame.rows[i] = row
+            end
+            frame.manage = H.localButton(frame, "manageProfiles", 154, function() frame:Hide(); ui:OpenSettings("profiles") end)
+            frame.manage:SetPoint("BOTTOMLEFT", 18, 18)
+            frame.previous = H.localButton(frame, "previous", 91, function() self:PageProfilePicker(-1) end)
+            frame.next = H.localButton(frame, "next", 91, function() self:PageProfilePicker(1) end)
+            frame.next:SetPoint("BOTTOMRIGHT", -18, 18)
+            frame.previous:SetPoint("RIGHT", frame.next, "LEFT", -12, 0)
+        end
+        frame.owner, frame.profiles, frame.offset = ui:Profile(), {}, 0
+        for _, name in ipairs(app.db:ListProfiles()) do
+            frame.profiles[#frame.profiles + 1] = { name = name, value = app.db:GetProfile(name) }
+        end
+        self:PaintProfilePicker(frame)
+        showDialog(frame)
+    end
+
+    function self:PageProfilePicker(direction)
+        local frame = ui.profilePicker
+        if not self:ProfilePickerIsCurrent(frame) then frame:Hide(); return end
+        frame.offset = frame.offset + direction * #frame.rows
+        self:PaintProfilePicker(frame)
+        showDialog(frame)
+    end
+
+    function self:PaintProfilePicker(frame)
+        local count, pageSize = #frame.profiles, #frame.rows
+        local lastPage = math.floor(math.max(0, count - 1) / pageSize) * pageSize
+        frame.offset = math.max(0, math.min(frame.offset, lastPage))
+        local active = app.db:GetActiveProfileName()
+        for i, row in ipairs(frame.rows) do
+            local entry = frame.profiles[frame.offset + i]
+            row.profileName, row.profile = entry and entry.name, entry and entry.value
+            row:SetShown(entry ~= nil)
+            if entry then
+                local selected = entry.name == active
+                row.label:SetText(selected and ui:F("currentProfileChoice", entry.name) or entry.name)
+                row.bg:SetColorTexture(unpack(selected and { 0.10, 0.22, 0.28, 1 } or H.C.panel))
+                row:SetEnabled(not selected)
+            end
+        end
+        frame.previous:SetShown(lastPage > 0); frame.next:SetShown(lastPage > 0)
+        frame.previous:SetEnabled(frame.offset > 0); frame.next:SetEnabled(frame.offset < lastPage)
+        frame:SetHeight(116 + 35 * math.min(pageSize, count - frame.offset))
+    end
+
     function self:CurrentSoundPicker()
         local picker = ui.soundPicker
         local selection = self.soundSelection
@@ -623,6 +698,7 @@ function D.Attach(ui, app, H)
 
     function self:Refresh()
         self:CurrentSoundPicker()
+        if ui.profilePicker and ui.profilePicker:IsShown() and not self:ProfilePickerIsCurrent(ui.profilePicker) then ui.profilePicker:Hide() end
         for _, frame in ipairs(dialogs) do
             if frame:IsShown() then ui:FitWindow(frame, frame:GetWidth(), frame:GetHeight(), 1) end
         end
@@ -700,6 +776,7 @@ function D.Attach(ui, app, H)
     end
 
     function ui:OpenRules() self.dialogs:OpenRules() end
+    function ui:OpenProfilePicker() self.dialogs:OpenProfilePicker() end
     function ui:OpenSoundPicker(...) self.dialogs:OpenSoundPicker(...) end
     function ui:OpenTransfer(mode) self.dialogs:OpenTransfer(mode) end
     function ui:ShowGuide(replay) return self.dialogs:ShowGuide(replay) end

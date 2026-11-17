@@ -10,6 +10,12 @@ local function setup(raw, configure)
     app.engine = RG.Engine.New({ clock = state.clock.Now, profile = app.db:GetProfile() })
     function app:OnSettingsChanged() self.changes = self.changes + 1; self.engine:SetProfile(self.db:GetProfile()) end
     app.ProfileChanged = app.OnSettingsChanged
+    function app:UseProfile(name)
+        if not self.db:SetProfile(name) then return false end
+        self:ProfileChanged()
+        self.ui:Refresh()
+        return true
+    end
     function app:ToggleMute() self.db:GetProfile().alerts.sound = not self.db:GetProfile().alerts.sound; self:OnSettingsChanged() end
     function app:Demo() self.demos = self.demos + 1 end
     function app:Notify(text) state.messages[#state.messages + 1] = text end

@@ -450,9 +450,16 @@ function UI.New(app)
     end)
     local title = label(header, "addon", 15, C.accent)
     title:SetPoint("LEFT", 12, 0); title:SetJustifyV("MIDDLE")
-    local settingsButton = button(main, "…", 30, function() self:OpenSettings() end)
+    local settingsButton = button(main, "…", 30)
+    self.nearbySettingsButton = settingsButton
+    settingsButton:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    settingsButton:SetScript("OnClick", function(_, mouseButton)
+        if mouseButton == "RightButton" then self:OpenProfilePicker() else self:OpenSettings() end
+    end)
     settingsButton:SetPoint("TOPRIGHT", -3, -2); settingsButton:SetHeight(25)
-    settingsButton:SetScript("OnEnter", function() tooltip(settingsButton, self:T("settings"), self:T("listHint")) end)
+    settingsButton:SetScript("OnEnter", function()
+        tooltip(settingsButton, self:F("currentProfileChoice", app.db:GetActiveProfileName()), self:T("profilePickerTip"))
+    end)
     settingsButton:SetScript("OnLeave", hideTooltip)
     local statusText = font(main, 11, C.muted)
     statusText:SetPoint("TOPLEFT", 12, -31); statusText:SetWidth(324)
@@ -873,10 +880,7 @@ function UI.New(app)
         row:SetPoint("TOPLEFT", 0, firstProfileRowY - (i - 1) * profileRowSpacing); row:SetSize(550, 34)
         row.nameText = font(row, 13); row.nameText:SetPoint("LEFT", 0, 0); row.nameText:SetWidth(300); row.nameText:SetJustifyV("MIDDLE")
         row.use = localButton(row, "useProfile", 95, function()
-            if not row.profileName then return end
-            local use = app.db.UseProfile or app.db.SetProfile
-            local ok = use and use(app.db, row.profileName)
-            if ok then app:ProfileChanged(); self:Refresh(); notify("profileUsed") else notify("profileError") end
+            if row.profileName then app:UseProfile(row.profileName) end
         end)
         row.use:SetPoint("RIGHT", -105, 0)
         row.delete = localButton(row, "deleteProfile", 95, function()

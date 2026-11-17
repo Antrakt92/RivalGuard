@@ -44,7 +44,8 @@ current profile would handle that new sighting in the open world.
   when a targeting warning fires.
 - **Profiles:** choose a preset, create a profile, then select **Use** to apply
   it. Imports require a preview and a new name. They do not include personal
-  lists or history.
+  lists or history. Right-click **…** on Nearby or use `/rg profile` to switch
+  quickly. `/rg profile NAME` activates an exact saved profile name.
 - **Journal:** search recent encounters or open your watch, avoid and ignore
   lists. Retain all eligible encounters, listed players or observed threats.
 - **Support:** see available sensors, why alerts are quiet here and which

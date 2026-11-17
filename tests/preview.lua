@@ -30,7 +30,11 @@ for index, class in ipairs(classes) do
 end
 app.ui:Refresh()
 if view == "settings" then
-    if page == "alerts-context" or page == "alerts-muted" then
+    if page == "profile-picker" then
+        assert(app.db:CreateProfile(RG.Locale.Get("quiet", locale), "quiet"))
+        assert(app.db:CreateProfile(RG.Locale.Get("farming", locale), "farming"))
+        app.ui.nearbySettingsButton:Click("RightButton")
+    elseif page == "alerts-context" or page == "alerts-muted" then
         local name = RG.Locale.Get("battleground", locale)
         local profile = assert(app.db:CreateProfile(name, "battleground"))
         profile.context.world = page == "alerts-muted"

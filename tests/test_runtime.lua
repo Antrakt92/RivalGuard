@@ -1936,6 +1936,143 @@ H.Test("slash pause resume mute and settings operate without hidden side effects
     H.Equal(#app.engine:Snapshot(), 0)
 end)
 
+H.Test("Nearby right-click opens the profile chooser and existing Settings and minimap clicks still work", function()
+    local state, _, app = setup(nil, function(mock)
+        mock.api.CreateFrame("Frame", "Minimap", mock.api.UIParent):SetSize(160, 160)
+    end)
+    local ui = app.ui
+    local settingsButton
+    for _, child in ipairs(ui.frame.children) do
+        if child.label and child.label:GetText() == "…" then settingsButton = child; break end
+    end
+    local ellipsis = assert(settingsButton)
+    ellipsis:Click("RightButton")
+    local picker = assert(ui.profilePicker, "Nearby right click did not open the profile chooser")
+    H.Equal(ui.nearbySettingsButton, ellipsis)
+    H.Equal(ellipsis.clickButtons[1], "LeftButtonUp")
+    H.Equal(ellipsis.clickButtons[2], "RightButtonUp")
+    H.True(picker:IsShown())
+    H.False(ui.settings:IsShown())
+
+    picker.manage:Click()
+    H.False(picker:IsShown())
+    H.True(ui.settings:IsShown()); H.Equal(ui.currentPage, "profiles")
+    ui.settings:Hide()
+    ellipsis:Click("LeftButton")
+    H.True(ui.settings:IsShown()); H.False(picker:IsShown())
+    ui.settings:Hide()
+    local launcher = assert(ui.launcher).frame
+    launcher:Click("RightButton")
+    H.True(ui.settings:IsShown()); H.False(picker:IsShown())
+    ui.settings:Hide()
+    H.True(ui.frame:IsShown())
+    launcher:Click("LeftButton"); H.False(ui.frame:IsShown())
+    launcher:Click("LeftButton"); H.True(ui.frame:IsShown())
+    state.api.SlashCmdList.RIVALGUARD("profile")
+    H.True(picker:IsShown())
+end)
+
+H.Test("slash profile selects the exact Unicode name, rechecks queued alerts, and persists", function()
+    local state, _, app = setup()
+    local db, ui = app.db, app.ui
+    local original = db:GetProfile()
+    local name = "Боевой профиль"
+    local hunter = assert(db:CreateProfile(name))
+    hunter.alerts.classes = { HUNTER = true }
+    seeSoundRuleRival(state, 1, "ROGUE")
+    local slash = state.api.SlashCmdList.RIVALGUARD
+    slash("profile боевой профиль")
+    H.Equal(db:GetActiveProfileName(), "Default")
+    H.True(ui.frame:IsShown())
+    H.True(state.messages[#state.messages]:find(ui:T("profileMissing"), 1, true) ~= nil)
+    slash("profile " .. name)
+    H.Equal(db:GetActiveProfileName(), name)
+    H.Equal(db:GetProfile(), hunter)
+    H.Equal(app.engine.profile, hunter)
+    H.True(state.messages[#state.messages]:find(ui:F("profileUsed", name), 1, true) ~= nil)
+    H.Nil(next(original.alerts.classes))
+    H.Equal(app.engine.counters.alerts, 0)
+    seeSoundRuleRival(state, 2, "HUNTER")
+    state:Advance(1.5)
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(ui.activeBanner.name, "Sound rival 2")
+    H.Equal(#state.sounds, 1)
+
+    state:Fire("PLAYER_LOGOUT")
+    local _, _, reloaded = setup(state.api.RivalGuardDB)
+    H.Equal(reloaded.db:GetActiveProfileName(), name)
+    H.True(reloaded.db:GetProfile().alerts.classes.HUNTER)
+    H.Nil(reloaded.db:GetProfile().alerts.classes.ROGUE)
+end)
+
+local function quickProfileRow(picker, profileName)
+    for _, row in ipairs(picker.rows) do
+        if row:IsShown() and row.profileName == profileName then return row end
+    end
+end
+
+H.Test("the profile chooser paginates and stale names never activate replacement profiles", function()
+    local state, _, app = setup()
+    local db, ui = app.db, app.ui
+    for index = 1, 11 do assert(db:CreateProfile(string.format("Field %02d", index))) end
+    local slash = state.api.SlashCmdList.RIVALGUARD
+    slash("profile")
+    local picker = assert(ui.profilePicker)
+    H.True(picker:IsShown())
+    H.Equal(#picker.rows, 8)
+    local current = assert(quickProfileRow(picker, "Default"))
+    H.False(current.enabled)
+    H.Equal(current.label:GetText(), ui:F("currentProfileChoice", "Default"))
+    H.True(picker.next.enabled); H.False(picker.previous.enabled)
+    H.True(quickProfileRow(picker, "Field 07") ~= nil)
+    H.Nil(quickProfileRow(picker, "Field 08"))
+    picker.next:Click()
+    H.True(picker.previous.enabled); H.False(picker.next.enabled)
+    H.True(quickProfileRow(picker, "Field 11") ~= nil)
+    H.Nil(quickProfileRow(picker, "Default"))
+    picker.previous:Click()
+    H.False(assert(quickProfileRow(picker, "Default")).enabled)
+    picker.next:Click()
+
+    local replaced = assert(quickProfileRow(picker, "Field 10"))
+    assert(db:DeleteProfile("Field 10"))
+    assert(db:CreateProfile("Field 10", "quiet"))
+    replaced:Click()
+    H.Equal(db:GetActiveProfileName(), "Default")
+    H.False(picker:IsShown())
+    slash("profile")
+    if not quickProfileRow(picker, "Field 10") then picker.next:Click() end
+    local removed = assert(quickProfileRow(picker, "Field 11"))
+    assert(db:DeleteProfile("Field 11"))
+    assert(db:CreateProfile("Field 12"))
+    removed:Click()
+    H.Equal(db:GetActiveProfileName(), "Default")
+    H.False(picker:IsShown())
+
+    slash("profile")
+    if not quickProfileRow(picker, "Field 10") then picker.next:Click() end
+    assert(quickProfileRow(picker, "Field 10")):Click()
+    H.Equal(db:GetActiveProfileName(), "Field 10")
+    H.False(picker:IsShown())
+    H.False(db:GetProfile().alerts.sound)
+
+    slash("profile")
+    slash("profile Field 01")
+    H.Equal(db:GetActiveProfileName(), "Field 01")
+    H.False(picker:IsShown())
+    slash("profile")
+    if not quickProfileRow(picker, "Field 01") then picker.previous:Click() end
+    H.False(assert(quickProfileRow(picker, "Field 01")).enabled)
+
+    picker.manage:Click()
+    for _, row in ipairs(ui.profileRows) do
+        if row.profileName == "Field 02" then row.use:Click(); break end
+    end
+    H.Equal(db:GetActiveProfileName(), "Field 02")
+    H.Equal(app.engine.profile, db:GetProfile())
+    H.True(state.messages[#state.messages]:find(ui:F("profileUsed", "Field 02"), 1, true) ~= nil)
+end)
+
 H.Test("pause control resumes immediately and expires in an otherwise idle world", function()
     local state, _, app = setup()
     local slash = state.api.SlashCmdList.RIVALGUARD

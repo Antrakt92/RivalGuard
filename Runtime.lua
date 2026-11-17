@@ -35,6 +35,19 @@ function App:OnSettingsChanged()
     self:ProfileChanged()
 end
 
+function App:UseProfile(name)
+    name = RG.Util.Text(name, 64)
+    if name == self.db:GetActiveProfileName() then return true end
+    local profile = name and self.db:SetProfile(name)
+    if not profile then
+        self:Notify(RG.Locale.Get("profileMissing", self.db:GetProfile().locale))
+        return false
+    end
+    self:ProfileChanged()
+    self:Notify(RG.Locale.Format("profileUsed", profile.locale, name))
+    return true
+end
+
 function App:ProfileChanged()
     local profile = self.db:GetProfile()
     local config = alertConfig(profile)
@@ -355,6 +368,8 @@ function App:Command(text)
     local command, argument = text:match("^(%S+)%s*(.-)$")
     command = command and command:lower() or ""
     if command == "settings" or command == "config" then self.ui:OpenSettings()
+    elseif command == "profile" then
+        if argument == "" then self.ui:OpenProfilePicker() else self:UseProfile(argument) end
     elseif command == "demo" or command == "test" then self:Demo()
     elseif command == "pause" then self.engine:Pause(RG.Util.Clamp(tonumber(argument), 1, 1440, 10) * 60)
     elseif command == "resume" then self.engine:Resume()
@@ -370,7 +385,7 @@ function App:Command(text)
         end
         if not ok then self:Notify(RG.Locale.Get("identityUnknown", self.db:GetProfile().locale)) end
     elseif command == "help" then
-        self:Notify("/rg settings, demo, pause [minutes], resume, mute, clear, watch, ignore, report")
+        self:Notify("/rg settings, profile [name], demo, pause [minutes], resume, mute, clear, watch, ignore, report")
     else self.ui:Toggle() end
     self.dirty = true
 end
