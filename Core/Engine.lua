@@ -238,8 +238,9 @@ function E:Reconcile(contact, now, clearOlderTargeting)
 end
 
 function E:Explain(contact, event, now)
-    local view = contact.tokens and self:View(contact, now) or contact
-    return Rules.Evaluate(self.profile, view, event or "sighting", self.context, self:ListEntry(contact))
+    local rangeFresh
+    if contact.tokens then rangeFresh = freshRange(contact, now or self:Now()) end
+    return Rules.Evaluate(self.profile, contact, event or "sighting", self.context, self:ListEntry(contact), rangeFresh)
 end
 
 function E:ExplainView(id, event)
@@ -795,6 +796,14 @@ function E:EmitOrdinary(group, now)
     self:Emit({ kind = "wave", count = #group, classes = classes, priority = 35, sound = sound, banner = banner, reason = "multiple_sightings" }, now)
 end
 
+local function usesRangeRules(profile)
+    if profile.range.enabled then return true end
+    for _, rule in ipairs(profile.rules) do
+        if rule.enabled and rule.range and rule.range > 0 then return true end
+    end
+    return false
+end
+
 function E:Tick()
     local now = self:Now()
     local resumed = self.pausedUntil and now >= self.pausedUntil
@@ -802,13 +811,15 @@ function E:Tick()
     self:RevalidateNamePending(now)
     local ready, waiting = {}, {}
     local waveWindow = self.profile.alerts.waveWindow
+    -- A newer or expired distance can change priority before wave grouping.
+    local refreshRange = #self.pending > 0 and usesRangeRules(self.profile)
     local firstOrdinaryAt
     -- Pending entries are appended in observation order. The first arrival
     -- sets the deadline for its group, including arrivals close to that deadline.
     for _, item in ipairs(self.pending) do
         local age = now - item.at
-        if age > MAX_PENDING_AGE then
-            local contact = self.contacts[item.id]
+        local contact = self.contacts[item.id]
+        if age > MAX_PENDING_AGE or (refreshRange and not refreshPendingDecision(self, item, contact, now)) then
             if contact and item.event == "sighting" then contact.arrivalQueued = false end
         else
             if ordinaryAlert(item.decision) then

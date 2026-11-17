@@ -8,8 +8,9 @@ function R.ClassMatches(classes, class, allowUnknown)
     return classes[class] == true
 end
 
-function R.RangeMatches(config, contact)
+function R.RangeMatches(config, contact, rangeFresh)
     if not config.enabled then return true end
+    if rangeFresh == false then return config.unknown, "range_unknown" end
     local lower, upper = contact.rangeMin, contact.rangeMax
     if contact.rangeEvidence == "conflict" then return config.unknown, "range_conflict" end
     if not U.IsFinite(lower) and not U.IsFinite(upper) then return config.unknown, "range_unknown" end
@@ -39,7 +40,7 @@ end
 
 local PRIORITY = { sighting = 20, returning = 30, watch = 90, targeting = 70, stealth = 100 }
 
-function R.Evaluate(profile, contact, event, context, listEntry)
+function R.Evaluate(profile, contact, event, context, listEntry, rangeFresh)
     local identified = event == "identified"
     if identified then event = "sighting" end
     if not profile.enabled or not profile.alerts.enabled then return nil, "disabled" end
@@ -48,7 +49,7 @@ function R.Evaluate(profile, contact, event, context, listEntry)
     if contact.dead == true then return nil, "dead" end
     local allowed, reason = R.ContextMatches(profile.context, context or {})
     if not allowed then return nil, reason end
-    local inRange, rangeReason = R.RangeMatches(profile.range, contact)
+    local inRange, rangeReason = R.RangeMatches(profile.range, contact, rangeFresh)
     if not inRange then return nil, rangeReason end
     local watched = listEntry and (listEntry.kind == "watch" or listEntry.kind == "avoid")
     local kind = watched and (event == "sighting" or event == "returning") and "watch" or event
@@ -62,7 +63,8 @@ function R.Evaluate(profile, contact, event, context, listEntry)
             and (not rule.context or rule.context == "any" or rule.context == ((context and context.kind) or "world"))
             and (not rule.list or rule.list == "any" or (rule.list == "listed" and watched) or (rule.list == "unlisted" and not watched))
             and R.ClassMatches(rule.classes, contact.class, profile.alerts.unknownClass) then
-            local rangeMatches = not rule.range or rule.range == 0 or R.RangeMatches({ enabled = true, yards = rule.range, policy = rule.rangePolicy, unknown = rule.rangeUnknown }, contact)
+            local rangeMatches = not rule.range or rule.range == 0
+                or R.RangeMatches({ enabled = true, yards = rule.range, policy = rule.rangePolicy, unknown = rule.rangeUnknown }, contact, rangeFresh)
             if rangeMatches and (not matched or rule.priority > matched.priority) then matched = rule end
         end
     end

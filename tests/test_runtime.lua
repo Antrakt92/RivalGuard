@@ -798,6 +798,129 @@ H.Test("a cached spell sample does not conflict with a later exact measurement",
     H.Equal(app:Explain(contact).reason, "range_outside")
 end)
 
+local function pendingRangeFixture(configure)
+    local distances, reads = {}, 0
+    local state, RG, app = setup(nil, function(mock)
+        mock.api.UnitDistanceSquared = function(token)
+            local distance = distances[token]
+            if distance then reads = reads + 1; return distance * distance, true end
+        end
+    end)
+    if configure then configure(app.db:GetProfile()); app:OnSettingsChanged() end
+    local function see(index, distance)
+        local token = "nameplate" .. index
+        distances[token] = distance
+        state:Unit(token, { guid = "Player-PendingRange" .. index, name = "Range rival " .. index,
+            class = "ROGUE", hostile = true, isPlayer = true })
+        state:Fire("NAME_PLATE_UNIT_ADDED", token)
+    end
+    local function move(index, distance)
+        local token = "nameplate" .. index
+        distances[token] = distance
+        state:Fire("UNIT_FLAGS", token)
+    end
+    return state, app, see, move, RG, function() return reads end
+end
+
+local function urgentRangeRule(profile, allowUnknown)
+    profile.rules = {{ name = "Urgent within 35", enabled = true, event = "sighting", action = "alert",
+        priority = 80, classes = {}, cooldown = 0, sound = true, banner = true,
+        range = 35, rangePolicy = "confirmed", rangeUnknown = allowUnknown }}
+end
+
+for _, movesNear in ipairs({ false, true }) do
+    H.Test("a new exact range " .. (movesNear and "expedites" or "demotes") .. " a queued sighting", function()
+        local state, app, see, move = pendingRangeFixture(function(profile) urgentRangeRule(profile, false) end)
+        local initialDistance, newDistance = movesNear and 48 or 21, movesNear and 21 or 48
+        local arrival = state.clock.Now()
+        see(1, initialDistance)
+        local contact = app.engine:Snapshot()[1]
+        H.Equal(contact.rangeMax, initialDistance)
+        state.clock.Advance(0.2)
+        move(1, newDistance)
+        H.Equal(app.engine:Snapshot()[1].rangeMax, newDistance)
+        H.Equal(app.engine.pending[1].at, arrival)
+        state.clock.Advance(0.05)
+        app.engine:Tick()
+        H.Equal(app.engine.counters.alerts, movesNear and 1 or 0)
+        state.clock.Advance(0.6)
+        app.engine:Tick()
+        H.Equal(app.engine.counters.alerts, 1)
+        H.Equal(app.engine.history[1].id, contact.id)
+        H.Equal(app.engine.history[1].reason, movesNear and "custom_rule" or "event_matched")
+    end)
+end
+
+for _, allowUnknown in ipairs({ false, true }) do
+    H.Test("expired range " .. (allowUnknown and "uses the rule's unknown-distance urgency" or "removes unsupported urgency"), function()
+        local state, app, see = pendingRangeFixture(function(profile)
+            urgentRangeRule(profile, allowUnknown)
+            profile.alerts.waveWindow = 3
+        end)
+        see(1, allowUnknown and 48 or 21)
+        local contact = app.engine:Snapshot()[1]
+        H.Equal(contact.rangeEvidence, "exact")
+        state.clock.Advance(2.1)
+        H.Equal(app.engine:Snapshot()[1].rangeEvidence, "unknown")
+        app.engine:Tick()
+        H.Equal(app.engine.counters.alerts, allowUnknown and 1 or 0)
+        state.clock.Advance(1)
+        app.engine:Tick()
+        H.Equal(app.engine.counters.alerts, 1)
+        H.Equal(app.engine.history[1].id, contact.id)
+        H.Equal(app.engine.history[1].reason, allowUnknown and "custom_rule" or "event_matched")
+    end)
+end
+
+H.Test("a queued player now outside strict range does not accelerate a later wave", function()
+    local state, app, see, move = pendingRangeFixture(function(profile)
+        local range = profile.range
+        range.enabled, range.policy, range.yards, range.unknown = true, "confirmed", 35, false
+        profile.alerts.waveThreshold = 2
+    end)
+    see(1, 21)
+    local first = app.engine:Snapshot()[1]
+    state.clock.Advance(0.3)
+    see(2, 21); see(3, 21)
+    state.clock.Advance(0.1)
+    move(1, 48)
+    H.Equal(app:Explain(app.engine:SelectedContact(first.id, first.identity)).reason, "range_outside")
+    state.clock.Advance(0.45)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 0)
+    state.clock.Advance(0.3)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(app.engine.history[1].kind, "wave")
+    H.Equal(app.ui.activeBanner.count, 2)
+end)
+
+H.Test("unchanged exact measurements do not reschedule sightings when no range filter is in use", function()
+    local state, app, see, move, RG, reads = pendingRangeFixture()
+    local arrival = state.clock.Now()
+    local rawEvaluate, evaluations = RG.Rules.Evaluate, 0
+    RG.Rules.Evaluate = function(...)
+        evaluations = evaluations + 1
+        return rawEvaluate(...)
+    end
+    for index = 1, 8 do see(index, 21) end
+    local initial = evaluations
+    for _ = 1, 3 do
+        state.clock.Advance(0.1)
+        for index = 1, 8 do move(index, 21) end
+        app.engine:Tick()
+    end
+    H.Equal(reads(), 32)
+    H.Equal(evaluations, initial)
+    H.Equal(app.engine.counters.alerts, 0)
+    H.Equal(#app.engine.pending, 8)
+    for _, item in ipairs(app.engine.pending) do H.Equal(item.at, arrival) end
+    state.clock.Advance(0.55)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(app.ui.activeBanner.count, 8)
+end)
+
 for _, queued in ipairs({ false, true }) do
     H.Test("targeting banner retires when evidence ends " .. (queued and "in the queue" or "while shown"), function()
         local state, _, app = setup()
