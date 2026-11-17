@@ -188,6 +188,14 @@ function UI.New(app)
     function self:T(key) return RG.Locale.Get(key, self:Profile().locale) end
     function self:F(key, ...) return RG.Locale.Format(key, self:Profile().locale, ...) end
     function self:Now() return app.engine:Now() end
+    function self:AlertBlock() return app.AlertBlock and app:AlertBlock() end
+
+    function self:DetectionKey(status)
+        local state = type(status) == "table" and (status.detectionState or status.state)
+        if not self:Profile().enabled or state == "disabled" then return "disabled" end
+        if state == "limited" then return "limited" end
+        return "active"
+    end
 
     function self:UpdateClasses()
         if self.classAvailability then return end
@@ -798,14 +806,14 @@ function UI.New(app)
     self.supportStatus = font(support, 13, C.text)
     self.supportStatus:SetPoint("TOPLEFT", 0, y); self.supportStatus:SetWidth(550)
     local diagnosticButton = localButton(support, "diagnostics", 260, function() self:ShowDiagnostics() end)
-    diagnosticButton:SetPoint("TOPLEFT", 0, y - 140)
+    diagnosticButton:SetPoint("TOPLEFT", 0, y - 208)
     local supportPreview = localButton(support, "demo", 180, function() app:Demo() end)
     supportPreview:SetPoint("LEFT", diagnosticButton, "RIGHT", 12, 0)
     local guideReplayButton = localButton(support, "guideReplay", 300, function() if self.ShowGuide then self:ShowGuide(true) end end)
-    guideReplayButton:SetPoint("TOPLEFT", 0, y - 180)
+    guideReplayButton:SetPoint("TOPLEFT", 0, y - 248)
     local caution = label(support, "statusHelp", 13, C.muted)
-    caution:SetPoint("TOPLEFT", 0, y - 228); caution:SetWidth(550)
-    support.height = -y + 310
+    caution:SetPoint("TOPLEFT", 0, y - 296); caution:SetWidth(550)
+    support.height = -y + 352
 
     local pageKeys = { "overview", "alerts", "appearance", "profiles", "journal", "support" }
     self.nav = {}
@@ -989,6 +997,9 @@ function UI.New(app)
         self.statusPage = settings:IsShown() and self.currentPage or nil
         local appStatus = self.statusCache or {}
         if type(appStatus) ~= "table" then appStatus = { detail = appStatus } end
+        local detection = self:DetectionKey(appStatus)
+        local supportShown = self.statusPage == "support"
+        local alertBlock = (nearbyShown and not preview or supportShown) and self:AlertBlock()
         if nearbyShown then
             local rows = M.Rows(snapshot, profile, now, preview and self.previewAliases or self.aliases)
             self.renderedCount = #rows
@@ -1001,8 +1012,9 @@ function UI.New(app)
             local visibleCount = 0
             for _, row in ipairs(rows) do if row.visible and row.contact.behindCamera ~= true then visibleCount = visibleCount + 1 end end
             self.visibleCount = preview and 0 or visibleCount
-            local status = preview and self:T("demoLabel") or not profile.enabled and self:T("disabled") or paused and self:T("paused") or self:T(appStatus.state == "limited" and "limited" or "active")
-            statusText:SetText(status .. " · " .. self:F("inViewCount", visibleCount))
+            local status = self:T(preview and "demoLabel" or detection) .. " · " .. self:F("inViewCount", visibleCount)
+            if not preview and detection ~= "disabled" and alertBlock then status = status .. " · " .. self:T("alertsQuiet") end
+            statusText:SetText(status)
             self.pauseButton.label:SetText(self:T(paused and "resume" or "pause"))
             self.muteButton.label:SetText(self:T(profile.alerts.sound and "mute" or "unmute"))
             empty:SetShown(#rows == 0); emptyHelp:SetShown(#rows == 0)
@@ -1055,11 +1067,15 @@ function UI.New(app)
             self:FitWindow(settings, UI.layout.settingsWidth, UI.layout.settingsHeight, 1)
             if self.currentPage == "profiles" and (needsStatus or self.dataPage ~= "profiles") then self:RefreshProfiles() end
             if self.currentPage == "journal" and (needsStatus or self.dataPage ~= "journal") then self:RefreshJournal() end
-            if self.currentPage == "support" then
-                local lines = { M.Text(appStatus.detail, self:T("sensorReady")) }
-                if appStatus.nameplates == false then lines[#lines + 1] = self:T("nameplatesOff") end
-                if appStatus.state == "limited" then lines[#lines + 1] = self:T("sensorLimited") end
-                if appStatus.state == "disabled" then lines[#lines + 1] = self:T("disabled") end
+            if supportShown then
+                local detectionText = detection == "disabled" and "sensorDisabled" or detection == "limited" and "sensorLimited" or "sensorReady"
+                local lines = { M.Text(appStatus.detail, self:T(detectionText)) }
+                if alertBlock then lines[#lines + 1] = RG.Locale.Reason(alertBlock, profile.locale) end
+                if appStatus.nameplates == false then
+                    lines[#lines + 1] = self:T("nameplatesOff")
+                elseif appStatus.nameplates == true and appStatus.alwaysNameplates == false then
+                    lines[#lines + 1] = self:T("nameplatesAutomatic")
+                end
                 if appStatus.writable == false then lines[#lines + 1] = self:T("sessionOnly") end
                 self.supportStatus:SetText(table.concat(lines, "\n\n"))
             end

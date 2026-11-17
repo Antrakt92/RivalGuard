@@ -58,6 +58,10 @@ Decorations must respect forbidden frames and the client's protected-operation
 rules. Adapter checks and simulated tests do not verify in-game appearance or
 protected behavior.
 
+Support reads the enemy-nameplate and always-show preferences independently.
+A clean false for always-show with enemy nameplates enabled identifies WoW's
+automatic mode. Preference reads do not establish current nameplate availability.
+
 ## Reference declarations
 
 The initial API review used these immutable upstream source revisions:
@@ -72,6 +76,8 @@ The initial API review used these immutable upstream source revisions:
 - [Forever shard events](https://github.com/Gethe/wow-ui-source/blob/bebcb6bf309cf41b41bd74f8ca651e6a105b2676/Interface/AddOns/Blizzard_APIDocumentationGenerated/SystemDocumentation.lua)
 - [Forever character names](https://github.com/Gethe/wow-ui-source/blob/bebcb6bf309cf41b41bd74f8ca651e6a105b2676/Interface/AddOns/Blizzard_FrameXMLUtil/NameUtil.lua)
 - [Zone PvP state](https://github.com/Gethe/wow-ui-source/blob/bebcb6bf309cf41b41bd74f8ca651e6a105b2676/Interface/AddOns/Blizzard_APIDocumentationGenerated/PvpInfoDocumentation.lua)
+- [Forever nameplate settings](https://github.com/Gethe/wow-ui-source/blob/bebcb6bf309cf41b41bd74f8ca651e6a105b2676/Interface/AddOns/Blizzard_SettingsDefinitions_Frame/Nameplates.lua)
+- [Retail nameplate settings](https://github.com/Gethe/wow-ui-source/blob/297d7aaaa736f346b3e036f38ee088eaf7f8c07f/Interface/AddOns/Blizzard_SettingsDefinitions_Frame/Nameplates.lua)
 
 Future client builds require renewed compatibility checks. Function declarations
 describe contracts but do not establish availability in every game context.

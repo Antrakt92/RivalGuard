@@ -67,17 +67,37 @@ function App:PreviewSound(kind)
     return self.audio and self.audio:Play(kind or "sighting", true)
 end
 
+function App:AlertBlock()
+    local profile = self.db:GetProfile()
+    local alerts = profile.alerts
+    if not profile.enabled or not alerts.enabled then return "disabled" end
+    if self.engine.pausedUntil and self.engine.pausedUntil > self.engine:Now() then return "paused" end
+    local allowed, reason = RG.Rules.ContextMatches(profile.context, self.engine.context)
+    if not allowed then return reason end
+    if alerts.banner then return nil end
+    if alerts.sound then
+        for _, sound in pairs(alerts.sounds) do
+            if sound ~= "none" then return nil end
+        end
+    end
+    return "outputs_disabled"
+end
+
 function App:Status()
     local profile = self.db:GetProfile()
     local cvars = self.api.C_CVar
     local read = type(cvars) == "table" and cvars.GetCVarBool
     if type(read) ~= "function" then read = self.api.GetCVarBool end
     local plates = self.client:Boolean(self.client:Safe(read, "nameplateShowEnemies"))
-    local state = "active"
-    if not profile.enabled then state = "disabled"
-    elseif self.engine.pausedUntil and self.engine.pausedUntil > self.engine:Now() then state = "paused"
-    elseif plates == false or not self.client:Capabilities().nameplates or (self.sensors and not self.sensors.running) then state = "limited" end
-    return { state = state, nameplates = plates, capabilities = self.client:Capabilities(), context = self.client:Context(),
+    local alwaysPlates = self.client:Boolean(self.client:Safe(read, "nameplateShowAll"))
+    local capabilities = self.client:Capabilities()
+    local detectionState = "active"
+    if not profile.enabled then detectionState = "disabled"
+    elseif plates == false or not capabilities.nameplates or (self.sensors and not self.sensors.running) then detectionState = "limited" end
+    local state = detectionState
+    if profile.enabled and self.engine.pausedUntil and self.engine.pausedUntil > self.engine:Now() then state = "paused" end
+    return { state = state, detectionState = detectionState, nameplates = plates, alwaysNameplates = alwaysPlates,
+        capabilities = capabilities, context = self.client:Context(),
         contacts = RG.Util.Count(self.engine.contacts), errors = self.diagnostics.counts.errors or 0,
         writable = self.db.writable }
 end

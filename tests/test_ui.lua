@@ -49,6 +49,43 @@ H.Test("actual UI initializes through strict frame methods and accessible contro
     H.Equal(#state.blocked, 0)
 end)
 
+H.Test("detection and alert status stay separate with guarded automatic-nameplate guidance", function()
+    for _, locale in ipairs({ "enUS", "ruRU" }) do
+        local state, RG, app, ui = setup(nil, function(fixture) minimap(fixture) end)
+        app.db:GetProfile().locale = locale
+        local status = { state = "paused", detectionState = "limited", nameplates = true, alwaysNameplates = false }
+        local block = "paused"
+        function app:Status() return status end
+        function app:AlertBlock() return block end
+        app.engine:Observe({ token = "target", guid = "Player-Status", name = "Example", class = "ROGUE", hostile = true, isPlayer = true, source = "target" })
+        ui:OpenSettings("support")
+        local reason = RG.Locale.Reason(block, locale)
+        local hint = ui:T("nameplatesAutomatic")
+        local text = ui.supportStatus:GetText()
+        H.True(text:find(ui:T("sensorLimited"), 1, true) ~= nil)
+        H.True(text:find(reason, 1, true) ~= nil)
+        H.True(text:find(hint, 1, true) ~= nil)
+        H.Equal(ui.statusText:GetText(), ui:T("limited") .. " · " .. ui:F("inViewCount", 1) .. " · " .. ui:T("alertsQuiet"))
+
+        local launcher = assert(ui.launcher).frame
+        launcher.scripts.OnEnter(launcher)
+        H.True(state.api.GameTooltip:GetText():find(ui:T("limited"), 1, true) ~= nil)
+        H.True(state.api.GameTooltip.lines[1]:find(reason, 1, true) ~= nil)
+        H.True(state.api.GameTooltip.lines[1]:find(ui:F("inViewCount", 1), 1, true) ~= nil)
+
+        status.alwaysNameplates = nil
+        block = nil
+        ui:Refresh()
+        H.False(ui.supportStatus:GetText():find(hint, 1, true) ~= nil)
+        H.False(ui.supportStatus:GetText():find(reason, 1, true) ~= nil)
+        H.Equal(ui.statusText:GetText(), ui:T("limited") .. " · " .. ui:F("inViewCount", 1))
+        status.nameplates, status.alwaysNameplates = false, false
+        ui:Refresh()
+        H.True(ui.supportStatus:GetText():find(ui:T("nameplatesOff"), 1, true) ~= nil)
+        H.False(ui.supportStatus:GetText():find(hint, 1, true) ~= nil)
+    end
+end)
+
 H.Test("quick class chips update only display filtering and preserve audible selection", function()
     local _, _, app, ui = setup()
     local before = app.db:GetProfile().alerts.classes

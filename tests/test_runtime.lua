@@ -11,6 +11,83 @@ local function setup(raw, configure)
     return state, RG, RG.instance
 end
 
+H.Test("runtime status reads both nameplate settings through the supported API without writes", function()
+    local writes = 0
+    local state, _, app = setup(nil, function(fixture)
+        fixture.api.C_CVar = {
+            GetCVarBool = function(name) return fixture.cvars[name] end,
+            SetCVar = function() writes = writes + 1 end,
+        }
+        fixture.api.GetCVarBool = function() return true end
+        fixture.api.SetCVar = function() writes = writes + 1 end
+        fixture.cvars.nameplateShowAll = false
+    end)
+    local status = app:Status()
+    H.True(status.nameplates); H.False(status.alwaysNameplates); H.Equal(status.state, "active")
+    state.cvars.nameplateShowAll = true
+    H.True(app:Status().alwaysNameplates)
+    state.cvars.nameplateShowAll = H.Secret("auto nameplates")
+    H.Nil(app:Status().alwaysNameplates)
+    state.cvars.nameplateShowEnemies = false
+    H.Equal(app:Status().state, "limited")
+    state.api.C_CVar.GetCVarBool = nil
+    H.True(app:Status().alwaysNameplates); H.True(app:Status().nameplates)
+    H.Equal(writes, 0)
+end)
+
+H.Test("runtime alert blocks follow live context without changing detection status", function()
+    local state, _, app = setup()
+    local profile = app.db:GetProfile()
+    H.Nil(app:AlertBlock()); H.Equal(app:Status().state, "active")
+    for _, fixture in ipairs({
+        { instance = "arena", expected = "context_disabled", setting = "arena" },
+        { zone = "sanctuary", expected = "sanctuary", setting = "sanctuary" },
+        { resting = true, expected = "resting", setting = "resting" },
+        { flight = true, expected = "flight", setting = "flight" },
+    }) do
+        state.instance, state.zonePVP, state.resting, state.flight = fixture.instance, fixture.zone, fixture.resting, fixture.flight
+        state:Fire("ZONE_CHANGED_NEW_AREA")
+        H.Equal(app:AlertBlock(), fixture.expected); H.Equal(app:Status().state, "active")
+        profile.context[fixture.setting] = true
+        app:OnSettingsChanged()
+        H.Nil(app:AlertBlock())
+        profile.context[fixture.setting] = false
+    end
+    state.flight = false
+    state:Fire("PLAYER_FLAGS_CHANGED", "player")
+    H.Nil(app:AlertBlock())
+    state.api.IsInInstance = function() return H.Secret("instance membership"), H.Secret("instance type") end
+    state:Fire("ZONE_CHANGED_NEW_AREA")
+    H.Equal(app:AlertBlock(), "context_disabled"); H.Equal(app:Status().context.kind, "unknown")
+end)
+
+H.Test("runtime alert block reports pause and global output controls", function()
+    local state, _, app = setup()
+    local profile = app.db:GetProfile()
+    app.engine:Pause(2)
+    H.Equal(app:AlertBlock(), "paused"); H.Equal(app:Status().state, "paused")
+    H.Equal(app:Status().detectionState, "active")
+    state.cvars.nameplateShowEnemies = false
+    H.Equal(app:Status().detectionState, "limited"); H.Equal(app:Status().state, "paused")
+    state.cvars.nameplateShowEnemies = true
+    state:Advance(2.1)
+    H.Nil(app:AlertBlock())
+    profile.alerts.sound, profile.alerts.banner = false, false
+    app:OnSettingsChanged()
+    H.Equal(app:AlertBlock(), "outputs_disabled"); H.Equal(app:Status().state, "active")
+    profile.alerts.sound = true
+    for kind in pairs(profile.alerts.sounds) do profile.alerts.sounds[kind] = "none" end
+    H.Equal(app:AlertBlock(), "outputs_disabled")
+    profile.alerts.sounds.wave = "ready"
+    H.Nil(app:AlertBlock())
+    profile.alerts.enabled = false
+    H.Equal(app:AlertBlock(), "disabled"); H.Equal(app:Status().state, "active")
+    profile.enabled = false
+    app:OnSettingsChanged()
+    H.Equal(app:AlertBlock(), "disabled"); H.Equal(app:Status().state, "disabled")
+    H.Equal(app:Status().detectionState, "disabled")
+end)
+
 H.Test("hidden Nearby skips row production while minimap census and alerts stay live", function()
     local state, RG, app = setup(nil, function(fixture)
         local map = fixture.api.CreateFrame("Frame", "Minimap", fixture.api.UIParent)
@@ -777,18 +854,20 @@ end)
 
 H.Test("status uses clean C_CVar evidence and falls back only when the reader is absent", function()
     local state, _, app = setup()
-    local legacyReads = 0
-    state.api.GetCVarBool = function() legacyReads = legacyReads + 1; return true end
-    state.api.C_CVar = { GetCVarBool = function(name) H.Equal(name, "nameplateShowEnemies"); return false end }
+    local legacyReads, modernReads = {}, {}
+    state.api.GetCVarBool = function(name) legacyReads[#legacyReads + 1] = name; return true end
+    state.api.C_CVar = { GetCVarBool = function(name) modernReads[#modernReads + 1] = name; return false end }
     local status = app:Status()
-    H.False(status.nameplates); H.Equal(status.state, "limited"); H.Equal(legacyReads, 0)
+    H.False(status.nameplates); H.False(status.alwaysNameplates); H.Equal(status.state, "limited"); H.Equal(#legacyReads, 0)
+    H.Equal(table.concat(modernReads, ","), "nameplateShowEnemies,nameplateShowAll")
     state.api.C_CVar.GetCVarBool = function() return H.Secret("restricted CVar") end
     status = app:Status()
-    H.Nil(status.nameplates); H.Equal(legacyReads, 0)
+    H.Nil(status.nameplates); H.Nil(status.alwaysNameplates); H.Equal(#legacyReads, 0)
     state.api.C_CVar.GetCVarBool = function() error("blocked CVar") end
     status = app:Status()
-    H.Nil(status.nameplates); H.Equal(legacyReads, 0)
+    H.Nil(status.nameplates); H.Nil(status.alwaysNameplates); H.Equal(#legacyReads, 0)
     state.api.C_CVar.GetCVarBool = nil
     status = app:Status()
-    H.True(status.nameplates); H.Equal(legacyReads, 1)
+    H.True(status.nameplates); H.True(status.alwaysNameplates)
+    H.Equal(table.concat(legacyReads, ","), "nameplateShowEnemies,nameplateShowAll")
 end)

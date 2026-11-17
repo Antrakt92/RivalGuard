@@ -120,11 +120,12 @@ function L.New(ui, tooltip, hideTooltip)
         if mouseButton == "RightButton" then ui:OpenSettings() else ui:Toggle() end
     end)
     frame:SetScript("OnEnter", function()
-        local status = ui.statusCache
-        local state = type(status) == "table" and status.state or "active"
-        local key = ({ active = "active", limited = "limited", paused = "paused", disabled = "disabled" })[state] or "active"
         local count = M.Number(ui.visibleCount, 0)
-        tooltip(frame, ui:T("addon") .. " · " .. ui:T(key), ui:F("inViewCount", count) .. "\n" .. ui:T("launcherTip"))
+        local lines = { ui:F("inViewCount", count) }
+        local reason = ui:AlertBlock()
+        if reason then lines[#lines + 1] = RG.Locale.Reason(reason, ui:Profile().locale) end
+        lines[#lines + 1] = ui:T("launcherTip")
+        tooltip(frame, ui:T("addon") .. " · " .. ui:T(ui:DetectionKey(ui.statusCache)), table.concat(lines, "\n"))
     end)
     frame:SetScript("OnLeave", hideTooltip)
 

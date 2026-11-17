@@ -31,8 +31,9 @@ your journal and lists untouched.
   lists or history.
 - **Journal:** search recent encounters or open your watch, avoid and ignore
   lists. Retain all eligible encounters, listed players or observed threats.
-- **Support:** see available sensors and copy a report with player identities
-  and notes removed. Replay the first-run guide here at any time.
+- **Support:** see available sensors, why alerts are quiet here and which
+  nameplate options affect coverage. Copy a report with player identities and
+  notes removed or replay the first-run guide.
 
 Click the minimap button to show or hide Nearby. Right-click it to open
 settings, or drag it around the minimap to move it.
@@ -43,8 +44,10 @@ banners for unknown classes. Personal lists and matching advanced rules can
 override the alert class filter.
 
 Enable enemy nameplates in WoW to provide the broadest available coverage.
-RivalGuard does not change game settings. Range estimates depend on what the
-client can measure for observed units and may be a bracket or unavailable.
+**Always Show Nameplates** can help when automatic mode hides enemy plates.
+Your current target can still provide information when plates are unavailable.
+Range estimates depend on what the client can measure for observed units and
+may be a bracket or unavailable.
 You can control whether uncertain distances qualify for alerts.
 
 Personal lists and notes remain local. The current profile's positive retention
