@@ -8406,6 +8406,51 @@ H.Test("journal entries expire online and refresh the open journal without new s
     H.Equal(#app.engine:Snapshot(), 0)
 end)
 
+H.Test("closing or browsing the journal cancels an armed history clear", function()
+    local state, _, app = setup()
+    local ui, db = app.ui, app.db
+    local identity = "guid:Player-JournalClear"
+    assert(db:SetList(identity, "watch", "Saved privately", { name = "Journal rival" }))
+    for index = 1, 13 do
+        local key = index == 1 and identity or "guid:Player-JournalClear-" .. index
+        assert(db:Record({ identity = key, name = "Journal rival " .. index }, state.api.time() - index))
+    end
+    ui:OpenSettings("journal")
+    local clear = ui.journalClear
+    local function armed(expected)
+        H.Equal(clear.label:GetText(), ui:T(expected and "clearJournalNow" or "clearJournal"))
+        H.Equal(#db:GetJournal(), 13)
+    end
+    clear:Click()
+    armed(true)
+    ui.settings:Hide()
+    clear:Click(); clear:Click()
+    H.Equal(#db:GetJournal(), 13)
+    state:Advance(0.25)
+    ui:OpenSettings()
+    armed(false)
+    clear:Click()
+    armed(true)
+    ui.journalNext:Click()
+    armed(false)
+    clear:Click()
+    armed(true)
+    ui.journalSearch:SetText("Journal rival 1")
+    armed(false)
+    clear:Click()
+    armed(true)
+    ui.journalPersonal:Click()
+    clear:Click()
+    ui.journalRecent:Click()
+    armed(false)
+    clear:Click()
+    armed(true)
+    clear:Click()
+    H.Equal(#db:GetJournal(), 0)
+    H.Equal(db:GetList()[identity].kind, "watch")
+    H.Equal(db:GetList()[identity].note, "Saved privately")
+end)
+
 H.Test("Recent renders a detached journal page without cloning history and clamps after expiry", function()
     local state, RG, app = setup()
     local db, ui = app.db, app.ui

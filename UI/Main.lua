@@ -652,6 +652,7 @@ function UI.New(app)
     settingsTitle:SetPoint("LEFT", 18, 0); settingsTitle:SetText("RivalGuard")
     local settingsClose = localButton(settings, "close", 84, function() settings:Hide() end)
     settingsClose:SetPoint("TOPRIGHT", -12, -10)
+    settings:SetScript("OnHide", function() self.clearJournalUntil = nil end)
     local settingsHint = label(settings, "settingsHint", 11, C.muted)
     settingsHint:SetPoint("TOPLEFT", 184, -54); settingsHint:SetWidth(566)
     if UISpecialFrames then UISpecialFrames[#UISpecialFrames + 1] = "RivalGuardSettings" end
@@ -1029,7 +1030,7 @@ function UI.New(app)
     search:SetScript("OnEscapePressed", function(box) box:ClearFocus() end)
     search:SetScript("OnEnterPressed", function(box) box:ClearFocus() end)
     search:SetScript("OnTextChanged", function(box)
-        self.journalQuery, self.journalOffset = M.SearchText(box:GetText()), 0
+        self.journalQuery, self.journalOffset, self.clearJournalUntil = M.SearchText(box:GetText()), 0, nil
         self:RefreshJournal()
     end)
     self.journalSearch = search
@@ -1050,7 +1051,7 @@ function UI.New(app)
         self.journalFilterChoices[kind] = choice
     end
     self.journalClear = localButton(journal, "clearJournal", 300, function()
-        if not app.db.ClearJournal then return end
+        if not settings:IsShown() or self.currentPage ~= "journal" or self.journalMode ~= "recent" or not app.db.ClearJournal then return end
         if not self.clearJournalUntil or self.clearJournalUntil < self:Now() then
             self.clearJournalUntil = self:Now() + 6
             self:RefreshJournal()
@@ -1076,6 +1077,7 @@ function UI.New(app)
     end
     local function moveJournalPage(direction)
         self.journalOffset = math.max(0, self.journalOffset + direction * #self.journalRows)
+        self.clearJournalUntil = nil
         self:RefreshJournal()
         scrollbar:SetValue(0)
     end
