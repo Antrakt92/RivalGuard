@@ -60,7 +60,7 @@ function Sensors:Record(obs, behindCamera)
     local state = self.active[token]
     local name = obs.nameComplete and obs.name or nil
     if state and ((state.guid and obs.guid and state.guid ~= obs.guid)
-        or (not state.guid and state.name and name and state.name ~= name)) then
+        or ((not state.guid or not obs.guid) and state.name and name and state.name ~= name)) then
         self:Remove(token)
         state = nil
     end

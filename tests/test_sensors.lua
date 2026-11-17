@@ -80,6 +80,52 @@ H.Test("sensors preserve generation ownership through temporarily unreadable ide
     H.Equal(removed[#removed], "nameplate1")
 end)
 
+H.Test("sensors replace an old GUID when a new complete name proves discontinuity", function()
+    local sensors, units, _, _, _, _, _, _, _, secret, engine = fixture(true)
+    units.nameplate1 = { name = "Alpha", realm = "Realm", guid = "Player-A", class = "ROGUE" }
+    sensors:Start(); sensors:OnEvent("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    local generation = sensors.active.nameplate1.generation
+    units.nameplate1 = { name = "Bravo", realm = "Realm", guid = secret, class = "ROGUE" }
+    sensors:OnEvent("UNIT_NAME_UPDATE", "nameplate1")
+    local current = engine.contacts[engine.bindings.nameplate1.id]
+    H.Equal(current.identity, "name:Bravo-Realm")
+    H.True(sensors.active.nameplate1.generation > generation)
+    H.Nil(sensors.active.nameplate1.guid)
+    units.nameplate1.guid = "Player-B"
+    sensors:OnEvent("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "cast-bravo", 1856)
+    current = engine.contacts[engine.bindings.nameplate1.id]
+    H.Equal(current.identity, "guid:Player-B")
+    H.Equal(current.stealthEvidence, "cast"); H.Equal(current.stealthSpell, "Vanish")
+end)
+
+H.Test("sensors retain ownership when equal GUIDs accompany a changed complete name", function()
+    local sensors, units, observed, removed, casts = fixture()
+    units.nameplate1 = { name = "Alpha", realm = "Realm", guid = "Player-A", class = "ROGUE" }
+    sensors:Start(); sensors:OnEvent("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    local generation = sensors.active.nameplate1.generation
+    units.nameplate1.name = "Renamed"
+    sensors:OnEvent("UNIT_NAME_UPDATE", "nameplate1")
+    H.Equal(observed[#observed].name, "Renamed-Realm")
+    H.Equal(observed[#observed].generation, generation); H.Equal(#removed, 0)
+    sensors:OnEvent("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "cast-renamed", 1856)
+    H.Equal(#casts, 1)
+end)
+
+H.Test("a proven name discontinuity excludes a non-player replacement without inheriting the old GUID", function()
+    local sensors, units, _, _, _, _, _, api, _, secret, engine = fixture(true)
+    api.UnitIsPlayer = function(token) return units[token] and units[token].isPlayer ~= false end
+    units.nameplate1 = { name = "Alpha", realm = "Realm", guid = "Player-A", class = "ROGUE" }
+    sensors:Start(); sensors:OnEvent("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    local generation = sensors.active.nameplate1.generation
+    units.nameplate1 = { name = "NPC", realm = "Realm", guid = secret, isPlayer = false }
+    sensors:OnEvent("UNIT_NAME_UPDATE", "nameplate1")
+    H.True(sensors.active.nameplate1.generation > generation)
+    H.Nil(sensors.active.nameplate1.guid); H.Nil(engine.bindings.nameplate1)
+    sensors:OnEvent("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "cast-npc", 1856)
+    H.Nil(engine.bindings.nameplate1); H.Equal(#engine.pending, 1)
+    H.Equal(engine.pending[1].event, "sighting")
+end)
+
 H.Test("sensors reject restricted tokens and spell identifiers", function()
     local sensors, units, _, _, casts, _, _, _, _, secret = fixture()
     units.nameplate1 = player()
