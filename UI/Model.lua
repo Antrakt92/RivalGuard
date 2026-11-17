@@ -60,10 +60,14 @@ end
 
 function M.State(contact, now, locale)
     if clean(contact.visible) == true then
-        if clean(contact.targeting) == true then return RG.Locale.Get("targeting", locale) end
-        if clean(contact.stealth) == true or clean(contact.stealth) == "confirmed" then
-            return RG.Locale.Get("stealth", locale)
+        if clean(contact.dead) == true then return RG.Locale.Get("dead", locale) end
+        if clean(contact.hostile) == true and clean(contact.isPlayer) == true then
+            if clean(contact.targeting) == true then return RG.Locale.Get("targeting", locale) end
+            if clean(contact.stealth) == true or clean(contact.stealth) == "confirmed" then
+                return RG.Locale.Get("stealth", locale)
+            end
         end
+        if clean(contact.behindCamera) == true then return RG.Locale.Get("behindCamera", locale) end
         return M.Range(contact, locale)
     end
     return RG.Locale.Format("lastSeen", locale, M.Age(now - M.Number(contact.lastSeen, now), locale))

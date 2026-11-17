@@ -111,3 +111,69 @@ H.Test("simulated combat UI refresh never mutates protected action attributes", 
     state.combat = false
     state:Fire("PLAYER_REGEN_ENABLED")
 end)
+
+H.Test("fail once before UI creation preserves saved data and allows clean retry", function()
+    local state = W.New()
+    local raw = { schemaVersion = 1, activeProfile = "Default", profiles = {} }
+    state.api.RivalGuardDB = raw
+    local RG = state:LoadTOC()
+    local create, failures = RG.UI.New, 0
+    RG.UI.New = function(app)
+        failures = failures + 1
+        if failures == 1 then error("injected startup failure") end
+        return create(app)
+    end
+    state:Fire("ADDON_LOADED", "RivalGuard")
+    H.False(RG.instance.initialized)
+    H.False(RG.instance.initializing)
+    H.Equal(state.api.RivalGuardDB, raw)
+    state:Fire("ADDON_LOADED", "RivalGuard")
+    H.True(RG.instance.initialized)
+    H.Equal(state.api.RivalGuardDB, RG.instance.db.root)
+end)
+
+H.Test("failed constructed UI is torn down without orphaned update scripts", function()
+    local state = W.New()
+    local RG = state:LoadTOC()
+    local create, partial = RG.UI.New, nil
+    RG.UI.New = function(app)
+        partial = create(app)
+        error("injected post-construction failure")
+    end
+    state:Fire("ADDON_LOADED", "RivalGuard")
+    H.False(RG.instance.initialized)
+    H.True(partial ~= nil)
+    H.Nil(partial.ticker:GetScript("OnUpdate"), "partially constructed UI ticker still owns live work")
+    H.False(partial.frame:IsShown())
+    H.Nil(next(partial.ticker.events))
+end)
+
+H.Test("sensor startup refusal rolls back UI and does not claim initialization", function()
+    local state = W.New()
+    local raw = { schemaVersion = 1, profiles = {} }
+    state.api.RivalGuardDB = raw
+    local RG = state:LoadTOC()
+    local construct = RG.Sensors.New
+    RG.Sensors.New = function(...)
+        local sensors = construct(...)
+        sensors.Start = function() return false end
+        return sensors
+    end
+    state:Fire("ADDON_LOADED", "RivalGuard")
+    H.False(RG.instance.initialized, "sensor startup refusal must not produce a ready addon")
+    H.Equal(state.api.RivalGuardDB, raw)
+    H.False(RG.instance.ui.frame:IsShown())
+end)
+
+H.Test("watch ignore and note actions preserve notes through repeated toggles", function()
+    local _, _, app = setup()
+    local contact = { identity = "guid:Player-Note", name = "Enemy", class = "ROGUE" }
+    assert(app:SetNote(contact, "Remember this player"))
+    for _, action in ipairs({ "Watch", "Watch", "Ignore", "Ignore" }) do
+        assert(app[action](app, contact))
+        H.Equal(app.db:GetList()[contact.identity].note, "Remember this player")
+    end
+    H.Equal(app.db:GetList()[contact.identity].kind, "note")
+    assert(app:SetNote(contact, ""))
+    H.Nil(app.db:GetList()[contact.identity].note)
+end)

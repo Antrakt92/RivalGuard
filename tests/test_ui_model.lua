@@ -46,8 +46,11 @@ end)
 
 H.Test("unknown stealth string does not become confirmed stealth label", function()
     local RG = addon()
-    local contact = { visible = true, stealth = "suspected", rangeMax = 20 }
+    local contact = { visible = true, stealth = "suspected", rangeMax = 20, hostile = true, isPlayer = true }
     H.Equal(RG.UIModel.State(contact, 100, "enUS"), RG.UIModel.Range(contact, "enUS"))
     contact.stealth = "confirmed"
     H.Equal(RG.UIModel.State(contact, 100, "enUS"), RG.Locale.Get("stealth", "enUS"))
+    contact.hostile = nil
+    contact.targeting = true
+    H.Equal(RG.UIModel.State(contact, 100, "enUS"), RG.UIModel.Range(contact, "enUS"))
 end)

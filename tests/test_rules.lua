@@ -58,6 +58,14 @@ H.Test("range policies distinguish possible confirmed and unavailable evidence",
     H.False(RG.Rules.RangeMatches(p.range, contact))
 end)
 
+H.Test("strictly beyond a range threshold is never possibly within that threshold", function()
+    local RG = H.Addon({ "Core/Bootstrap.lua", "Core/Util.lua", "Core/Defaults.lua", "Core/Rules.lua" })
+    local config = { enabled = true, policy = "possible", yards = 40, unknown = true }
+    H.False(RG.Rules.RangeMatches(config, { rangeMin = 40, rangeMinExclusive = true }))
+    H.True(RG.Rules.RangeMatches(config, { rangeMin = 40, rangeMinExclusive = false }))
+    H.True(RG.Rules.RangeMatches(config, { rangeMin = 39, rangeMinExclusive = true }))
+end)
+
 H.Test("watch entries bypass ordinary class whitelist but never ignores or context", function()
     local RG, p, contact = setup()
     p.alerts.classes = { MAGE = true }

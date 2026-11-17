@@ -34,8 +34,11 @@ function App:ProfileChanged()
     local profile = self.db:GetProfile()
     self.engine:SetProfile(profile)
     self.engine.lists = self.db:GetList()
+    self.db:Prune(readClock(self.api, "time"))
     self.dirty = true
-    if self.ui then self.ui:Refresh() end
+    if self.ui then
+        if self.ui.SettingsChanged then self.ui:SettingsChanged() else self.ui:Refresh() end
+    end
 end
 
 function App:ToggleMute()
@@ -60,6 +63,12 @@ function App:Status()
         writable = self.db.writable }
 end
 
+function App:SupportedClasses() return self.client:SupportedClasses() end
+
+function App:Explain(contact)
+    return self.engine:ExplainView(contact.id, "sighting")
+end
+
 function App:ExportDiagnostics()
     return self.diagnostics:Export(self.client:Capabilities(), self.engine)
 end
@@ -81,7 +90,7 @@ function App:Watch(contact)
     local entry = self.db:GetList()[contact.identity]
     local kind = "watch"
     if entry and entry.kind == "watch" then kind = entry.note and "note" or nil end
-    local ok, err = self.db:SetList(contact.identity, kind, entry and entry.note)
+    local ok, err = self.db:SetList(contact.identity, kind, entry and entry.note, contact)
     if ok then self:ProfileChanged() end
     return ok, err
 end
@@ -91,7 +100,7 @@ function App:Ignore(contact)
     local entry = self.db:GetList()[contact.identity]
     local kind = "ignore"
     if entry and entry.kind == "ignore" then kind = entry.note and "note" or nil end
-    local ok, err = self.db:SetList(contact.identity, kind, entry and entry.note)
+    local ok, err = self.db:SetList(contact.identity, kind, entry and entry.note, contact)
     if ok then self:ProfileChanged() end
     return ok, err
 end
@@ -99,20 +108,23 @@ end
 function App:SetNote(contact, note)
     if not contact or not contact.identity then return nil, "unknown_identity" end
     local entry = self.db:GetList()[contact.identity]
-    local ok, err = self.db:SetList(contact.identity, entry and entry.kind or "note", note)
+    local ok, err = self.db:SetList(contact.identity, entry and entry.kind or "note", note, contact)
     if ok then self:ProfileChanged() end
     return ok, err
 end
 
 function App:Demo()
     local now = self.engine:Now()
+    local locale = self.db:GetProfile().locale
+    local function title(key) return RG.Locale.Get(key, locale) end
     local contacts = {
-        { id = "demo1", name = "Sample Rogue", class = "ROGUE", level = 60, visible = true, firstSeen = now, lastSeen = now, hostile = true, isPlayer = true, rangeMin = 8, rangeMax = 20, sources = { preview = true } },
-        { id = "demo2", name = "Sample Hunter", class = "HUNTER", level = 60, visible = true, firstSeen = now, lastSeen = now, hostile = true, isPlayer = true, rangeMin = 20, rangeMax = 30, targeting = true, sources = { preview = true } },
-        { id = "demo3", name = "Sample Rival", class = "MAGE", level = 60, visible = false, firstSeen = now - 60, lastSeen = now - 12, watched = true, sources = { preview = true } },
+        { id = "demo1", name = title("demoRogue"), class = "ROGUE", level = 60, visible = true, firstSeen = now, lastSeen = now, hostile = true, isPlayer = true, rangeMin = 8, rangeMax = 20, sources = { preview = true } },
+        { id = "demo2", name = title("demoHunter"), class = "HUNTER", level = 60, visible = true, firstSeen = now, lastSeen = now, hostile = true, isPlayer = true, rangeMin = 20, rangeMax = 30, targeting = true, sources = { preview = true } },
+        { id = "demo3", name = title("demoWatch"), class = "MAGE", level = 60, visible = false, firstSeen = now - 60, lastSeen = now - 12, watched = true, sources = { preview = true } },
     }
-    if self.ui and self.ui.Preview then self.ui:Preview(contacts) end
-    if self.ui then self.ui:Alert({ kind = "sighting", contact = contacts[1], banner = true, sound = false, preview = true, reason = "preview" }) end
+    local decision = { kind = "sighting", contact = contacts[1], banner = true, sound = false, preview = true, reason = "preview" }
+    if self.ui and self.ui.Preview then self.ui:Preview(contacts, decision)
+    elseif self.ui then self.ui:Alert(decision) end
 end
 
 function App:Command(text)
@@ -165,7 +177,7 @@ function App:Initialize()
     })
     self.ui = RG.UI.New(self)
     self.sensors = RG.Sensors.New(self, self.client, self.api)
-    self.sensors:Start()
+    if not self.sensors:Start() then error("sensor_start_failed", 0) end
     self.api.SLASH_RIVALGUARD1, self.api.SLASH_RIVALGUARD2 = "/rivalguard", "/rg"
     self.api.SlashCmdList.RIVALGUARD = function(message) self:Command(message) end
     self.db:Prune(epochNow())

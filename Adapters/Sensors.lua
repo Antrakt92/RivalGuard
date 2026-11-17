@@ -8,6 +8,8 @@ local EVENTS = {
     "UNIT_SPELLCAST_SUCCEEDED", "UNIT_AURA", "UNIT_FLAGS", "UNIT_FACTION", "UNIT_NAME_UPDATE",
     "PLAYER_ENTERING_WORLD", "PLAYER_LEAVING_WORLD", "ZONE_CHANGED_NEW_AREA", "ZONE_CHANGED",
     "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED", "PLAYER_UPDATE_RESTING", "PLAYER_FLAGS_CHANGED",
+    "SPELLS_CHANGED", "PLAYER_SPECIALIZATION_CHANGED", "SPELL_DATA_LOAD_RESULT", "SPELL_TEXT_UPDATE",
+    "PLAYER_EQUIPMENT_CHANGED", "UPDATE_SHAPESHIFT_FORM", "TRAIT_CONFIG_UPDATED",
 }
 local DIRECT = { target = true, focus = true, mouseover = true, softenemy = true }
 local MAX_ACTIVE = 128
@@ -42,8 +44,9 @@ function Sensors:Observe(token, source, behindCamera)
         state = { generation = self.generation }
         self.active[token], self.count = state, self.count + 1
     end
+    local name = obs.nameComplete and obs.name or nil
     if (state.guid and obs.guid and state.guid ~= obs.guid)
-        or (not state.guid and state.name and obs.name and state.name ~= obs.name) then
+        or (not state.guid and state.name and name and state.name ~= name) then
         self:Remove(token)
         self.generation = self.generation + 1
         state = { generation = self.generation }
@@ -51,7 +54,7 @@ function Sensors:Observe(token, source, behindCamera)
     end
     obs.generation = state.generation
     if behindCamera ~= nil then obs.behindCamera = behindCamera end
-    state.guid, state.name = obs.guid or state.guid, obs.name or state.name
+    state.guid, state.name = obs.guid or state.guid, name or state.name
     local contact = self:Call("Observe", obs)
     if type(self.app.UIContactUpdated) == "function" then
         local ok = pcall(self.app.UIContactUpdated, self.app, token, obs, contact)
@@ -61,6 +64,7 @@ end
 
 function Sensors:Remove(token)
     token = self.client:IsToken(token)
+    if token then self.client:ForgetToken(token) end
     if not token or not self.active[token] then return end
     self.active[token], self.count = nil, self.count - 1
     self:Call("Remove", token)
@@ -108,6 +112,9 @@ end
 
 function Sensors:OnEvent(event, token, castGUID, spellID)
     if not self.running then return end
+    if event == "SPELLS_CHANGED" or event == "PLAYER_SPECIALIZATION_CHANGED" or event == "SPELL_DATA_LOAD_RESULT"
+        or event == "SPELL_TEXT_UPDATE" or event == "PLAYER_EQUIPMENT_CHANGED" or event == "UPDATE_SHAPESHIFT_FORM"
+        or event == "TRAIT_CONFIG_UPDATED" then self.client:InvalidateRanges(); return end
     if event == "PLAYER_LEAVING_WORLD" then self.loading = true; self:Clear(); return end
     if event == "PLAYER_ENTERING_WORLD" then
         self.loading = false
@@ -132,7 +139,7 @@ function Sensors:OnEvent(event, token, castGUID, spellID)
         local state = token and self.active[token]
         if state and spellID and spellID > 0 and spellID == math.floor(spellID) then
             local obs = self.client:ReadUnit(token, "cast")
-            if obs and ((state.guid and obs.guid == state.guid) or (not state.guid and state.name and obs.name == state.name)) then
+            if obs and ((state.guid and obs.guid == state.guid) or (not state.guid and state.name and obs.nameComplete and obs.name == state.name)) then
                 self:Observe(token, "cast")
                 self:Call("Cast", token, spellID)
             end

@@ -67,6 +67,26 @@ L.enUS = {
     sensorReady = "Detection is running", sensorUnavailable = "Detection is unavailable", noData = "No data available",
     nameplatesOff = "Enemy nameplates are off. Enable them in the game settings for more sightings.",
     settingUnavailable = "Unavailable on this client", error = "Something could not be completed.",
+    rules = "Advanced rules", rulesHelp = "Optional overrides for particular events and classes. The highest-priority matching rule wins; equal priorities use the first rule. Personal ignores and excluded areas still apply.",
+    newRule = "New rule", saveRule = "Save rule", deleteRule = "Delete rule", ruleName = "Rule name", ruleEvent = "When this happens", ruleClasses = "For these classes",
+    ruleAction = "Then", ruleAlert = "Show an alert", ruleSuppress = "Suppress the alert", ruleEnabled = "Rule enabled", rulePriority = "Priority", ruleCooldown = "Repeat delay (seconds)",
+    ruleSound = "Play sound", ruleBanner = "Show banner", sighting = "A player is spotted", returning = "A player returns", anyEvent = "Any supported event",
+    ruleSaved = "Rule saved.", ruleDeleted = "Rule deleted.", ruleInvalid = "Check the rule name and values before saving.", ruleLimit = "You can save up to 32 rules.",
+    emptyRules = "No custom rules. Your usual settings still apply.", ruleExample = "Example: silence Mage sightings, or give Rogue stealth a distinct priority.",
+    ruleDraft = "Changes here apply only when you save.", ruleSelection = "Rule %d of %d", ruleNewName = "New rule", ruleNeedsName = "Give this rule a short, recognizable name.",
+    transfer = "Import and export", exportProfile = "Export current profile", importProfile = "Import profile", validateImport = "Preview import", importNew = "Import as new profile",
+    exportHelp = "Copy this text with Ctrl+A, Ctrl+C. It includes settings and rules, not your personal player lists or journal.",
+    importHelp = "Paste profile text with Ctrl+V, give it a new name, then preview it. Nothing changes until you import.",
+    importPreview = "Validated: %d custom rules; %s. Existing profiles and personal lists will be kept.", importInvalid = "This profile could not be read. Check the complete exported text and its version.",
+    importChanged = "The text changed. Preview it again before importing.", importReady = "Preview the profile before importing.", importSuccess = "Profile imported. Select it in Profiles when you want to use it.",
+    sounds = "Sounds by event", soundNone = "No sound", soundPing = "Map ping", soundWarning = "Raid warning", soundReady = "Ready check", soundWhisper = "Whisper", soundQuest = "Quest complete",
+    previewSound = "Listen", eventReturning = "Player returns", eventSighting = "New player", eventWatch = "Personal list", eventStealth = "Observed stealth", eventTargeting = "Targeting you", eventWave = "Several opponents",
+    journalDays = "Keep recent encounters (days)", retentionHelp = "Personal notes and lists are kept separately. Set recent encounters to zero to stop recording them.",
+    noPreviewTarget = "Preview only. Sample players cannot be added to personal lists.",
+    sourceNameplate = "Nameplate", sourceTarget = "Current target", sourceFocus = "Focus", sourceMouseover = "Mouseover", sourceSoftTarget = "Action target", sourceJournal = "Encounter journal",
+    dead = "Dead", behindCamera = "Outside the camera view", noCurrentEvidence = "No current observation", why = "Why?", explanation = "Your current alert rules",
+    explanationHelp = "This explains the current settings and available evidence. It does not prove an opponent's intentions.",
+    limited = "Limited", inViewCount = "%d in view", levelShort = "Lv %d", sessionOnly = "Saved data is from a newer version. Changes apply for this session only.",
 }
 
 L.ruRU = {
@@ -87,7 +107,7 @@ L.ruRU = {
     showUnknown = "Показывать игроков с неизвестным классом", showUnknownTip = "Недоступные сведения о классе не означают, что игрок безопасен.",
     displayClasses = "Классы в списке", alertClasses = "Классы для обычных оповещений",
     classesTip = "Фильтр классов относится к обычным встречам. Личные списки и важные события настраиваются отдельно.",
-    watch = "Следить", avoid = "Опасный", ignore = "Игнорировать", removeList = "Убрать из списка", note = "Личная заметка", saveNote = "Сохранить",
+    watch = "Следить", avoid = "В список угроз", ignore = "Игнорировать", removeList = "Убрать из списка", note = "Личная заметка", saveNote = "Сохранить",
     details = "Сведения об игроке", selectContact = "Выберите игрока в списке рядом или в журнале.",
     identityUnknown = "Для личного списка нужен доступный идентификатор. Анонимную встречу сохранить нельзя.",
     noTarget = "Нажатие открывает сведения и не меняет вашу цель.",
@@ -135,6 +155,26 @@ L.ruRU = {
     sensorReady = "Обнаружение работает", sensorUnavailable = "Обнаружение недоступно", noData = "Нет доступных данных",
     nameplatesOff = "Неймплейты противников выключены. Включите их в настройках игры, чтобы замечать больше игроков.",
     settingUnavailable = "Недоступно на этом клиенте", error = "Не удалось выполнить действие.",
+    rules = "Особые правила", rulesHelp = "Необязательные правила для отдельных событий и классов. Действует совпавшее правило с наибольшим приоритетом; при равенстве — первое. Игнорирование и отключённые зоны сохраняют силу.",
+    newRule = "Новое правило", saveRule = "Сохранить", deleteRule = "Удалить правило", ruleName = "Название правила", ruleEvent = "Когда происходит", ruleClasses = "Для этих классов",
+    ruleAction = "Действие", ruleAlert = "Показать оповещение", ruleSuppress = "Не оповещать", ruleEnabled = "Правило включено", rulePriority = "Приоритет", ruleCooldown = "Пауза повторов (секунды)",
+    ruleSound = "Со звуком", ruleBanner = "С предупреждением", sighting = "Замечен игрок", returning = "Игрок вернулся", anyEvent = "Любое доступное событие",
+    ruleSaved = "Правило сохранено.", ruleDeleted = "Правило удалено.", ruleInvalid = "Проверьте название и значения правила.", ruleLimit = "Можно сохранить до 32 правил.",
+    emptyRules = "Особых правил нет. Действуют обычные настройки.", ruleExample = "Например, отключите встречи с магами или задайте особый приоритет скрытности разбойников.",
+    ruleDraft = "Изменения вступят в силу после сохранения.", ruleSelection = "Правило %d из %d", ruleNewName = "Новое правило", ruleNeedsName = "Укажите короткое понятное название.",
+    transfer = "Импорт и экспорт", exportProfile = "Экспорт профиля", importProfile = "Импорт профиля", validateImport = "Проверить импорт", importNew = "Импортировать новый профиль",
+    exportHelp = "Скопируйте текст: Ctrl+A, Ctrl+C. Здесь настройки и правила, без личных списков игроков и журнала.",
+    importHelp = "Вставьте текст профиля через Ctrl+V, укажите новое имя и проверьте его. До импорта ничего не изменится.",
+    importPreview = "Проверено: особых правил — %d; %s. Существующие профили и личные списки сохранятся.", importInvalid = "Не удалось прочитать профиль. Проверьте полноту текста экспорта и его версию.",
+    importChanged = "Текст изменён. Проверьте его снова перед импортом.", importReady = "Сначала проверьте импортируемый профиль.", importSuccess = "Профиль импортирован. Когда понадобится, выберите его на странице профилей.",
+    sounds = "Звуки событий", soundNone = "Без звука", soundPing = "Отметка карты", soundWarning = "Предупреждение рейда", soundReady = "Проверка готовности", soundWhisper = "Шёпот", soundQuest = "Задание выполнено",
+    previewSound = "Послушать", eventReturning = "Игрок вернулся", eventSighting = "Новый игрок", eventWatch = "Личный список", eventStealth = "Замечена скрытность", eventTargeting = "Выбрал вас целью", eventWave = "Несколько противников",
+    journalDays = "Хранить недавние встречи (дни)", retentionHelp = "Личные заметки и списки хранятся отдельно. Ноль отключает запись недавних встреч.",
+    noPreviewTarget = "Это пример. Учебных игроков нельзя добавлять в личные списки.",
+    sourceNameplate = "Неймплейт", sourceTarget = "Текущая цель", sourceFocus = "Фокус", sourceMouseover = "Наведение мыши", sourceSoftTarget = "Мягкий выбор цели", sourceJournal = "Журнал встреч",
+    dead = "Мёртв", behindCamera = "Вне поля зрения камеры", noCurrentEvidence = "Нет текущего наблюдения", why = "Почему?", explanation = "Ваши текущие правила",
+    explanationHelp = "Здесь объясняются действующие настройки и доступные сведения, а не намерения противника.",
+    limited = "Ограничен", inViewCount = "В поле зрения: %d", levelShort = "Ур. %d", sessionOnly = "Сохранённые данные от более новой версии. Изменения действуют только до выхода из игры.",
 }
 
 function L.Get(key, requested)
@@ -162,4 +202,44 @@ function L.Class(token, requested)
         end
     end
     return (CLASS_NAMES[locale] or CLASS_NAMES.enUS)[token] or L.Get("unknownClass", requested)
+end
+
+local REASONS = {
+    enUS = {
+        disabled = "Alerts are disabled in this profile.", ignored = "This player is on your ignore list.",
+        identity_unconfirmed = "The game has not provided enough readable evidence to confirm an enemy player.",
+        context_disabled = "Alerts are disabled in this type of area.", sanctuary = "Sanctuary alerts are disabled.",
+        resting = "Alerts are quiet in rest areas.", flight = "Alerts are quiet while you are on a flight path.",
+        range_unknown = "The distance is unknown; your unknown-range setting applies.", range_confirmed = "The confirmed range setting applies.",
+        range_possible = "The estimated range setting applies.", range_unconfirmed = "There is not enough evidence that this player is inside your range threshold.",
+        event_disabled = "This event type is disabled.", watch_only = "Only your personal watch and avoid lists can trigger alerts.",
+        ordinary_muted = "Ordinary sightings are silenced.", custom_suppressed = "A matching custom rule suppresses this alert.",
+        class_filtered = "This class is not selected for ordinary alerts.", outputs_disabled = "Neither sound nor a banner is enabled for this event.",
+        custom_rule = "Your highest-priority matching custom rule applies.", watch_list = "This player is on your watch or avoid list.",
+        event_matched = "This event matches your current alert settings.", cooldown = "The repeat delay is still active for this player and event.",
+        paused = "Alerts are temporarily paused.", dead = "The player is confirmed dead.",
+        unavailable = "No current explanation is available for this record.",
+    },
+    ruRU = {
+        disabled = "Оповещения отключены в этом профиле.", ignored = "Этот игрок в вашем списке игнорирования.",
+        identity_unconfirmed = "Игра не предоставила достаточно доступных сведений, чтобы подтвердить противника.",
+        context_disabled = "Оповещения отключены для этого типа местности.", sanctuary = "Оповещения в святилищах отключены.",
+        resting = "В зонах отдыха оповещения отключены.", flight = "Во время перелёта оповещения отключены.",
+        range_unknown = "Расстояние неизвестно. Действует ваша настройка для неизвестного расстояния.", range_confirmed = "Действует ваша настройка подтверждённого расстояния.",
+        range_possible = "Действует ваша настройка приблизительного расстояния.", range_unconfirmed = "Недостаточно сведений, что игрок находится ближе заданного порога.",
+        event_disabled = "Этот тип событий отключён.", watch_only = "Оповещения разрешены только для личных списков наблюдения и опасных игроков.",
+        ordinary_muted = "Обычные встречи не вызывают оповещений.", custom_suppressed = "Совпавшее особое правило отключает это оповещение.",
+        class_filtered = "Этот класс не выбран для обычных оповещений.", outputs_disabled = "Для этого события отключены и звук, и предупреждение.",
+        custom_rule = "Действует совпавшее особое правило с наибольшим приоритетом.", watch_list = "Этот игрок в вашем списке наблюдения или опасных игроков.",
+        event_matched = "Событие соответствует вашим текущим настройкам.", cooldown = "Ещё действует пауза повторов для этого игрока и события.",
+        paused = "Оповещения временно приостановлены.", dead = "Подтверждено, что игрок мёртв.",
+        unavailable = "Для этой записи сейчас нет объяснения.",
+    },
+}
+
+function L.Reason(code, requested)
+    local locale = requested
+    if locale == nil or locale == "auto" then locale = GetLocale and GetLocale() or "enUS" end
+    local reasons = REASONS[locale] or REASONS.enUS
+    return reasons[code] or reasons.unavailable
 end

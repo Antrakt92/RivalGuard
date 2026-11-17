@@ -1,0 +1,73 @@
+local root, locale, view, page = arg[1] or ".", arg[2] or "enUS", arg[3] or "settings", arg[4] or "alerts"
+local width, height, scale = tonumber(arg[5]) or 1920, tonumber(arg[6]) or 1080, tonumber(arg[7]) or 1
+assert(width >= 640 and height >= 480 and scale >= 0.5 and scale <= 2, "invalid preview dimensions")
+local H = assert(loadfile(root .. "/tests/support/harness.lua"))(); H.root = root; RGTest = H
+local W = assert(loadfile(root .. "/tests/support/wow.lua"))()
+local state = W.New(); state.locale = locale
+state.api.UIParent:SetSize(width / scale, height / scale); state.api.UIParent:SetScale(scale)
+local RG = state:LoadTOC()
+state:Fire("ADDON_LOADED", "RivalGuard")
+local app = RG.instance
+assert(app.initialized, "preview addon initialization failed")
+app.db:GetProfile().locale = locale
+app.db:GetProfile().display.highContrast = arg[8] == "contrast"
+app.db:GetProfile().display.locked = false
+local classes = { "ROGUE", "HUNTER", "MAGE", "DRUID", "PRIEST", "WARRIOR", "SHAMAN", "WARLOCK", "PALADIN", "MONK" }
+for index, class in ipairs(classes) do
+    local name = locale == "ruRU" and ("Длинноеимяперсонажа " .. index) or ("LongCharacterName " .. index)
+    local contact = app.engine:Observe({ token = "nameplate" .. index, guid = "Player-Preview-" .. index,
+        name = name, realm = "FixtureRealm", class = class, level = 60,
+        hostile = true, isPlayer = true, source = "nameplate", rangeMin = index * 3, rangeMax = index * 3 + 10 })
+    if index == 1 then app:Watch(contact) end
+end
+app.ui:Refresh()
+if view == "settings" then app.ui:OpenSettings(page)
+elseif view == "rules" then app.ui:OpenRules()
+elseif view == "import" then app.ui:OpenTransfer("import")
+elseif view == "export" then app.ui:OpenTransfer("export")
+elseif view == "details" then app.ui:Select(app.engine:Snapshot()[1])
+elseif view == "banner" then app.ui:PreviewAlert()
+elseif view ~= "main" then error("unknown preview view") end
+
+local function json(value)
+    if type(value) == "boolean" then return value and "true" or "false" end
+    if type(value) == "number" then assert(RG.Util.IsFinite(value)); return string.format("%.12g", value) end
+    if type(value) == "string" then
+        return '"' .. value:gsub('[%z\1-\31\\"]', function(char)
+            if char == '"' then return '\\"' end
+            if char == "\\" then return "\\\\" end
+            return string.format("\\u%04x", char:byte())
+        end) .. '"'
+    end
+    assert(type(value) == "table", "unsupported preview value")
+    local entries, array = {}, #value > 0
+    if array then for _, item in ipairs(value) do entries[#entries + 1] = json(item) end
+    else
+        local keys = RG.Util.SortedKeys(value)
+        for _, key in ipairs(keys) do entries[#entries + 1] = json(key) .. ":" .. json(value[key]) end
+    end
+    return (array and "[" or "{") .. table.concat(entries, ",") .. (array and "]" or "}")
+end
+
+local frames = {}
+local windowNames = {}
+for name, frame in pairs(app.ui.windows or {}) do windowNames[frame.serial] = name end
+for _, frame in ipairs(state.frames) do
+    local anchors = {}
+    for _, point in ipairs(frame.points) do
+        anchors[#anchors + 1] = { point = point[1], relative = point[2] and point[2].serial or state.api.UIParent.serial,
+            relativePoint = point[3], x = point[4], y = point[5] }
+    end
+    frames[#frames + 1] = { id = frame.serial, name = windowNames[frame.serial] or frame.name, kind = frame.kind, template = frame.template,
+        parent = frame.parent and frame.parent.serial, visible = frame:IsVisible(), shown = frame:IsShown(),
+        width = frame.width, height = frame.height, scale = frame.scale, alpha = frame.alpha,
+        text = frame.text, fontSize = frame.font and frame.font[2] or 13, textColor = frame.textColor,
+        color = frame.color, texture = type(frame.texture) == "string" and frame.texture or nil,
+        allPoints = type(frame.allPoints) == "table" and frame.allPoints.serial or nil,
+        points = anchors, layer = frame.layer, strata = frame.strata,
+        justifyH = frame.justifyH, justifyV = frame.justifyV, checked = frame.checked, enabled = frame.enabled,
+        value = frame.value, minimum = frame.minimum, maximum = frame.maximum,
+        scrollChild = frame.scrollChild and frame.scrollChild.serial, scroll = type(frame.scroll) == "number" and frame.scroll or 0 }
+end
+io.write(json({ meta = { simulation = true, disclaimer = "Simulated addon frames; not an in-game screenshot. Font metrics and stock textures are approximated.",
+    locale = locale, view = view, page = page, width = width, height = height, uiScale = scale, root = state.api.UIParent.serial }, frames = frames }), "\n")

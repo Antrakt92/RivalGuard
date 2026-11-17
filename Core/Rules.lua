@@ -16,7 +16,10 @@ function R.RangeMatches(config, contact)
         if upper then return upper <= config.yards, "range_confirmed" end
         return false, "range_unconfirmed"
     end
-    if lower then return lower <= config.yards, "range_possible" end
+    if lower then
+        if contact.rangeMinExclusive and lower == config.yards then return false, "range_outside" end
+        return lower <= config.yards, "range_possible"
+    end
     return true, "range_possible"
 end
 

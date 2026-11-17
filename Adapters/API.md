@@ -8,12 +8,30 @@ it can influence tracking or alerts.
 Names, GUIDs, classes and spell identifiers may be unavailable or restricted.
 Anonymous observations remain separate by token generation. A token removal
 immediately ends its cast association; late events are never matched to recently
-removed players. Scoreboard matching is not used.
+removed players. Scoreboard matching is not used. A partial name can be shown
+without becoming a durable identity; a clean GUID remains usable independently.
+Forever's surname and Retail's realm are handled separately.
 
 Distance is exact only when `UnitDistanceSquared` provides a clean finite value
 and a successful `checkedDistance` result. Successful interaction checks provide
 approximate upper bounds. Failed checks do not establish an enemy's distance.
 Unknown distance remains unknown.
+
+The optional spell range adapter discovers the player's known, active, harmful
+spells from the modern spellbook. It combines valid range checks into approximate
+bounds; nil, errors and restricted returns contribute no evidence. A failed spell
+with a nonzero minimum range does not establish that the target is far away.
+Spell usability, resource cost and cooldown are not used as range evidence.
+
+Metadata rebuilding is event-driven and coalesced, including spell, specialization,
+equipment and form changes. Each rebuild visits at most 1,024 slots and 128
+eligible spells, retains at most 16 bands and samples at most eight range API
+calls per unit. Samples are cached for half a second by current token identity;
+removal invalidates them. Missing APIs are not repeatedly rescanned per sample.
+
+Available class controls can be populated from the client's
+`C_SpecializationInfo.GetAllClassIDs` and class information APIs. Failed or partial
+enumeration returns unknown rather than guessing classes from a build number.
 
 Aura checks use `C_UnitAuras.GetAuraDataByIndex` on relevant events. Restricted or
 failed reads cannot prove an aura disappeared. Regular identity polling does not
@@ -31,6 +49,8 @@ The initial API review used these immutable upstream source revisions:
 - [Forever 1.60.1 (70938)](https://github.com/Gethe/wow-ui-source/tree/bebcb6bf309cf41b41bd74f8ca651e6a105b2676/Interface/AddOns/Blizzard_APIDocumentationGenerated)
 - [Retail 12.1.5 (70783)](https://github.com/Gethe/wow-ui-source/tree/297d7aaaa736f346b3e036f38ee088eaf7f8c07f/Interface/AddOns/Blizzard_APIDocumentationGenerated)
 - [Nameplate behind-camera handling](https://github.com/Gethe/wow-ui-source/blob/bebcb6bf309cf41b41bd74f8ca651e6a105b2676/Interface/AddOns/Blizzard_NamePlates/Blizzard_NamePlateUnitFrame.lua)
+- [Spellbook range contracts](https://github.com/Gethe/wow-ui-source/blob/bebcb6bf309cf41b41bd74f8ca651e6a105b2676/Interface/AddOns/Blizzard_APIDocumentationGenerated/SpellBookDocumentation.lua)
+- [Class enumeration used by the client](https://github.com/Gethe/wow-ui-source/blob/bebcb6bf309cf41b41bd74f8ca651e6a105b2676/Interface/AddOns/Blizzard_ClassMenu/Blizzard_ClassMenu.lua)
 
 Future client builds require renewed compatibility checks. Function declarations
 describe contracts but do not establish availability in every game context.

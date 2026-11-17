@@ -13,7 +13,7 @@ D.profile = {
     alerts = { enabled = true, sound = true, banner = true, channel = "Master", sounds = { sighting = "ping", returning = "ping", watch = "warning", targeting = "ready", stealth = "warning", wave = "ready" }, classes = {}, unknownClass = true, cooldown = 30, returnAfter = 45, soundGap = 1.5, waveWindow = 0.8, waveThreshold = 3, stealth = true, targeting = true, watchedOnly = false, muteOrdinary = false },
     context = { world = true, battleground = true, arena = false, instance = false, sanctuary = false, resting = false, flight = false },
     range = { enabled = false, yards = 40, policy = "possible", unknown = true },
-    retention = { contactSeconds = 120, maxContacts = 256, journalDays = 7, maxJournal = 500, maxHistory = 200 },
+    retention = { contactSeconds = 120, maxContacts = 256, journalDays = 7, journalMode = "all", maxJournal = 500, maxHistory = 200 },
     positions = {},
     rules = {},
 }

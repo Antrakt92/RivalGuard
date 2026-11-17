@@ -91,6 +91,18 @@ H.Test("sensors reject restricted tokens and spell identifiers", function()
     H.Equal(#casts, 0)
 end)
 
+H.Test("sensors do not attribute casts using a partial name without a GUID", function()
+    local sensors, units, _, _, casts = fixture()
+    units.nameplate1 = { name = "Alpha", class = "ROGUE" }
+    sensors:Start(); sensors:OnEvent("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    sensors:OnEvent("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "cast", 1856)
+    H.Equal(#casts, 0)
+    units.nameplate1.realm = "Realm"
+    sensors:Poll()
+    sensors:OnEvent("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "cast", 1856)
+    H.Equal(#casts, 1)
+end)
+
 H.Test("sensors loading transitions clear tokens and suspend observations", function()
     local sensors, units, _, _, casts, _, _, _, badges = fixture()
     units.nameplate1 = player()

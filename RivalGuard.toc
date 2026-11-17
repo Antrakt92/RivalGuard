@@ -17,10 +17,12 @@ Core/Rules.lua
 Core/Engine.lua
 Core/Diagnostics.lua
 Core/Audio.lua
+Adapters/Range.lua
 Adapters/Client.lua
 Adapters/Sensors.lua
 Locale/Strings.lua
 UI/Model.lua
+UI/Dialogs.lua
 UI/Badges.lua
 UI/Main.lua
 Runtime.lua

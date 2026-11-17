@@ -96,13 +96,42 @@ H.Test("client names preserve regional surnames and reject placeholder identity"
     local client, api, unit = fixture()
     api.RegionalUniqueNamesEnabled = function() return true end
     unit.name, unit.realm = "Альфа", "Фамилия"
+    api.UnitName = function() return unit.name, unit.realm end
     local obs = client:ReadUnit("target", "poll")
-    H.Equal(obs.name, "Альфа Фамилия"); H.Nil(obs.realm)
-    api.GetUnitName = function() return "Альфа Полная Фамилия" end
-    H.Equal(client:ReadUnit("target", "poll").name, "Альфа Полная Фамилия")
+    H.Equal(obs.name, "Альфа Фамилия"); H.Nil(obs.realm); H.True(obs.nameComplete)
+    api.UnitNameUnmodified = function() return "Альфа Полная Фамилия", "Фамилия" end
+    obs = client:ReadUnit("target", "poll")
+    H.Equal(obs.name, "Альфа Полная Фамилия"); H.True(obs.nameComplete)
     unit.name, unit.realm = "Unknown", nil
-    api.GetUnitName = function() return "Unknown" end
+    api.UnitNameUnmodified = nil
     H.Nil(client:ReadUnit("target", "poll").name)
+end)
+
+H.Test("client does not promote partial regional names or realm-like unknown suffixes to identity", function()
+    local client, api, _, secret = fixture()
+    api.RegionalUniqueNamesEnabled = function() return true end
+    api.UnitNameUnmodified = function() return "Alpha", secret end
+    api.UnitName = function() return "Alpha" end
+    api.GetUnitName = function() return "Alpha-BogusBackend" end
+    local obs = client:ReadUnit("target", "poll")
+    H.Equal(obs.name, "Alpha"); H.False(obs.nameComplete); H.Nil(obs.realm)
+    H.Equal(obs.guid, "Player-A")
+end)
+
+H.Test("client retail names require readable realm evidence for durable fallback identity", function()
+    local client, api, unit, secret = fixture()
+    local obs = client:ReadUnit("target", "poll")
+    H.Equal(obs.name, "Alpha-Realm"); H.Equal(obs.realm, "Realm"); H.True(obs.nameComplete)
+    unit.name = "Alpha-Realm"
+    H.Equal(client:ReadUnit("target", "poll").name, "Alpha-Realm")
+    unit.name, unit.realm = "Alpha", secret
+    obs = client:ReadUnit("target", "poll")
+    H.Equal(obs.name, "Alpha"); H.False(obs.nameComplete); H.Nil(obs.realm)
+    api.LE_REALM_RELATION_SAME = 1
+    api.UnitRealmRelationship = function() return 1 end
+    api.GetNormalizedRealmName = function() return "LocalRealm" end
+    obs = client:ReadUnit("target", "poll")
+    H.Equal(obs.name, "Alpha-LocalRealm"); H.Equal(obs.realm, "LocalRealm"); H.True(obs.nameComplete)
 end)
 
 H.Test("client aura evidence distinguishes positive absent restricted and failed reads", function()
@@ -170,4 +199,38 @@ H.Test("client death evidence preserves confirmed alive dead and unknown states"
     H.Nil(client:ReadUnit("target", "poll").dead)
     api.UnitIsDeadOrGhost = function() error("restricted death state") end
     H.Nil(client:ReadUnit("target", "poll").dead)
+end)
+
+H.Test("client class enumeration follows sparse runtime class IDs without build guesses", function()
+    local client, api = fixture()
+    local calls = 0
+    api.C_SpecializationInfo = { GetAllClassIDs = function() return { 1, 8, 11 } end }
+    api.C_CreatureInfo = { GetClassInfo = function(id)
+        calls = calls + 1
+        return { classFile = ({ [1] = "WARRIOR", [8] = "MAGE", [11] = "DRUID" })[id] }
+    end }
+    local classes, complete = client:SupportedClasses()
+    H.True(complete); H.Equal(table.concat(classes, ","), "WARRIOR,MAGE,DRUID")
+    classes[1] = "BROKEN"
+    H.Equal(client:SupportedClasses()[1], "WARRIOR"); H.Equal(calls, 3)
+end)
+
+H.Test("client partial class enumeration remains unknown and can recover", function()
+    local client, api, _, secret = fixture()
+    api.C_SpecializationInfo = { GetAllClassIDs = function() return { 1 } end }
+    api.C_CreatureInfo = { GetClassInfo = function() return { classFile = secret } end }
+    local classes, complete = client:SupportedClasses()
+    H.Nil(classes); H.False(complete)
+    api.C_CreatureInfo.GetClassInfo = function() return { classFile = "WARRIOR" } end
+    classes, complete = client:SupportedClasses()
+    H.True(complete); H.Equal(classes[1], "WARRIOR")
+end)
+
+H.Test("client legacy class enumeration uses returned tokens and reports absent APIs unknown", function()
+    local client, api = fixture()
+    H.Nil(client:SupportedClasses())
+    api.GetNumClasses = function() return 2 end
+    api.GetClassInfo = function(index) return "Localized", index == 1 and "ROGUE" or "DRUID", index == 1 and 4 or 11 end
+    local classes, complete = client:SupportedClasses()
+    H.True(complete); H.Equal(table.concat(classes, ","), "ROGUE,DRUID")
 end)

@@ -12,8 +12,13 @@ local STEALTH = {
 }
 
 function Client.New(api, diagnostics)
-    return setmetatable({ api = api or _G, diagnostics = diagnostics }, Client)
+    local self = setmetatable({ api = api or _G, diagnostics = diagnostics }, Client)
+    if RG.Range then self.range = RG.Range.New(self.api, self) end
+    return self
 end
+
+function Client:ForgetToken(token) if self.range then self.range:Forget(token) end end
+function Client:InvalidateRanges() if self.range then self.range:Invalidate() end end
 
 function Client:Count(key)
     if self.diagnostics and self.diagnostics.Count then self.diagnostics:Count(key) end
@@ -83,36 +88,81 @@ end
 function Client:Names(token)
     local api = self.api
     local regional = self:Boolean(self:Safe(api.RegionalUniqueNamesEnabled))
-    local first, second = self:Safe(api.UnitFullName, token)
-    first, second = self:Text(first, 100), self:Text(second, 100)
-    if not first then
-        first, second = self:Safe(api.UnitName, token)
-        first, second = self:Text(first, 100), self:Text(second, 100)
-    end
     local unknown = self:Text(api.UNKNOWNOBJECT, 100)
-    if first == "Unknown" or first == unknown then first, second = nil, nil end
-    if regional then
-        local full = self:Text(self:Safe(api.GetUnitName, token, true), 200)
-        if full == "Unknown" or full == unknown then full = nil end
-        if full and full:find(" ", 1, true) then return full end
-        if first and second then return first .. " " .. second end
-        return full or first
+    local function parts(reader)
+        local first, second = self:Safe(reader, token)
+        first, second = self:Text(first, 160), self:Text(second, 96)
+        if not first or first == "Unknown" or first == unknown then return nil end
+        if second == "Unknown" or second == unknown then second = nil end
+        return first, second
     end
-    if first and second then return first .. "-" .. second, second end
-    return first
+    if regional then
+        -- Camelot NameUtil obtains the surname from UnitName[Unmodified], not
+        -- UnitFullName's server field. Do not treat a backend as a surname.
+        local constants = api.Constants and api.Constants.CharacterNameSeparatorConsts
+        local separator = constants and self:Clean(constants.CHARACTERNAME_SURNAME_SEPARATOR)
+        if type(separator) ~= "string" or #separator < 1 or #separator > 8 or separator:find("[%z\1-\31\127|]") then separator = " " end
+        local partial
+        for _, key in ipairs({ "UnitNameUnmodified", "UnitName" }) do
+            local first, surname = parts(api[key])
+            if first then
+                local split = first:find(separator, 1, true)
+                if (split and split > 1 and split + #separator <= #first) or first:match("^%S+%s+%S") then
+                    return first, nil, true
+                end
+                if surname and first ~= surname then
+                    local full = self:Text(first .. separator .. surname, 160)
+                    if full then return full, nil, true end
+                end
+                partial = partial or first
+            end
+        end
+        local other = parts(api.UnitFullName)
+        return partial or other, nil, false
+    end
+
+    local partial
+    for _, key in ipairs({ "UnitFullName", "UnitNameUnmodified", "UnitName" }) do
+        local first, realm = parts(api[key])
+        if first then
+            partial = partial or first
+            if realm then
+                local suffix = "-" .. realm
+                local full = self:Text(first:sub(-#suffix) == suffix and first or (first .. suffix), 160)
+                if full then return full, realm, true end
+            end
+        end
+    end
+    if partial then
+        local relationship = self:Number(self:Safe(api.UnitRealmRelationship, token))
+        local same = self:Number(api.LE_REALM_RELATION_SAME)
+        if same and relationship == same then
+            local realm = self:Text(self:Safe(api.GetNormalizedRealmName), 96)
+            if realm then
+                local full = self:Text(partial .. "-" .. realm, 160)
+                if full then return full, realm, true end
+            end
+        end
+    end
+    return partial, nil, false
 end
 
-function Client:Range(token)
+function Client:Range(token, identity)
     local squared, checked = self:Safe(self.api.UnitDistanceSquared, token)
     squared, checked = self:Number(squared), self:Boolean(checked)
     if squared and squared >= 0 and checked == true then
         local distance = math.sqrt(squared)
-        return distance, distance
+        return distance, distance, false
     end
     -- A failed interaction check does not establish an enemy's lower distance bound.
-    if self:Boolean(self:Safe(self.api.CheckInteractDistance, token, 3)) == true then return 0, 10 end
-    if self:Boolean(self:Safe(self.api.CheckInteractDistance, token, 4)) == true then return 0, 28 end
-    return nil, nil
+    local lower, upper, exclusive
+    if self.range then lower, upper, exclusive = self.range:Measure(token, identity) end
+    local interaction
+    if self:Boolean(self:Safe(self.api.CheckInteractDistance, token, 3)) == true then interaction = 10
+    elseif self:Boolean(self:Safe(self.api.CheckInteractDistance, token, 4)) == true then interaction = 28 end
+    if interaction then lower, upper = lower or 0, math.min(upper or math.huge, interaction) end
+    if lower and upper and (lower > upper or (lower == upper and exclusive)) then return nil, nil, false end
+    return lower, upper, exclusive == true
 end
 
 function Client:Stealth(token)
@@ -147,7 +197,7 @@ function Client:ReadUnit(token, source)
     local api = self.api
     local exists = self:Boolean(self:Safe(api.UnitExists, token))
     if exists == false then return nil end
-    local name, realm = self:Names(token)
+    local name, realm, nameComplete = self:Names(token)
     local guid = self:Text(self:Safe(api.UnitGUID, token), 128)
     local player = self:Boolean(self:Safe(api.UnitIsPlayer, token))
     if exists ~= true and not name and not guid and player ~= true then return nil end
@@ -159,7 +209,7 @@ function Client:ReadUnit(token, source)
     if hostile == nil then hostile = self:Boolean(self:Safe(api.UnitCanAttack, "player", token)) end
     local level = self:Number(self:Safe(api.UnitLevel, token))
     if level and (level <= 0 or level > 1000) then level = nil end
-    local rangeMin, rangeMax = self:Range(token)
+    local rangeMin, rangeMax, rangeMinExclusive = self:Range(token, guid or (nameComplete and name))
     local manager = api.C_NamePlateManager
     local behind
     if type(manager) == "table" then behind = self:Boolean(self:Safe(manager.IsNamePlateUnitBehindCamera, token)) end
@@ -167,10 +217,11 @@ function Client:ReadUnit(token, source)
     -- Aura scans are event-driven; the regular identity poll does not walk 40 buffs per unit.
     if source ~= "poll" then stealth, readable = self:Stealth(token) end
     return {
-        token = token, guid = guid, name = name, realm = realm, class = class, level = level,
+        token = token, guid = guid, name = name, nameComplete = nameComplete, realm = realm, class = class, level = level,
         hostile = hostile, isPlayer = player, source = source or "unit",
         dead = self:Boolean(self:Safe(api.UnitIsDeadOrGhost, token)),
         rangeMin = rangeMin, rangeMax = rangeMax,
+        rangeMinExclusive = rangeMinExclusive,
         targeting = self:Boolean(self:Safe(api.UnitIsUnit, token .. "target", "player")),
         stealth = stealth, stealthReadable = readable == true, behindCamera = behind,
     }
@@ -208,5 +259,47 @@ function Client:Capabilities()
         distance = type(api.UnitDistanceSquared) == "function",
         behindCamera = type(api.C_NamePlateManager) == "table" and type(api.C_NamePlateManager.IsNamePlateUnitBehindCamera) == "function",
         combatLog = false,
+        spellRange = self.range ~= nil and self.range:Available(),
     }
+end
+
+function Client:SupportedClasses()
+    if self.supportedClasses then return RG.Util.Copy(self.supportedClasses), true end
+    local api, found, count = self.api, {}, 0
+    local specialization = api.C_SpecializationInfo
+    local ids = type(specialization) == "table" and self:Safe(specialization.GetAllClassIDs) or nil
+    local creature = api.C_CreatureInfo
+    local function remember(token)
+        token = self:Text(token, 20)
+        if not token or not CLASS[token] then return false end
+        if not found[token] then found[token], count = true, count + 1 end
+        return true
+    end
+    if type(ids) == "table" and #ids > 0 and #ids <= 64 then
+        for _, rawID in ipairs(ids) do
+            local id = self:Number(rawID)
+            if not id or id <= 0 or id % 1 ~= 0 then return nil, false end
+            local token
+            if type(creature) == "table" and type(creature.GetClassInfo) == "function" then
+                local info = self:Safe(creature.GetClassInfo, id)
+                if type(info) == "table" then token = self:Safe(function() return info.classFile end) end
+            elseif type(api.GetClassInfo) == "function" then
+                local _
+                _, token = self:Safe(api.GetClassInfo, id)
+            end
+            if not remember(token) then return nil, false end
+        end
+    else
+        local total = self:Number(self:Safe(api.GetNumClasses))
+        if not total or total < 1 or total > 64 or total % 1 ~= 0 or type(api.GetClassInfo) ~= "function" then return nil, false end
+        for index = 1, total do
+            local _, token = self:Safe(api.GetClassInfo, index)
+            if not remember(token) then return nil, false end
+        end
+    end
+    if count == 0 then return nil, false end
+    local result = {}
+    for _, token in ipairs(RG.Defaults.classes) do if found[token] then result[#result + 1] = token end end
+    self.supportedClasses = result
+    return RG.Util.Copy(result), true
 end

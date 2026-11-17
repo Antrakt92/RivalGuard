@@ -1,11 +1,14 @@
 local _, RG = ...
 local UI = RG.Register("UI", {})
 local M = RG.UIModel
+local BANNER_PRIORITY = { sighting = 20, returning = 30, wave = 35, targeting = 70, watch = 90, stealth = 100 }
+local BANNER_CATEGORIES = { watch = "watchTitle", watched = "watchTitle", avoid = "watchTitle", stealth = "stealthTitle", targeting = "targetingTitle", wave = "waveTitle" }
+local BANNER_QUEUE_LIMIT, BANNER_MAX_AGE = 8, 5
 
 UI.layout = { width = 348, header = 88, footer = 58, rowPadding = 20, settingsWidth = 800, settingsHeight = 610 }
 
 local C = {
-    bg = { 0.035, 0.045, 0.065, 0.97 }, panel = { 0.065, 0.080, 0.105, 0.98 },
+    bg = { 0.035, 0.045, 0.065, 1 }, panel = { 0.065, 0.080, 0.105, 1 },
     text = { 0.93, 0.95, 1 }, muted = { 0.63, 0.70, 0.79 }, accent = { 0.37, 0.78, 0.92 },
     gold = { 1, 0.79, 0.30 }, danger = { 1, 0.42, 0.38 }, border = { 0.22, 0.30, 0.39, 1 },
 }
@@ -91,12 +94,65 @@ local function pathSet(profile, path, value)
 end
 
 function UI.New(app)
-    local self = { app = app, aliases = {}, offset = 0, profileOffset = 0, journalOffset = 0, rows = {}, controls = {}, pages = {}, localized = {}, selected = nil }
+    local self = { app = app, aliases = {}, previewAliases = {}, offset = 0, profileOffset = 0, journalOffset = 0, rows = {}, controls = {}, pages = {}, localized = {}, windows = {}, bannerQueue = {}, selected = nil }
+    -- Keep partial initialization reachable so the caller can clean it up.
+    app.ui = self
+
+    function self:Destroy()
+        if self.destroyed then return end
+        self.destroyed = true
+        if self.ticker then self.ticker:SetScript("OnUpdate", nil); self.ticker:UnregisterAllEvents() end
+        if self.badges then self.badges:Destroy() end
+        for name, frame in pairs(self.windows) do
+            frame:Hide()
+            if _G[name] == frame then _G[name] = nil end
+        end
+        if UISpecialFrames then
+            for i = #UISpecialFrames, 1, -1 do
+                if self.windows[UISpecialFrames[i]] then table.remove(UISpecialFrames, i) end
+            end
+        end
+    end
+
+    function self:Window(name, parent)
+        -- Escape uses the global reference; anonymous native frames remain safe to recreate.
+        local frame = CreateFrame("Frame", nil, parent or UIParent)
+        self.windows[name] = frame
+        _G[name] = frame
+        return frame
+    end
+
+    function self:FitWindow(frame, width, height, requested)
+        local screenWidth = M.Number(UIParent:GetWidth(), 1920)
+        local screenHeight = M.Number(UIParent:GetHeight(), 1080)
+        local scale = math.min(requested or 1, math.max(0.1, (screenWidth - 24) / width), math.max(0.1, (screenHeight - 24) / height))
+        frame:SetScale(scale)
+    end
 
     function self:Profile() return app.db:GetProfile() end
     function self:T(key) return RG.Locale.Get(key, self:Profile().locale) end
     function self:F(key, ...) return RG.Locale.Format(key, self:Profile().locale, ...) end
     function self:Now() return app.engine:Now() end
+
+    function self:UpdateClasses()
+        if self.classAvailability then return end
+        local tokens, known
+        if app.SupportedClasses then tokens, known = app:SupportedClasses() end
+        self.classAvailability = nil
+        if known and type(tokens) == "table" then
+            local available = {}
+            for _, token in ipairs(tokens) do if RG.Defaults.classSet[token] then available[token] = true end end
+            if next(available) then self.classAvailability = available; self.controlsDirty = true end
+        end
+    end
+
+    function self:SettingsChanged()
+        self.controlsDirty = true
+        self.dataPage = nil
+        self:ClearBanners()
+        if self.activeBanner then self:PaintBanner(self.activeBanner) end
+        self:Refresh()
+    end
 
     local function label(parent, key, size, color)
         local text = font(parent, size, color)
@@ -113,7 +169,7 @@ function UI.New(app)
 
     local function changed()
         if app.OnSettingsChanged then app:OnSettingsChanged() else app:ProfileChanged() end
-        self:Refresh()
+        self:SettingsChanged()
     end
 
     local function notify(key)
@@ -144,7 +200,7 @@ function UI.New(app)
         end
     end
 
-    local main = CreateFrame("Frame", "RivalGuardNearby", UIParent)
+    local main = self:Window("RivalGuardNearby", UIParent)
     self.frame = main
     main:SetSize(UI.layout.width, 410)
     main:SetFrameStrata("MEDIUM")
@@ -191,7 +247,7 @@ function UI.New(app)
             chip:SetScript("OnLeave", hideTooltip)
             chips[#chips + 1] = { frame = chip, class = class, group = group }
         end
-        self.controls[#self.controls + 1] = { kind = "classes", chips = chips }
+        self.controls[#self.controls + 1] = { kind = "classes", chips = chips, x = x, y = y, size = size, gap = gap }
         return chips
     end
 
@@ -230,25 +286,25 @@ function UI.New(app)
     local more = font(main, 10, C.muted, "CENTER")
     more:SetPoint("BOTTOMLEFT", 10, 43); more:SetPoint("BOTTOMRIGHT", -10, 43); self.moreText = more
     local pauseButton = button(main, self:T("pause"), 118, function()
-        local paused = self.pauseUntil and self.pauseUntil > self:Now()
-        if paused then app.engine:Resume(); self.pauseUntil = nil
-        else app.engine:Pause(600); self.pauseUntil = self:Now() + 600 end
+        local untilTime = M.Number(app.engine.pausedUntil)
+        local paused = untilTime and untilTime > self:Now()
+        if paused then app.engine:Resume() else app.engine:Pause(600); self:ClearBanners() end
         self:Refresh()
     end)
     pauseButton:SetPoint("BOTTOMLEFT", 10, 9); self.pauseButton = pauseButton
-    local muteButton = button(main, self:T("mute"), 111, function() app:ToggleMute(); self:Refresh() end)
+    local muteButton = button(main, self:T("mute"), 111, function() app:ToggleMute(); self:SettingsChanged() end)
     muteButton:SetPoint("LEFT", pauseButton, "RIGHT", 5, 0); self.muteButton = muteButton
     local demoButton = localButton(main, "demo", 85, function() app:Demo() end)
     demoButton:SetPoint("LEFT", muteButton, "RIGHT", 5, 0)
     demoButton:SetScript("OnEnter", function() tooltip(demoButton, self:T("demo"), self:T("demoTip")) end)
     demoButton:SetScript("OnLeave", hideTooltip)
     main:SetScript("OnMouseWheel", function(_, delta)
-        local count = #M.Rows(app.engine:Snapshot(), self:Profile(), self:Now(), self.aliases)
+        local count = self.renderedCount or 0
         self.offset = math.max(0, math.min(math.max(0, count - self:Profile().display.maxRows), self.offset - delta))
         self:Refresh()
     end)
 
-    local banner = CreateFrame("Frame", "RivalGuardAlert", UIParent)
+    local banner = self:Window("RivalGuardAlert", UIParent)
     self.banner = banner
     banner:SetSize(440, 84); banner:SetFrameStrata("HIGH"); banner:SetClampedToScreen(true)
     banner:SetMovable(true); banner:EnableMouse(false)
@@ -265,7 +321,7 @@ function UI.New(app)
     banner:SetScript("OnDragStop", function() banner:StopMovingOrSizing(); savePosition(banner, "alert") end)
     banner:Hide()
 
-    local settings = CreateFrame("Frame", "RivalGuardSettings", UIParent)
+    local settings = self:Window("RivalGuardSettings", UIParent)
     self.settings = settings
     settings:SetSize(UI.layout.settingsWidth, UI.layout.settingsHeight)
     settings:SetPoint("CENTER"); settings:SetFrameStrata("DIALOG"); settings:SetClampedToScreen(true)
@@ -398,12 +454,23 @@ function UI.New(app)
     y = slider(alerts, "cooldown", "alerts.cooldown", y, 5, 180, 5, "cooldownTip")
     y = slider(alerts, "returnAfter", "alerts.returnAfter", y, 5, 180, 5, "returnAfterTip")
     y = choice(alerts, "soundChannel", "alerts.channel", { { "Master", "master" }, { "SFX", "sfx" }, { "Dialog", "dialog" }, { "Music", "music" }, { "Ambience", "ambience" } }, y)
+    y = section(alerts, "sounds", y - 4)
+    local soundOptions = { { "none", "soundNone" }, { "ping", "soundPing" }, { "warning", "soundWarning" }, { "ready", "soundReady" }, { "whisper", "soundWhisper" }, { "quest", "soundQuest" } }
+    for _, entry in ipairs({ { "sighting", "eventSighting" }, { "returning", "eventReturning" }, { "watch", "eventWatch" }, { "stealth", "eventStealth" }, { "targeting", "eventTargeting" }, { "wave", "eventWave" } }) do
+        local kind = entry[1]
+        local rowY = y
+        y = choice(alerts, entry[2], "alerts.sounds." .. kind, soundOptions, y, 380)
+        local listen = localButton(alerts, "previewSound", 150, function() if app.PreviewSound then app:PreviewSound(kind) end end)
+        listen:SetPoint("TOPLEFT", 395, rowY - 25)
+    end
     y = check(alerts, "rangeFilter", "range.enabled", y, "rangeFilterTip")
     y = slider(alerts, "rangeYards", "range.yards", y - 6, 5, 100, 5)
     y = choice(alerts, "rangePolicy", "range.policy", { { "possible", "possible" }, { "confirmed", "confirmed" } }, y)
     y = check(alerts, "unknownRange", "range.unknown", y)
     local previewAlert = localButton(alerts, "previewBanner", 200, function() self:PreviewAlert() end)
     previewAlert:SetPoint("TOPLEFT", 0, y - 6)
+    local advancedRules = localButton(alerts, "rules", 240, function() if self.OpenRules then self:OpenRules() end end)
+    advancedRules:SetPoint("LEFT", previewAlert, "RIGHT", 12, 0)
     alerts.height = -y + 60
 
     local appearance = CreateFrame("Frame", nil, content); self.pages.appearance = appearance; appearance:SetAllPoints()
@@ -413,7 +480,7 @@ function UI.New(app)
     end
     y = slider(appearance, "textSize", "display.textSize", y - 8, 11, 20, 1)
     y = slider(appearance, "scale", "display.scale", y, 0.75, 1.5, 0.05)
-    y = slider(appearance, "maxRows", "display.maxRows", y, 3, 12, 1)
+    y = slider(appearance, "maxRows", "display.maxRows", y, 3, 20, 1)
     local preview = localButton(appearance, "previewBanner", 200, function() self:PreviewAlert() end)
     preview:SetPoint("TOPLEFT", 0, y)
     local previewContacts = localButton(appearance, "previewList", 200, function() app:Demo() end)
@@ -433,6 +500,7 @@ function UI.New(app)
     local nameTitle = label(profiles, "profileName", 13); nameTitle:SetPoint("TOPLEFT", 0, y - 36)
     local nameInput = CreateFrame("EditBox", nil, profiles, "InputBoxTemplate")
     nameInput:SetPoint("TOPLEFT", 8, y - 65); nameInput:SetSize(345, 26); nameInput:SetAutoFocus(false); nameInput:SetMaxLetters(64)
+    if nameInput.SetMaxBytes then nameInput:SetMaxBytes(64) end
     nameInput:SetScript("OnEscapePressed", function(box) box:ClearFocus() end)
     self.profileInput = nameInput
     local presetTokens = { "balanced", "farming", "quiet", "battleground" }
@@ -443,6 +511,8 @@ function UI.New(app)
         self.newPreset = presetTokens[index % #presetTokens + 1]; self:Refresh()
     end)
     presetButton:SetPoint("TOPLEFT", 0, y - 103); self.presetButton = presetButton
+    presetButton:SetScript("OnEnter", function() tooltip(presetButton, self:T(self.newPreset), self:T(self.newPreset .. "Tip")) end)
+    presetButton:SetScript("OnLeave", hideTooltip)
     local createProfile = localButton(profiles, "createProfile", 200, function()
         if not app.db.CreateProfile then notify("noProfileAPI") return end
         local name = nameInput:GetText()
@@ -481,7 +551,11 @@ function UI.New(app)
     local profileNext = localButton(profiles, "next", 120, function() self.profileOffset = self.profileOffset + 10; self:RefreshProfiles() end)
     profileNext:SetPoint("LEFT", profilePrev, "RIGHT", 12, 0)
     self.profilePrev, self.profileNext = profilePrev, profileNext
-    profiles.height = -y + 615
+    local exportProfile = localButton(profiles, "exportProfile", 245, function() if self.OpenTransfer then self:OpenTransfer("export") end end)
+    exportProfile:SetPoint("TOPLEFT", 0, y - 615)
+    local importProfile = localButton(profiles, "importProfile", 245, function() if self.OpenTransfer then self:OpenTransfer("import") end end)
+    importProfile:SetPoint("LEFT", exportProfile, "RIGHT", 12, 0)
+    profiles.height = -y + 670
 
     local journal = CreateFrame("Frame", nil, content); self.pages.journal = journal; journal:SetAllPoints()
     y = section(journal, "journal", 0, "journalHelp")
@@ -499,7 +573,9 @@ function UI.New(app)
     local journalNext = localButton(journal, "next", 120, function() self.journalOffset = self.journalOffset + 12; self:RefreshJournal() end)
     journalNext:SetPoint("LEFT", journalPrev, "RIGHT", 12, 0)
     self.journalPrev, self.journalNext = journalPrev, journalNext
-    journal.height = -y + 535
+    local retentionY = section(journal, "journalDays", y - 545, "retentionHelp")
+    retentionY = slider(journal, "journalDays", "retention.journalDays", retentionY, 0, 90, 1)
+    journal.height = -retentionY + 20
 
     local support = CreateFrame("Frame", nil, content); self.pages.support = support; support:SetAllPoints()
     y = section(support, "support", 0, "supportHelp")
@@ -539,7 +615,15 @@ function UI.New(app)
                 local value = pathGet(self:Profile(), control.path)
                 for _, option in ipairs(control.options) do if option[1] == value then control.frame.label:SetText(self:T(option[2]) .. "  ›") end end
             elseif control.kind == "classes" then
+                local visibleIndex = 0
                 for _, chip in ipairs(control.chips) do
+                    local available = not self.classAvailability or self.classAvailability[chip.class] == true
+                    chip.frame:SetShown(available)
+                    if available then
+                        chip.frame:ClearAllPoints()
+                        chip.frame:SetPoint("TOPLEFT", control.x + visibleIndex * (control.size + control.gap), control.y)
+                        visibleIndex = visibleIndex + 1
+                    end
                     local selected = M.ClassEnabled(self:Profile()[chip.group].classes, chip.class)
                     chip.frame.icon:SetDesaturated(not selected)
                     chip.frame.icon:SetAlpha(selected and 1 or 0.28)
@@ -602,27 +686,41 @@ function UI.New(app)
     function self:Refresh()
         if self.destroyed then return end
         local profile = self:Profile()
+        self:UpdateClasses()
         if self.lastProfile ~= profile then
             restorePosition(main, "nearby", "RIGHT", -70, 20)
             restorePosition(banner, "alert", "TOP", 0, -180)
             self.lastProfile = profile
+            self.controlsDirty = true
         end
         local now = self:Now()
         local preview = self.previewUntil and self.previewUntil > now
         if not preview then self.previewContacts, self.previewUntil = nil, nil end
         local snapshot = preview and self.previewContacts or app.engine:Snapshot()
-        local rows = M.Rows(snapshot, profile, now, self.aliases)
-        local maxRows = math.floor(RG.Util.Clamp(profile.display.maxRows, 3, 12, 8))
+        local rows = M.Rows(snapshot, profile, now, preview and self.previewAliases or self.aliases)
+        self.renderedCount = #rows
+        local maxRows = math.floor(RG.Util.Clamp(profile.display.maxRows, 3, 20, 8))
         local rowHeight = profile.display.textSize + UI.layout.rowPadding
-        main:SetScale(profile.display.scale)
-        main:SetHeight(UI.layout.header + math.max(3, math.min(maxRows, #rows)) * rowHeight + UI.layout.footer)
+        local mainHeight = UI.layout.header + math.max(3, math.min(maxRows, #rows)) * rowHeight + UI.layout.footer
+        main:SetHeight(mainHeight)
+        self:FitWindow(main, UI.layout.width, mainHeight, profile.display.scale)
         main:SetShown(profile.display.showList or preview)
         self.offset = math.max(0, math.min(self.offset, math.max(0, #rows - maxRows)))
-        local appStatus = app.Status and app:Status() or {}
+        local needsStatus = self.statusAt == nil or now - self.statusAt >= 1
+            or settings:IsShown() and self.currentPage == "support" and self.statusPage ~= "support"
+        if needsStatus then
+            self.statusCache = app.Status and app:Status() or {}
+            self.statusAt = now
+        end
+        self.statusPage = settings:IsShown() and self.currentPage or nil
+        local appStatus = self.statusCache or {}
         if type(appStatus) ~= "table" then appStatus = { detail = appStatus } end
-        local paused = appStatus.state == "paused" or (self.pauseUntil and self.pauseUntil > now)
-        local status = preview and self:T("demoLabel") or not profile.enabled and self:T("disabled") or paused and self:T("paused") or self:T("active")
-        statusText:SetText(status .. " · " .. #rows .. " " .. self:T("nearby"))
+        local untilTime = M.Number(app.engine.pausedUntil)
+        local paused = appStatus.state == "paused" or (untilTime and untilTime > now)
+        local visibleCount = 0
+        for _, row in ipairs(rows) do if row.visible then visibleCount = visibleCount + 1 end end
+        local status = preview and self:T("demoLabel") or not profile.enabled and self:T("disabled") or paused and self:T("paused") or self:T(appStatus.state == "limited" and "limited" or "active")
+        statusText:SetText(status .. " · " .. self:F("inViewCount", visibleCount))
         self.pauseButton.label:SetText(self:T(paused and "resume" or "pause"))
         self.muteButton.label:SetText(self:T(profile.alerts.sound and "mute" or "unmute"))
         empty:SetShown(#rows == 0); emptyHelp:SetShown(#rows == 0)
@@ -638,7 +736,8 @@ function UI.New(app)
                 row.detailText:ClearAllPoints(); row.detailText:SetPoint("TOPLEFT", 36, -profile.display.textSize - 5)
                 row.nameText:SetText(data.name)
                 if data.class then row.nameText:SetTextColor(classColor(data.class)) else row.nameText:SetTextColor(unpack(C.text)) end
-                row.detailText:SetText(data.detail)
+                local level = M.Number(data.contact.level)
+                row.detailText:SetText(level and (self:F("levelShort", level) .. " · " .. data.detail) or data.detail)
                 row.detailText:SetTextColor(unpack(profile.display.highContrast and C.text or C.muted))
                 row.icon:SetTexture(data.class and ("Interface\\Icons\\ClassIcon_" .. data.class) or "Interface\\Icons\\INV_Misc_QuestionMark")
                 row:SetAlpha(data.visible and 1 or profile.display.highContrast and 0.9 or 0.65)
@@ -646,24 +745,39 @@ function UI.New(app)
             end
         end
         more:SetText(#rows > maxRows and self:F("moreContacts", #rows - maxRows) or self:T("noTarget"))
-        self:RefreshControls()
+        if self.controlsDirty then self:RefreshControls(); self.controlsDirty = false end
         self.badges:Refresh()
         if settings:IsShown() then
-            if self.currentPage == "profiles" then self:RefreshProfiles() end
-            if self.currentPage == "journal" then self:RefreshJournal() end
+            self:FitWindow(settings, UI.layout.settingsWidth, UI.layout.settingsHeight, 1)
+            if self.currentPage == "profiles" and (needsStatus or self.dataPage ~= "profiles") then self:RefreshProfiles() end
+            if self.currentPage == "journal" and (needsStatus or self.dataPage ~= "journal") then self:RefreshJournal() end
             if self.currentPage == "support" then
                 local lines = { M.Text(appStatus.detail, self:T("sensorReady")) }
                 if appStatus.nameplates == false then lines[#lines + 1] = self:T("nameplatesOff") end
                 if appStatus.state == "limited" then lines[#lines + 1] = self:T("sensorLimited") end
                 if appStatus.state == "disabled" then lines[#lines + 1] = self:T("disabled") end
+                if appStatus.writable == false then lines[#lines + 1] = self:T("sessionOnly") end
                 self.supportStatus:SetText(table.concat(lines, "\n\n"))
             end
+            self.dataPage = self.currentPage
+        else
+            self.dataPage = nil
+        end
+        if self.dialogs then self.dialogs:Refresh() end
+        if self.detailsFrame and self.detailsFrame:IsShown() and self.selected then
+            local current
+            for _, contact in ipairs(snapshot) do if contact.id == self.selected.id then current = contact break end end
+            if current then self.selected = current end
+            self.selectedOutside = current == nil
+            self:ShowDetails(true)
         end
     end
 
     function self:OpenSettings(page)
         page = self.pages[page] and page or self.currentPage or "overview"
         self.currentPage = page
+        self.controlsDirty = true
+        self.dataPage = nil
         for key, frame in pairs(self.pages) do
             frame:SetShown(key == page)
             self.nav[key].bg:SetColorTexture(unpack(key == page and { 0.10, 0.22, 0.28, 1 } or C.panel))
@@ -680,28 +794,82 @@ function UI.New(app)
         changed()
     end
 
+    function self:PaintBanner(item)
+        local kind, class = item.kind, item.class
+        local title = self:T(BANNER_CATEGORIES[kind] or "alertTitle")
+        if item.preview then title = self:T("demoLabel") .. " · " .. title end
+        banner.title:SetText(title)
+        local name = self:Profile().display.streamer and self:T("unknownPlayer") or item.name
+        banner.body:SetText(item.count and item.count > 1 and self:F("waveBody", item.count) or name)
+        banner.icon:SetTexture(RG.Defaults.classSet[class] and ("Interface\\Icons\\ClassIcon_" .. class) or "Interface\\Icons\\Ability_Warrior_BattleShout")
+        banner.title:SetTextColor(unpack((kind == "watch" or kind == "stealth" or kind == "avoid") and C.gold or C.accent))
+    end
+
+    function self:ShowBanner(item, now)
+        self.activeBanner = item
+        self.bannerPreview = item.preview
+        banner:EnableMouse(self.bannerPreview)
+        self.bannerUntil = now + (self.bannerPreview and 12 or 4)
+        self:PaintBanner(item)
+        banner:SetAlpha(1); self.bannerAlpha = 1; banner:Show()
+    end
+
+    function self:ClearBanners()
+        self.bannerQueue = {}
+        if self.activeBanner and self.activeBanner.preview then return end
+        self.activeBanner, self.bannerUntil, self.bannerPreview = nil, nil, false
+        banner:Hide(); banner:EnableMouse(false)
+    end
+
+    function self:AdvanceBanner(now)
+        local active = self.activeBanner
+        local pausedUntil = M.Number(app.engine.pausedUntil)
+        if pausedUntil and pausedUntil > now then
+            self:ClearBanners()
+            active = self.activeBanner
+        end
+        if active and self.bannerUntil > now then
+            local left = self.bannerUntil - now
+            local alpha = self:Profile().display.reducedMotion and 1 or math.min(1, left * 2)
+            if alpha ~= self.bannerAlpha then banner:SetAlpha(alpha); self.bannerAlpha = alpha end
+            return
+        end
+        self.activeBanner, self.bannerUntil, self.bannerPreview = nil, nil, false
+        if active then banner:Hide(); banner:EnableMouse(false) end
+        local queue = self.bannerQueue
+        while #queue > 0 do
+            local item = table.remove(queue, 1)
+            if now - item.at <= BANNER_MAX_AGE then self:ShowBanner(item, now); return end
+        end
+    end
+
     function self:Alert(decision)
         if type(decision) ~= "table" then return end
         local profile = self:Profile()
-        local showBanner = decision.banner
-        if showBanner == nil then showBanner = profile.alerts.banner end
-        if not showBanner and not decision.preview then return end
+        local preview = decision.preview == true
+        if not preview and (not profile.enabled or not profile.alerts.enabled or not profile.alerts.banner or decision.banner == false) then return end
         local contact = decision.contact or decision.player or decision
-        local kind = decision.kind or decision.type or "sighting"
-        local titles = { watch = "watchTitle", watched = "watchTitle", avoid = "watchTitle", stealth = "stealthTitle", targeting = "targetingTitle", wave = "waveTitle" }
-        local titleKey = titles[kind] or "alertTitle"
-        banner.title:SetText(self:T(titleKey))
-        local count = M.Number(decision.count)
-        local name = M.Text(contact.name, self:T("unknownPlayer"))
-        if self:Profile().display.streamer then name = self:T("unknownPlayer") end
-        banner.body:SetText(count and count > 1 and self:F("waveBody", count) or name)
-        local class = M.Text(contact.class, "")
-        banner.icon:SetTexture(RG.Defaults.classSet[class] and ("Interface\\Icons\\ClassIcon_" .. class) or "Interface\\Icons\\Ability_Warrior_BattleShout")
-        banner.title:SetTextColor(unpack((kind == "watch" or kind == "stealth" or kind == "avoid") and C.gold or C.accent))
-        self.bannerPreview = decision.preview == true
-        banner:EnableMouse(self.bannerPreview)
-        self.bannerUntil = self:Now() + (self.bannerPreview and 12 or 5)
-        banner:SetAlpha(1); banner:Show()
+        local kind = M.Text(decision.kind, M.Text(decision.type, "sighting"))
+        local priority = M.Number(decision.priority, BANNER_PRIORITY[kind] or 20)
+        local id = M.Text(contact.id, nil)
+        local now = self:Now()
+        local item = { kind = kind, class = M.Text(contact.class, ""), name = M.Text(contact.name, self:T("unknownPlayer")),
+            count = M.Number(decision.count), preview = preview, priority = priority, at = now,
+            key = id ~= "" and (kind .. ":" .. id) or nil }
+        self:AdvanceBanner(now)
+        local active = self.activeBanner
+        if preview and active and not active.preview then return end
+        if active and item.key and active.key == item.key and active.preview == item.preview then return end
+        if not active or active.preview or item.priority > active.priority then self:ShowBanner(item, now); return end
+        for i = #self.bannerQueue, 1, -1 do
+            local queued = self.bannerQueue[i]
+            if now - queued.at > BANNER_MAX_AGE then table.remove(self.bannerQueue, i)
+            elseif item.key and item.key == queued.key then return end
+        end
+        local index = #self.bannerQueue + 1
+        for i, queued in ipairs(self.bannerQueue) do if item.priority > queued.priority then index = i break end end
+        table.insert(self.bannerQueue, index, item)
+        if #self.bannerQueue > BANNER_QUEUE_LIMIT then table.remove(self.bannerQueue) end
     end
 
     function self:PreviewAlert()
@@ -710,11 +878,13 @@ function UI.New(app)
     end
 
     function self:Preview(contacts, decision)
-        self.previewContacts = contacts or {
+        self.previewContacts = RG.Util.Copy(contacts or {
             { id = "preview-rogue", name = self:T("demoRogue"), class = "ROGUE", visible = true, lastSeen = self:Now(), rangeMin = 10, rangeMax = 20 },
             { id = "preview-hunter", name = self:T("demoHunter"), class = "HUNTER", visible = true, lastSeen = self:Now(), rangeMin = 20, rangeMax = 40 },
             { id = "preview-mage", name = self:T("demoMage"), class = "MAGE", visible = false, lastSeen = self:Now() - 12 },
-        }
+        })
+        for _, contact in ipairs(self.previewContacts) do contact.identity, contact.preview = nil, true end
+        self.previewAliases = {}
         self.previewUntil = self:Now() + 15
         decision = decision or { kind = "stealth", contact = self.previewContacts[1] }
         local sample = RG.Util.Copy(decision)
@@ -728,12 +898,13 @@ function UI.New(app)
 
     function self:Select(contact)
         self.selected = contact
+        self.selectedOutside = contact.sources and contact.sources.journal == true or false
         self:ShowDetails()
     end
 
-    function self:ShowDetails()
+    function self:ShowDetails(refreshOnly)
         if not self.detailsFrame then
-            local detail = CreateFrame("Frame", "RivalGuardDetails", UIParent)
+            local detail = self:Window("RivalGuardDetails", UIParent)
             self.detailsFrame = detail
             detail:SetSize(470, 450); detail:SetPoint("CENTER", 80, 0)
             detail:SetFrameStrata("DIALOG"); detail:SetClampedToScreen(true); detail:EnableMouse(true)
@@ -777,12 +948,16 @@ function UI.New(app)
                 app:ProfileChanged(); self:Refresh(); self:ShowDetails()
             end)
             remove:SetPoint("TOPLEFT", 18, -231)
+            local why = localButton(detail, "why", 150, function() self:ShowExplanation() end)
+            why:SetPoint("TOPLEFT", 185, -231)
             local noteTitle = label(detail, "note", 13)
             noteTitle:SetPoint("TOPLEFT", 18, -275)
             detail.note = CreateFrame("EditBox", nil, detail, "InputBoxTemplate")
             detail.note:SetPoint("TOPLEFT", 25, -304); detail.note:SetSize(420, 28)
             detail.note:SetAutoFocus(false); detail.note:SetMaxLetters(160)
+            if detail.note.SetMaxBytes then detail.note:SetMaxBytes(160) end
             detail.note:SetScript("OnEscapePressed", function(box) box:ClearFocus() end)
+            detail:SetScript("OnHide", function() detail.note:ClearFocus() end)
             local save = localButton(detail, "saveNote", 160, function()
                 local contact = self.selected
                 if not contact or not contact.identity then notify("identityUnknown") return end
@@ -804,24 +979,48 @@ function UI.New(app)
         detail.title:SetText(name)
         local class = M.Text(contact.class, "")
         local lines = { RG.Defaults.classSet[class] and RG.Locale.Class(class, self:Profile().locale) or self:T("unknownClass") }
-        lines[#lines + 1] = M.State(contact, self:Now(), self:Profile().locale)
+        lines[#lines + 1] = self.selectedOutside and self:T("noCurrentEvidence") or M.State(contact, self:Now(), self:Profile().locale)
         local sourceNames = {}
         for source in pairs(contact.sources or {}) do
             local cleanSource = M.Text(source, "")
-            if cleanSource ~= "" then sourceNames[#sourceNames + 1] = cleanSource end
+            local sourceKeys = { nameplate = "sourceNameplate", target = "sourceTarget", focus = "sourceFocus", mouseover = "sourceMouseover", softenemy = "sourceSoftTarget", journal = "sourceJournal", preview = "demoLabel" }
+            if cleanSource ~= "" then sourceNames[#sourceNames + 1] = self:T(sourceKeys[cleanSource] or "observed") end
         end
         table.sort(sourceNames)
         lines[#lines + 1] = self:T("reason") .. ": " .. (#sourceNames > 0 and table.concat(sourceNames, ", ") or self:T("observed"))
         detail.info:SetText(table.concat(lines, "\n"))
         local entry = contact.identity and app.db:GetList()[contact.identity]
-        detail.note:SetText(M.Text(entry and entry.note or contact.note, "", 160))
+        if not refreshOnly or not (detail.note.HasFocus and detail.note:HasFocus()) then detail.note:SetText(M.Text(entry and entry.note or contact.note, "", 160)) end
         detail.identityHelp:SetShown(not contact.identity)
         detail:Show()
     end
 
+    function self:ShowExplanation()
+        if not self.explanationFrame then
+            local frame = self:Window("RivalGuardExplanation", UIParent)
+            self.explanationFrame = frame
+            frame:SetSize(460, 265); frame:SetPoint("CENTER", 0, 80); frame:SetFrameStrata("DIALOG")
+            frame:SetClampedToScreen(true); frame:EnableMouse(true)
+            fill(frame); outline(frame)
+            local titleText = label(frame, "explanation", 17, C.accent)
+            titleText:SetPoint("TOPLEFT", 18, -18); titleText:SetWidth(325)
+            local close = localButton(frame, "close", 84, function() frame:Hide() end)
+            close:SetPoint("TOPRIGHT", -12, -10)
+            frame.reason = font(frame, 14, C.text)
+            frame.reason:SetPoint("TOPLEFT", 18, -69); frame.reason:SetWidth(420)
+            local help = label(frame, "explanationHelp", 12, C.muted)
+            help:SetPoint("BOTTOMLEFT", 18, 24); help:SetWidth(420)
+            if UISpecialFrames then UISpecialFrames[#UISpecialFrames + 1] = "RivalGuardExplanation" end
+        end
+        local result = app.Explain and self.selected and app:Explain(self.selected) or nil
+        self.explanationFrame.reason:SetText(RG.Locale.Reason(type(result) == "table" and result.reason or "unavailable", self:Profile().locale))
+        self:FitWindow(self.explanationFrame, 460, 265, 1)
+        self.explanationFrame:Show()
+    end
+
     function self:ShowDiagnostics()
         if not self.copyFrame then
-            local copy = CreateFrame("Frame", "RivalGuardDiagnostics", UIParent)
+            local copy = self:Window("RivalGuardDiagnostics", UIParent)
             self.copyFrame = copy
             copy:SetSize(660, 490); copy:SetPoint("CENTER"); copy:SetFrameStrata("DIALOG")
             copy:SetClampedToScreen(true); copy:EnableMouse(true)
@@ -838,6 +1037,7 @@ function UI.New(app)
             edit:SetMultiLine(true); edit:SetAutoFocus(false); edit:SetWidth(596)
             edit:SetFontObject(ChatFontNormal or GameFontNormal)
             edit:SetScript("OnEscapePressed", function(box) box:ClearFocus(); copy:Hide() end)
+            copy:SetScript("OnHide", function() edit:ClearFocus() end)
             edit:SetScript("OnTextChanged", function(box)
                 local lines = M.Number(box:GetNumLines(), 1)
                 box:SetHeight(math.max(350, math.min(100000, lines * 16 + 24)))
@@ -856,23 +1056,15 @@ function UI.New(app)
     self.ticker = ticker
     ticker:SetScript("OnUpdate", function(_, elapsed)
         self.updateAcc = (self.updateAcc or 0) + elapsed
-        if banner:IsShown() and self.bannerUntil then
-            local left = self.bannerUntil - self:Now()
-            if left <= 0 then banner:Hide(); banner:EnableMouse(false); self.bannerPreview = false
-            elseif not self:Profile().display.reducedMotion then banner:SetAlpha(math.min(1, left * 2)) end
-        end
+        if self.activeBanner or #self.bannerQueue > 0 then self:AdvanceBanner(self:Now()) end
         if self.updateAcc >= 1 then self.updateAcc = 0; self:Refresh() end
     end)
     ticker:RegisterEvent("PLAYER_LOGOUT")
     ticker:SetScript("OnEvent", function() savePosition(main, "nearby"); savePosition(banner, "alert") end)
 
-    function self:Destroy()
-        self.destroyed = true
-        main:Hide(); settings:Hide(); banner:Hide()
-        if self.detailsFrame then self.detailsFrame:Hide() end
-        if self.copyFrame then self.copyFrame:Hide() end
-        ticker:SetScript("OnUpdate", nil); ticker:UnregisterAllEvents()
-        self.badges:Destroy()
+    if RG.UIDialogs then
+        self.dialogs = RG.UIDialogs.Attach(self, app, { button = button, label = label, localButton = localButton,
+            fill = fill, outline = outline, font = font, changed = changed, notify = notify, tooltip = tooltip, hideTooltip = hideTooltip, C = C })
     end
 
     self:Refresh()

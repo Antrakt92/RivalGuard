@@ -37,3 +37,13 @@ H.Test("audio handles missing failing and rejected playback without exception st
     api.PlaySound = function() return false end
     H.False(audio:Play("watch")); H.Equal(diag.counts.sound_unavailable, 2)
 end)
+
+H.Test("audio never reports playback when the API returns nothing or restricted status", function()
+    local audio, _, _, api, diag = fixture()
+    api.PlaySound = function() end
+    H.False(audio:Play("watch")); H.Equal(diag.counts.sound_unavailable, 1)
+    local hidden = H.Secret("sound result")
+    api.issecretvalue = function(value) return value == hidden end
+    api.PlaySound = function() return hidden end
+    H.False(audio:Play("watch")); H.Equal(diag.counts.sound_unavailable, 2)
+end)

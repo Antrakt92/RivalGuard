@@ -251,10 +251,12 @@ function W.New()
     end
     function state:LoadTOC(path)
         local modules = {}
-        for line in assert(io.open(H.root .. "/" .. (path or "RivalGuard.toc"), "r")):lines() do
+        local file = assert(io.open(H.root .. "/" .. (path or "RivalGuard.toc"), "r"))
+        for line in file:lines() do
             line = line:match("^%s*(.-)%s*$")
             if line ~= "" and not line:find("^#") then modules[#modules + 1] = line:gsub("\\", "/") end
         end
+        file:close()
         return self:Load(modules)
     end
     return state

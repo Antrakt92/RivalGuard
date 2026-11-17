@@ -14,6 +14,21 @@ function B.New(getProfile)
         return combat == true
     end
 
+    local function available(frame)
+        for _, method in ipairs({ "IsForbidden", "IsProtected" }) do
+            if frame[method] then
+                local ok, value = pcall(frame[method], frame)
+                if not ok then return false end
+                if issecretvalue then
+                    local clean, secret = pcall(issecretvalue, value)
+                    if not clean or secret then return false end
+                end
+                if value ~= false then return false end
+            end
+        end
+        return true
+    end
+
     local function acquire()
         local badge = table.remove(self.pool)
         if badge then return badge end
@@ -46,16 +61,13 @@ function B.New(getProfile)
         if not RG.UIModel.ClassEnabled(profile.display.classes, class) then badge:Hide() return end
         badge.icon:SetTexture("Interface\\Icons\\ClassIcon_" .. class)
         badge.marker:SetShown(contact.watched == true or contact.listKind == "avoid")
-        badge:SetScale(profile.display.highContrast and 1.15 or 1)
+        local scale = profile.display.highContrast and 1.15 or 1
+        if badge.styleScale ~= scale and not locked() then badge:SetScale(scale); badge.styleScale = scale end
         badge:Show()
     end
 
     function self:Set(unit, frame, contact)
-        if type(unit) ~= "string" or not unit:match("^nameplate%d+$") or not frame or not frame.SetPoint then return end
-        if frame.IsForbidden then
-            local ok, forbidden = pcall(frame.IsForbidden, frame)
-            if not ok or forbidden then return end
-        end
+        if type(unit) ~= "string" or not unit:match("^nameplate%d+$") or not frame or not frame.SetPoint or not available(frame) then return end
         local badge = self.active[unit]
         if locked() and (not badge or badge.parent ~= frame) then return end
         if not badge then

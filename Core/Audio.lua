@@ -30,7 +30,12 @@ function Audio:Play(kind, preview)
     if type(kit) ~= "number" or not RG.Util.IsFinite(kit) or kit <= 0 or type(self.api.PlaySound) ~= "function" then return false end
     local channel = CHANNELS[profile.alerts.channel] and profile.alerts.channel or "Master"
     local ok, played = pcall(self.api.PlaySound, kit, channel)
-    if not ok or played == false then
+    local restricted = false
+    if ok and type(self.api.issecretvalue) == "function" then
+        local checked, secret = pcall(self.api.issecretvalue, played)
+        restricted = not checked or secret
+    end
+    if not ok or restricted or played ~= true then
         if self.diagnostics then self.diagnostics:Count("sound_unavailable") end
         return false
     end

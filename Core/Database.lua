@@ -124,6 +124,7 @@ function DB.ValidateProfile(value, strict)
         { p.range, "policy", { possible = true, confirmed = true }, "possible" },
         { p, "locale", { auto = true, enUS = true, ruRU = true }, "auto" },
         { p, "preset", { balanced = true, farming = true, quiet = true, battleground = true, custom = true }, "custom" },
+        { p.retention, "journalMode", { all = true, watched = true, threats = true }, "all" },
     }
     for _, entry in ipairs(enums) do
         if not entry[3][entry[1][entry[2]]] then
@@ -142,7 +143,7 @@ function DB.ValidateProfile(value, strict)
 end
 
 local function newRoot()
-    return { schemaVersion = RG.schemaVersion, activeProfile = "Default", profiles = { Default = D.NewProfile() }, lists = {}, journal = {} }
+    return { schemaVersion = RG.schemaVersion, activeProfile = "Default", profiles = { Default = D.NewProfile() }, lists = {}, journal = {}, onboardingSeen = false }
 end
 
 function DB.New(raw)
@@ -153,6 +154,7 @@ function DB.New(raw)
         self.writable, self.recoveryReason = false, "future_schema"
         return self
     end
+    self.root.onboardingSeen = raw.onboardingSeen == true
     local count = 1
     if type(raw.profiles) == "table" then
         for name, value in pairs(raw.profiles) do
@@ -169,7 +171,7 @@ function DB.New(raw)
     if type(raw.lists) == "table" then
         for identity, entry in pairs(raw.lists) do
             if U.Count(self.root.lists) >= MAX_LISTS then break end
-            if type(entry) == "table" then self:SetList(identity, entry.kind, entry.note) end
+            if type(entry) == "table" then self:SetList(identity, entry.kind, entry.note, entry) end
         end
     end
     -- Session sightings are deliberately not restored as live contacts.
@@ -192,6 +194,14 @@ function DB:GetActiveProfileName() return self.root.activeProfile end
 function DB:ListProfiles() return U.SortedKeys(self.root.profiles) end
 function DB:GetList() return self.root.lists end
 function DB:GetJournal() return U.Copy(self.root.journal) end
+function DB:HasSeenGuide() return self.root.onboardingSeen end
+function DB:MarkGuideSeen() self.root.onboardingSeen = true end
+
+function DB:ClearJournal()
+    local count = #self.root.journal
+    self.root.journal = {}
+    return count
+end
 
 function DB:CreateProfile(name, preset)
     name = profileName(name)
@@ -212,6 +222,8 @@ end
 DB.UseProfile = DB.SetProfile
 
 function DB:CopyProfile(name, source)
+    name = profileName(name)
+    if not name then return nil, "invalid_name" end
     if not self.root.profiles[source or self.root.activeProfile] then return nil, "profile_missing" end
     local created, err = self:CreateProfile(name)
     if not created then return nil, err end
@@ -232,14 +244,19 @@ function DB:ResetProfile()
     return self:GetProfile()
 end
 
-function DB:SetList(identity, kind, note)
+function DB:SetList(identity, kind, note, metadata)
     identity = U.Text(identity, 256)
     if not identity or not (identity:match("^guid:") or identity:match("^name:")) then return nil, "unknown_identity" end
     if kind == nil then self.root.lists[identity] = nil return true end
     if kind ~= "watch" and kind ~= "avoid" and kind ~= "ignore" and kind ~= "note" then return nil, "invalid_list" end
     if not self.root.lists[identity] and U.Count(self.root.lists) >= MAX_LISTS then return nil, "list_limit" end
     if note ~= nil and note ~= "" and not U.Text(note, 512) then return nil, "invalid_note" end
-    self.root.lists[identity] = { kind = kind, note = U.Text(note, 512) }
+    local existing = self.root.lists[identity]
+    metadata = type(metadata) == "table" and metadata or {}
+    self.root.lists[identity] = {
+        kind = kind, note = U.Text(note, 512), name = U.Text(metadata.name, 160) or (existing and existing.name),
+        class = D.classSet[metadata.class] and metadata.class or (existing and existing.class),
+    }
     return true
 end
 
@@ -257,6 +274,8 @@ function DB:PreviewImport(text)
 end
 
 function DB:ImportProfile(name, text)
+    name = profileName(name)
+    if not name then return nil, "invalid_name" end
     local profile, err = self:PreviewImport(text)
     if not profile then return nil, err end
     local created, why = self:CreateProfile(name)
@@ -269,6 +288,9 @@ function DB:Record(contact, epoch, zone)
     if not contact.identity or not contact.name or not U.IsFinite(epoch) then return end
     local profile = self:GetProfile()
     if profile.retention.journalDays == 0 then return end
+    local mode = profile.retention.journalMode
+    if mode == "watched" and not contact.watched then return end
+    if mode == "threats" and not contact.watched and not contact.targeting and contact.stealth ~= "confirmed" then return end
     local record
     for _, item in ipairs(self.root.journal) do if item.identity == contact.identity then record = item break end end
     if not record then
@@ -284,6 +306,10 @@ end
 function DB:Prune(epoch)
     local profile = self:GetProfile()
     local journal = self.root.journal
+    if profile.retention.journalDays == 0 then
+        for index = #journal, 1, -1 do journal[index] = nil end
+        return
+    end
     table.sort(journal, function(a, b) return a.lastSeen > b.lastSeen end)
     for index = #journal, 1, -1 do
         if index > profile.retention.maxJournal or epoch - journal[index].lastSeen > profile.retention.journalDays * 86400 then table.remove(journal, index) end

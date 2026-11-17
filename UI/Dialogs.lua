@@ -1,0 +1,340 @@
+local _, RG = ...
+local D = RG.Register("UIDialogs", {})
+local M = RG.UIModel
+
+function D.Attach(ui, app, H)
+    local self = { ruleOffset = 0 }
+    local function t(key) return ui:T(key) end
+    local function notify(key) H.notify(key) end
+
+    local function dialog(name, titleKey, width, height)
+        local frame = ui:Window(name, UIParent)
+        frame:SetSize(width, height); frame:SetPoint("CENTER"); frame:SetFrameStrata("DIALOG")
+        frame:SetClampedToScreen(true); frame:EnableMouse(true)
+        H.fill(frame); H.outline(frame)
+        ui:FitWindow(frame, width, height, 1)
+        local title = H.label(frame, titleKey, 18, H.C.accent)
+        title:SetPoint("TOPLEFT", 18, -17); title:SetWidth(width - 130)
+        local close = H.localButton(frame, "close", 84, function() frame:Hide() end)
+        close:SetPoint("TOPRIGHT", -12, -10)
+        if UISpecialFrames then UISpecialFrames[#UISpecialFrames + 1] = name end
+        return frame
+    end
+
+    local function textInput(parent, width, maxBytes)
+        local edit = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
+        edit:SetSize(width, 28); edit:SetAutoFocus(false); edit:SetMaxLetters(maxBytes)
+        if edit.SetMaxBytes then edit:SetMaxBytes(maxBytes) end
+        edit:SetScript("OnEscapePressed", function(box) box:ClearFocus() end)
+        return edit
+    end
+
+    function self:RuleDraft(index)
+        local profile = ui:Profile()
+        self.ruleIndex, self.ruleProfile = index, profile
+        self.ruleOriginal = index and profile.rules[index] or nil
+        self.ruleDraft = RG.Util.Copy(self.ruleOriginal or {
+            name = t("ruleNewName"), enabled = true, priority = 50, classes = {},
+            event = "sighting", action = "alert", sound = true, banner = true, cooldown = 30,
+        })
+        if self.rulesFrame then
+            self.loadingRule = true
+            self.rulesFrame.nameInput:SetText(self.ruleDraft.name)
+            self.loadingRule = false
+        end
+        self:RefreshRules()
+    end
+
+    local function draftCheck(parent, key, field, x, y)
+        local check = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
+        check:SetPoint("TOPLEFT", x, y); check:SetSize(26, 26)
+        local label = H.label(check, key, 13)
+        label:SetPoint("LEFT", check, "RIGHT", 2, 0); label:SetWidth(360); label:SetJustifyV("MIDDLE")
+        check:SetHitRectInsets(0, -350, 0, 0)
+        check:SetScript("OnClick", function()
+            if self.ruleDraft then self.ruleDraft[field] = check:GetChecked() and true or false; self:RefreshRules() end
+        end)
+        return check
+    end
+
+    local function draftChoice(parent, key, field, options, x, y, width)
+        local label = H.label(parent, key, 12, H.C.muted)
+        label:SetPoint("TOPLEFT", x, y); label:SetWidth(width)
+        local b = H.button(parent, "", width, function()
+            if not self.ruleDraft then return end
+            local found = 0
+            for i, option in ipairs(options) do if option[1] == self.ruleDraft[field] then found = i break end end
+            self.ruleDraft[field] = options[found % #options + 1][1]
+            self:RefreshRules()
+        end)
+        b:SetPoint("TOPLEFT", x, y - 23)
+        b.ruleField, b.ruleOptions = field, options
+        return b
+    end
+
+    local function draftSlider(parent, key, field, x, y, low, high, step)
+        local label = H.label(parent, key, 12, H.C.muted)
+        label:SetPoint("TOPLEFT", x, y); label:SetWidth(290)
+        local valueText = H.font(parent, 12, H.C.accent, "RIGHT")
+        valueText:SetPoint("TOPLEFT", x + 290, y); valueText:SetWidth(100)
+        local slider = CreateFrame("Slider", nil, parent)
+        slider:SetPoint("TOPLEFT", x + 4, y - 27); slider:SetSize(380, 16)
+        slider:SetOrientation("HORIZONTAL"); slider:SetMinMaxValues(low, high); slider:SetValueStep(step)
+        if slider.SetObeyStepOnDrag then slider:SetObeyStepOnDrag(true) end
+        H.fill(slider, H.C.panel); H.outline(slider)
+        slider:SetThumbTexture("Interface\\Buttons\\UI-SliderBar-Button-Horizontal")
+        slider:SetScript("OnValueChanged", function(_, value)
+            if self.loadingRule or not self.ruleDraft then return end
+            self.ruleDraft[field] = math.floor(value / step + 0.5) * step
+            valueText:SetText(tostring(self.ruleDraft[field]))
+        end)
+        slider.ruleField, slider.valueText = field, valueText
+        return slider
+    end
+
+    function self:BuildRules()
+        local f = dialog("RivalGuardRules", "rules", 800, 675)
+        self.rulesFrame, ui.rulesDialog = f, f
+        local explanation = H.label(f, "rulesHelp", 12, H.C.muted)
+        explanation:SetPoint("TOPLEFT", 18, -57); explanation:SetWidth(760)
+        local new = H.localButton(f, "newRule", 184, function()
+            if #ui:Profile().rules >= 32 then notify("ruleLimit") return end
+            self:RuleDraft(nil)
+        end)
+        new:SetPoint("TOPLEFT", 18, -124)
+        f.rows = {}
+        for i = 1, 10 do
+            local row = H.button(f, "", 205, function() end)
+            row:SetPoint("TOPLEFT", 18, -166 - (i - 1) * 38)
+            row:SetScript("OnClick", function() if row.index then self:RuleDraft(row.index) end end)
+            f.rows[i] = row
+        end
+        f.previous = H.localButton(f, "previous", 97, function()
+            self.ruleOffset = math.max(0, self.ruleOffset - 10); self:RefreshRules()
+        end)
+        f.previous:SetPoint("TOPLEFT", 18, -553)
+        f.next = H.localButton(f, "next", 97, function() self.ruleOffset = self.ruleOffset + 10; self:RefreshRules() end)
+        f.next:SetPoint("LEFT", f.previous, "RIGHT", 11, 0)
+        f.empty = H.label(f, "emptyRules", 12, H.C.muted)
+        f.empty:SetPoint("TOPLEFT", 18, -171); f.empty:SetWidth(200)
+        local nameLabel = H.label(f, "ruleName", 13)
+        nameLabel:SetPoint("TOPLEFT", 253, -125)
+        f.nameInput = textInput(f, 495, 80)
+        f.nameInput:SetPoint("TOPLEFT", 260, -150)
+        f.nameInput:SetScript("OnTextChanged", function(box)
+            if not self.loadingRule and self.ruleDraft then self.ruleDraft.name = box:GetText() end
+        end)
+        f:SetScript("OnHide", function() f.nameInput:ClearFocus() end)
+        f.enabled = draftCheck(f, "ruleEnabled", "enabled", 250, -187)
+        f.event = draftChoice(f, "ruleEvent", "event", {
+            { "sighting", "sighting" }, { "returning", "returning" }, { "stealth", "eventStealth" },
+            { "targeting", "eventTargeting" }, { "any", "anyEvent" },
+        }, 253, -226, 495)
+        local classesLabel = H.label(f, "ruleClasses", 12, H.C.muted)
+        classesLabel:SetPoint("TOPLEFT", 253, -291)
+        f.classes = {}
+        for i, token in ipairs(RG.Defaults.classes) do
+            local class = token
+            local b = CreateFrame("Button", nil, f)
+            b:SetSize(26, 26); b:SetPoint("TOPLEFT", 253 + (i - 1) * 35, -315)
+            H.fill(b, H.C.panel); b.edges = H.outline(b)
+            b.icon = b:CreateTexture(nil, "ARTWORK"); b.icon:SetPoint("TOPLEFT", 2, -2); b.icon:SetPoint("BOTTOMRIGHT", -2, 2)
+            b.icon:SetTexture("Interface\\Icons\\ClassIcon_" .. class)
+            b:SetScript("OnClick", function()
+                if self.ruleDraft then self.ruleDraft.classes = M.ToggleClass(self.ruleDraft.classes, class); self:RefreshRules() end
+            end)
+            b:SetScript("OnEnter", function() H.tooltip(b, RG.Locale.Class(class, ui:Profile().locale), t("ruleClasses")) end)
+            b:SetScript("OnLeave", H.hideTooltip)
+            f.classes[#f.classes + 1] = { class = class, frame = b }
+        end
+        f.allClasses = H.localButton(f, "all", 160, function() self.ruleDraft.classes = {}; self:RefreshRules() end)
+        f.allClasses:SetPoint("TOPLEFT", 253, -352)
+        f.action = draftChoice(f, "ruleAction", "action", { { "alert", "ruleAlert" }, { "suppress", "ruleSuppress" } }, 253, -394, 495)
+        f.sound = draftCheck(f, "ruleSound", "sound", 250, -455)
+        f.banner = draftCheck(f, "ruleBanner", "banner", 470, -455)
+        -- Keep each checkbox's hit area in its own column.
+        f.sound:SetHitRectInsets(0, -180, 0, 0)
+        f.banner:SetHitRectInsets(0, -180, 0, 0)
+        f.cooldown = draftSlider(f, "ruleCooldown", "cooldown", 253, -501, 0, 600, 5)
+        f.priority = draftSlider(f, "rulePriority", "priority", 253, -561, 1, 100, 1)
+        f.save = H.localButton(f, "saveRule", 160, function() self:SaveRule() end)
+        f.save:SetPoint("TOPLEFT", 253, -625)
+        f.delete = H.localButton(f, "deleteRule", 185, function() self:DeleteRule() end)
+        f.delete:SetPoint("LEFT", f.save, "RIGHT", 12, 0)
+        local hint = H.label(f, "ruleDraft", 11, H.C.muted)
+        hint:SetPoint("TOPLEFT", 18, -612); hint:SetWidth(205)
+        return f
+    end
+
+    function self:RefreshRules()
+        local f = self.rulesFrame
+        if not f or not self.ruleDraft then return end
+        local rules = ui:Profile().rules
+        self.ruleOffset = math.max(0, math.min(self.ruleOffset, math.max(0, math.floor((#rules - 1) / 10) * 10)))
+        f.empty:SetShown(#rules == 0)
+        for i, row in ipairs(f.rows) do
+            local index = self.ruleOffset + i
+            local rule = rules[index]
+            row.index = rule and index or nil
+            row:SetShown(rule ~= nil)
+            if rule then
+                row.label:SetText((rule.enabled and "" or "– ") .. M.Text(rule.name, ""))
+                row.bg:SetColorTexture(unpack(index == self.ruleIndex and { 0.10, 0.22, 0.28, 1 } or H.C.panel))
+            end
+        end
+        f.previous:SetEnabled(self.ruleOffset > 0); f.next:SetEnabled(self.ruleOffset + 10 < #rules)
+        self.loadingRule = true
+        for _, field in ipairs({ "enabled", "sound", "banner" }) do f[field]:SetChecked(self.ruleDraft[field] == true) end
+        for _, key in ipairs({ "event", "action" }) do
+            for _, option in ipairs(f[key].ruleOptions) do
+                if self.ruleDraft[f[key].ruleField] == option[1] then f[key].label:SetText(t(option[2]) .. "  ›") end
+            end
+        end
+        for _, key in ipairs({ "cooldown", "priority" }) do
+            f[key]:SetValue(self.ruleDraft[key]); f[key].valueText:SetText(tostring(self.ruleDraft[key]))
+        end
+        local visibleIndex = 0
+        for _, chip in ipairs(f.classes) do
+            local available = not ui.classAvailability or ui.classAvailability[chip.class] == true
+            chip.frame:SetShown(available)
+            if available then
+                chip.frame:ClearAllPoints(); chip.frame:SetPoint("TOPLEFT", 253 + visibleIndex * 35, -315)
+                visibleIndex = visibleIndex + 1
+            end
+            local selected = M.ClassEnabled(self.ruleDraft.classes, chip.class)
+            chip.frame.icon:SetDesaturated(not selected); chip.frame.icon:SetAlpha(selected and 1 or 0.28)
+            for _, edge in ipairs(chip.frame.edges) do edge:SetColorTexture(unpack(selected and H.C.accent or H.C.border)) end
+        end
+        local alert = self.ruleDraft.action == "alert"
+        f.sound:SetEnabled(alert); f.banner:SetEnabled(alert)
+        f.delete:SetEnabled(self.ruleIndex ~= nil)
+        self.loadingRule = false
+    end
+
+    function self:SaveRule()
+        if not self.ruleDraft then return end
+        local profile = ui:Profile()
+        if profile ~= self.ruleProfile or (self.ruleIndex and profile.rules[self.ruleIndex] ~= self.ruleOriginal) then
+            notify("ruleInvalid"); self:RuleDraft(nil); return
+        end
+        local index = self.ruleIndex or (#profile.rules + 1)
+        if index > 32 then notify("ruleLimit") return end
+        local draft = RG.Util.Copy(self.ruleDraft)
+        draft.name = RG.Util.Text(self.rulesFrame.nameInput:GetText(), 80)
+        if not draft.name then notify("ruleNeedsName") return end
+        local candidate = RG.Util.Copy(profile)
+        candidate.rules[index] = draft
+        local clean = RG.Database.ValidateProfile(candidate, true)
+        if not clean then notify("ruleInvalid") return end
+        profile.rules = clean.rules
+        profile.preset = "custom"
+        H.changed(); notify("ruleSaved"); self:RuleDraft(index)
+    end
+
+    function self:DeleteRule()
+        local profile, index = ui:Profile(), self.ruleIndex
+        if not index then return end
+        if profile ~= self.ruleProfile or profile.rules[index] ~= self.ruleOriginal then notify("ruleInvalid"); self:RuleDraft(nil); return end
+        local rules = RG.Util.Copy(profile.rules)
+        table.remove(rules, index); profile.rules = rules
+        H.changed(); notify("ruleDeleted"); self:RuleDraft(nil)
+    end
+
+    function self:OpenRules()
+        if not self.rulesFrame then self:BuildRules() end
+        self:RuleDraft(#ui:Profile().rules > 0 and 1 or nil)
+        self.rulesFrame:Show()
+    end
+
+    function self:BuildTransfer()
+        local f = dialog("RivalGuardTransfer", "transfer", 730, 650)
+        self.transferFrame, ui.transferDialog = f, f
+        f.help = H.font(f, 12, H.C.muted)
+        f.help:SetPoint("TOPLEFT", 18, -58); f.help:SetWidth(686)
+        f.nameLabel = H.label(f, "profileName", 13)
+        f.nameLabel:SetPoint("TOPLEFT", 18, -119)
+        f.nameInput = textInput(f, 510, 64)
+        f.nameInput:SetPoint("TOPLEFT", 25, -145)
+        local scroll = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
+        scroll:SetPoint("TOPLEFT", 18, -191); scroll:SetPoint("BOTTOMRIGHT", -40, 169)
+        local edit = CreateFrame("EditBox", nil, scroll)
+        edit:SetMultiLine(true); edit:SetAutoFocus(false); edit:SetWidth(665); edit:SetHeight(280)
+        edit:SetFontObject(ChatFontNormal or GameFontNormal)
+        if edit.SetMaxBytes then edit:SetMaxBytes(65536) else edit:SetMaxLetters(65536) end
+        edit:SetScript("OnEscapePressed", function(box) box:ClearFocus(); f:Hide() end)
+        edit:SetScript("OnTextChanged", function(box)
+            box:SetHeight(math.max(280, math.min(100000, M.Number(box:GetNumLines(), 1) * 16 + 24)))
+            if self.loadingTransfer or self.transferMode ~= "import" then return end
+            self.importText, self.importPreview = nil, nil
+            f.summary:SetText(t("importChanged")); f.apply:SetEnabled(false)
+        end)
+        scroll:SetScrollChild(edit); f.edit, f.scroll = edit, scroll
+        f.summary = H.font(f, 12, H.C.accent)
+        f.summary:SetPoint("BOTTOMLEFT", 18, 83); f.summary:SetWidth(690); f.summary:SetHeight(68)
+        f.preview = H.localButton(f, "validateImport", 190, function() self:PreviewImport() end)
+        f.preview:SetPoint("BOTTOMLEFT", 18, 25)
+        f.apply = H.localButton(f, "importNew", 310, function() self:ApplyImport() end)
+        f.apply:SetPoint("LEFT", f.preview, "RIGHT", 12, 0)
+        f:SetScript("OnHide", function()
+            f.edit:ClearFocus(); f.nameInput:ClearFocus()
+            self.importText, self.importPreview = nil, nil
+        end)
+        return f
+    end
+
+    function self:OpenTransfer(mode)
+        if not self.transferFrame then self:BuildTransfer() end
+        local f = self.transferFrame
+        self.transferMode = mode == "export" and "export" or "import"
+        self.importText, self.importPreview = nil, nil
+        f.help:SetText(t(self.transferMode == "export" and "exportHelp" or "importHelp"))
+        f.nameLabel:SetShown(self.transferMode == "import"); f.nameInput:SetShown(self.transferMode == "import")
+        f.preview:SetShown(self.transferMode == "import"); f.apply:SetShown(self.transferMode == "import")
+        f.apply:SetEnabled(false); f.nameInput:SetText("")
+        self.loadingTransfer = true
+        local text = ""
+        if self.transferMode == "export" then
+            text = app.db.ExportProfile and app.db:ExportProfile() or nil
+            if not text then text = t("error") end
+        end
+        f.edit:SetText(text)
+        self.loadingTransfer = false
+        f.summary:SetText(self.transferMode == "import" and t("importReady") or "")
+        f:Show(); f.edit:SetFocus()
+        if self.transferMode == "export" then f.edit:HighlightText() end
+    end
+
+    function self:PreviewImport()
+        local f = self.transferFrame
+        if not f or self.transferMode ~= "import" then return end
+        local text = f.edit:GetText()
+        local clean = app.db.PreviewImport and app.db:PreviewImport(text)
+        if not clean then
+            self.importText, self.importPreview = nil, nil
+            f.summary:SetText(t("importInvalid")); f.apply:SetEnabled(false); return
+        end
+        self.importText, self.importPreview = text, clean
+        f.summary:SetText(ui:F("importPreview", #clean.rules, t(clean.enabled and "active" or "disabled")))
+        f.apply:SetEnabled(true)
+    end
+
+    function self:ApplyImport()
+        local f = self.transferFrame
+        if not f or not self.importText or not self.importPreview then notify("importReady") return end
+        if f.edit:GetText() ~= self.importText then self.importText = nil; f.apply:SetEnabled(false); notify("importChanged") return end
+        local name = f.nameInput:GetText()
+        local result = app.db.ImportProfile and app.db:ImportProfile(name, self.importText)
+        if not result then notify("profileError") return end
+        self.importText, self.importPreview = nil, nil
+        f.apply:SetEnabled(false); f:Hide()
+        H.changed(); notify("importSuccess")
+    end
+
+    function self:Refresh()
+        if self.rulesFrame and self.rulesFrame:IsShown() then self:RefreshRules() end
+    end
+
+    function ui:OpenRules() self.dialogs:OpenRules() end
+    function ui:OpenTransfer(mode) self.dialogs:OpenTransfer(mode) end
+    return self
+end
