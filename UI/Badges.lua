@@ -62,9 +62,15 @@ function B.New(getProfile)
         badge.focus = badge:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
         badge.focus:SetPoint("TOP", badge, "BOTTOM", 0, 0)
         badge.focus:SetText("◆"); badge.focus:SetTextColor(0.91, 0.62, 1)
-        badge.locator = badge:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-        badge.locator:SetFont(STANDARD_TEXT_FONT or "Fonts\\ARIALN.TTF", 26, "OUTLINE")
-        badge.locator:SetText("▼"); badge.locator:SetTextColor(1, 0.85, 0.38)
+        badge.locator = CreateFrame("Frame", nil, badge)
+        badge.locator:SetSize(36, 28)
+        badge.locator:EnableMouse(false)
+        local glyph = badge.locator:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        badge.locator.glyph = glyph
+        glyph:SetAllPoints()
+        glyph:SetJustifyH("CENTER"); glyph:SetJustifyV("MIDDLE")
+        glyph:SetFont(STANDARD_TEXT_FONT or "Fonts\\ARIALN.TTF", 26, "OUTLINE")
+        glyph:SetText("▼"); glyph:SetTextColor(1, 0.85, 0.38)
         show(badge, "locator", false)
         return badge
     end
@@ -144,6 +150,8 @@ function B.New(getProfile)
         if badge.parent ~= frame then
             badge:ClearAllPoints()
             badge:SetParent(frame)
+            -- The arrow owns its strata. Rebinding happens outside lockdown.
+            badge.locator:SetFrameStrata("DIALOG")
             badge.locator:ClearAllPoints()
             badge.locator:SetPoint("BOTTOM", frame, "TOP", 0, 5)
             badge.parent = frame

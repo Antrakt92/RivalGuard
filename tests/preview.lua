@@ -69,7 +69,8 @@ elseif view == "banner" then app.ui:PreviewAlert()
 elseif view == "locator" then
     local token = "nameplate80"
     local name = locale == "ruRU" and "Пример противника" or "Example opponent"
-    if page == "automatic" then
+    local automatic = page == "automatic" or page == "overlap"
+    if automatic then
         app.engine:Clear()
         local display = app.db:GetProfile().display
         display.highlightTargeting, display.showBadges = true, false
@@ -84,7 +85,7 @@ elseif view == "locator" then
     local plateName = plate:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     plateName:SetPoint("CENTER"); plateName:SetText(name)
     state:Fire("NAME_PLATE_UNIT_ADDED", token)
-    if page == "automatic" then
+    if automatic then
         state:Advance(0.45)
         assert(app.ui.badges.highlight and app.ui.badges.highlight.automatic, "automatic locator preview did not attach")
     else

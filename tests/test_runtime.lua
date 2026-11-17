@@ -1064,8 +1064,8 @@ H.Test("simulated combat UI refresh never mutates protected action attributes", 
     state:Fire("PLAYER_REGEN_ENABLED")
 end)
 
-local function locatorFixture()
-    local state, _, app = setup()
+local function locatorFixture(raw)
+    local state, _, app = setup(raw)
     app.db:GetProfile().display.showBadges = false
     app:ProfileChanged()
     local unit = { guid = "Player-LocatorOwner", name = "Rival to locate", class = "ROGUE", hostile = true, isPlayer = true }
@@ -1432,10 +1432,42 @@ H.Test("stationary Nearby and Details avoid repeat painting while changed contac
 end)
 
 H.Test("nameplate highlight works on an already anchored badge in combat and expires", function()
-    local state, app, ui = locatorFixture()
+    local state, app, ui = locatorFixture({ schemaVersion = 1, onboardingSeen = true, profiles = { Default = {
+        positions = { alert = { point = "TOPLEFT", relativePoint = "TOPLEFT", x = 320, y = -180 } },
+    } } })
     local badge = assert(ui.badges.active.nameplate1)
+    local locator = assert(badge.locator)
+    H.Equal(locator.kind, "Frame")
+    H.Equal(locator:GetParent(), badge)
+    H.Equal(locator.strata, "DIALOG")
+    H.Equal(locator.glyph.kind, "FontString")
+    H.Equal(locator.glyph:GetParent(), locator)
+    local badgeStrata = badge.strata
+    H.True(badgeStrata ~= "DIALOG")
     H.Equal(badge:GetParent(), state.plates.nameplate1)
     H.False(locatorVisible(ui, "nameplate1"))
+    state:Advance(1)
+    H.True(ui.banner:IsShown())
+    local alertIcon = ui.banner.icon.texture
+    H.Equal(alertIcon, "Interface\\Icons\\ClassIcon_ROGUE")
+    local function checkBannerPosition()
+        H.Equal(ui.banner.strata, "HIGH")
+        local point, relative, relativePoint, x, y = ui.banner:GetPoint(1)
+        H.Equal(point, "TOPLEFT")
+        H.Equal(relative, state.api.UIParent)
+        H.Equal(relativePoint, "TOPLEFT")
+        H.Equal(x, 320); H.Equal(y, -180)
+        local saved = app.db:GetProfile().positions.alert
+        H.Equal(saved.point, point); H.Equal(saved.relativePoint, relativePoint)
+        H.Equal(saved.x, x); H.Equal(saved.y, y)
+    end
+    checkBannerPosition()
+    local strataWrites = 0
+    local setStrata = locator.SetFrameStrata
+    locator.SetFrameStrata = function(self, value)
+        strataWrites = strataWrites + 1
+        return setStrata(self, value)
+    end
     state.combat = true
     state:Fire("PLAYER_REGEN_DISABLED")
     local before = #state.mutations
@@ -1445,20 +1477,28 @@ H.Test("nameplate highlight works on an already anchored badge in combat and exp
     H.False(app.db:GetProfile().display.showBadges)
     H.Equal(ui.badges.active.nameplate1, badge)
     H.Equal(badge:GetParent(), state.plates.nameplate1)
+    H.False(badge.icon:IsVisible())
+    H.Equal(badge.strata, badgeStrata)
+    H.Equal(ui.banner.icon.texture, alertIcon)
     local geometry = { SetParent = true, SetPoint = true, ClearAllPoints = true, SetAllPoints = true, SetSize = true, SetWidth = true, SetHeight = true }
     for index = before + 1, #state.mutations do
         local mutation = state.mutations[index]
-        if mutation.frame == badge or mutation.frame == badge.locator then H.Nil(geometry[mutation.action]) end
+        if mutation.frame == badge or mutation.frame == locator or mutation.frame == locator.glyph then H.Nil(geometry[mutation.action]) end
     end
     H.Equal(#state.blocked, 0)
     state:Advance(2.2)
     H.True(locatorVisible(ui, "nameplate1"))
     state:Advance(1.4)
     H.False(locatorVisible(ui, "nameplate1"))
+    H.Equal(locator.strata, "DIALOG")
+    H.Equal(strataWrites, 0)
+    checkBannerPosition()
 end)
 
 H.Test("nameplate highlight validates the current GUID and never follows a recycled plate", function()
-    local state, _, ui, owner = locatorFixture()
+    local state, app, ui, owner = locatorFixture()
+    app.db:GetProfile().display.showBadges = true
+    app:ProfileChanged()
     local readGUID, secret = state.api.UnitGUID, H.Secret("unreadable locator owner")
     state.api.UnitGUID = function(token)
         if token == "nameplate1" then return secret end
@@ -1480,6 +1520,11 @@ H.Test("nameplate highlight validates the current GUID and never follows a recyc
     state:Unit("nameplate1", replacement)
     state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
     H.False(locatorVisible(ui, "nameplate1"))
+    local reused = assert(ui.badges.active.nameplate1)
+    H.Equal(reused.locator:GetParent(), reused)
+    H.Equal(reused.locator.strata, "DIALOG")
+    H.True(reused.icon:IsVisible())
+    H.Equal(reused.icon.texture, "Interface\\Icons\\ClassIcon_HUNTER")
     state:Advance(0.5)
     H.False(locatorVisible(ui, "nameplate1"))
 
