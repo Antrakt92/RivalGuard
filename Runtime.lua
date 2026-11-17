@@ -40,8 +40,8 @@ function App:ProfileChanged()
     local config = alertConfig(profile)
     local sameAlerts = config ~= nil and config == self.alertConfig and self.alertProfile == profile
     self.alertConfig, self.alertProfile = config, profile
-    self.engine:SetProfile(profile, sameAlerts)
     self.engine.lists = self.db:GetList()
+    self.engine:SetProfile(profile, sameAlerts)
     self.db:Prune(readClock(self.api, "time"))
     if self.sensors then
         if profile.enabled then

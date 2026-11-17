@@ -114,6 +114,30 @@ H.Test("profile changes do not discard a queued first sighting permanently", fun
     H.Equal(#alerts, 1); H.Equal(alerts[1].kind, "sighting")
 end)
 
+H.Test("a smaller profile keeps the strongest pending alerts in observation order", function()
+    local engine, observe, clock, _, _, RG = fixture()
+    for index = 1, 20 do
+        observe("nameplate" .. index, { guid = "Player-QueueProfile-" .. index, class = "ROGUE" })
+    end
+    clock.Advance(engine.profile.alerts.waveWindow + 0.1)
+    for index = 1, 20 do H.True(engine:Cast("nameplate" .. index, 1856)) end
+    H.Equal(#engine.pending, 40)
+
+    local replacement = RG.Defaults.NewProfile()
+    replacement.retention.maxContacts = 32
+    engine:SetProfile(replacement)
+    H.Equal(#engine.pending, 32)
+    for index, item in ipairs(engine.pending) do
+        local sighting = index <= 12
+        H.Equal(item.sequence, sighting and index or index + 8)
+        H.Equal(item.event, sighting and "sighting" or "stealth")
+        if sighting then H.True(engine.contacts[item.id].arrivalQueued) end
+    end
+    for index = 13, 20 do
+        H.False(engine.contacts[engine.bindings["nameplate" .. index].id].arrivalQueued)
+    end
+end)
+
 H.Test("class resolution can sound once after an unidentified visual first sighting", function()
     local engine, observe, clock, alerts = fixture()
     engine.profile.alerts.classes = { ROGUE = true }

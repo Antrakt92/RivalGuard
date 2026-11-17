@@ -218,7 +218,7 @@ H.Test("queued alerts recheck current context instead of emitting stale eligibil
     H.Equal(#alerts, 1); H.Equal(alerts[1].contact.identity, "guid:B")
 end)
 
-H.Test("profile switches cancel queued old alerts and new rules apply to future enemies", function()
+H.Test("profile switches cancel newly ineligible alerts and apply new rules to future enemies", function()
     local engine, _, alerts, observe, tick, _, RG = setup()
     observe("nameplate1", "A")
     local replacement = RG.Defaults.NewProfile(); replacement.alerts.classes = { MAGE = true }

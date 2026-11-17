@@ -283,6 +283,16 @@ local function ordinaryAlert(decision)
     return decision.priority < URGENT_PRIORITY and (decision.kind == "sighting" or decision.kind == "returning")
 end
 
+local function pendingDecision(engine, item, contact, now)
+    if not contact or (item.event == "targeting" and (contact.targeting ~= true or contact.targetingNotified == true))
+        or (engine.pausedUntil and now < engine.pausedUntil) or engine:SnoozedUntil(contact) then return end
+    local decision = engine:Explain(contact, item.event, now)
+    if not decision then return end
+    local key = contact.id .. ":" .. (decision.dedupKey or decision.kind)
+    local cooldown = engine.cooldowns[key]
+    if not cooldown or now - cooldown >= decision.cooldown then return decision, key end
+end
+
 function E:CancelTargeting(contact)
     for index = #self.pending, 1, -1 do
         local item = self.pending[index]
@@ -778,35 +788,29 @@ function E:Tick()
     local ordinary, accepted = {}, {}
     for _, item in ipairs(ready) do
         local contact = self.contacts[item.id]
-        local decision
-        if contact and (item.event ~= "targeting" or (contact.targeting == true and contact.targetingNotified ~= true)) then
-            decision = self:Explain(contact, item.event, now)
-        end
-        if decision and not (self.pausedUntil and now < self.pausedUntil) and not self:SnoozedUntil(contact) then
-            local key = contact.id .. ":" .. (decision.dedupKey or decision.kind)
-            if not accepted[key] and (not self.cooldowns[key] or now - self.cooldowns[key] >= decision.cooldown) then
-                accepted[key] = true
-                decision.contact = self:View(contact, now)
-                decision.stealthEvidence, decision.stealthSpell = item.stealthEvidence, item.stealthSpell
-                local emitted
-                if ordinaryAlert(decision) then
-                    item.decision = decision
-                    ordinary[#ordinary + 1] = item
-                else
-                    emitted = self:Emit(decision, now)
+        local decision, key = pendingDecision(self, item, contact, now)
+        if decision and key and not accepted[key] then
+            accepted[key] = true
+            decision.contact = self:View(contact, now)
+            decision.stealthEvidence, decision.stealthSpell = item.stealthEvidence, item.stealthSpell
+            local emitted
+            if ordinaryAlert(decision) then
+                item.decision = decision
+                ordinary[#ordinary + 1] = item
+            else
+                emitted = self:Emit(decision, now)
+            end
+            if emitted and contact.targeting == true and contact.targetingNotified ~= true then
+                -- A stronger warning counts only if it replaced an
+                -- eligible targeting warning from the same burst.
+                if item.event == "targeting" or (item.coversTargeting and self:Explain(contact, "targeting", now)) then
+                    contact.targetingNotified = true
                 end
-                if emitted and contact.targeting == true and contact.targetingNotified ~= true then
-                    -- A stronger warning counts only if it replaced an
-                    -- eligible targeting warning from the same burst.
-                    if item.event == "targeting" or (item.coversTargeting and self:Explain(contact, "targeting", now)) then
-                        contact.targetingNotified = true
-                    end
-                end
-                if item.event ~= "targeting" or emitted then
-                    self.cooldowns[key] = now
-                    contact.arrivalNotified, contact.arrivalQueued = true, false
-                    if contact.class then contact.notifiedClass = contact.class end
-                end
+            end
+            if item.event ~= "targeting" or emitted then
+                self.cooldowns[key] = now
+                contact.arrivalNotified, contact.arrivalQueued = true, false
+                if contact.class then contact.notifiedClass = contact.class end
             end
         elseif contact and item.event == "sighting" then
             contact.arrivalQueued = false
@@ -894,8 +898,26 @@ function E:SetProfile(profile, preservePending)
     self.profile = profile
     if not profile.enabled then self:Clear() return end
     if not preservePending then
-        self.pending = {}
+        -- Preserve the observed event and its age. Only the alert decision
+        -- changes when the player edits or switches a profile.
+        local now, kept = self:Now(), {}
+        for _, item in ipairs(self.pending) do
+            local decision = now - item.at <= MAX_PENDING_AGE and pendingDecision(self, item, self.contacts[item.id], now)
+            if decision then
+                item.decision = decision
+                kept[#kept + 1] = item
+            end
+        end
+        if #kept > profile.retention.maxContacts then
+            table.sort(kept, strongerAlert)
+            for index = #kept, profile.retention.maxContacts + 1, -1 do kept[index] = nil end
+            table.sort(kept, function(a, b) return a.sequence < b.sequence end)
+        end
+        self.pending = kept
         for _, contact in pairs(self.contacts) do contact.arrivalQueued = false end
+        for _, item in ipairs(kept) do
+            if item.event == "sighting" then self.contacts[item.id].arrivalQueued = true end
+        end
     end
     while self.contactCount > profile.retention.maxContacts do self:MakeRoom() end
     while #self.history > profile.retention.maxHistory do table.remove(self.history, 1) end

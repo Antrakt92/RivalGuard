@@ -2291,6 +2291,136 @@ local function stealthFixture(readable, configure)
     return state, app, unit
 end
 
+local function queuedSettingsVanish()
+    local state, app = stealthFixture(false, function(profile) profile.alerts.muteOrdinary = true end)
+    H.Equal(app.engine.counters.alerts, 0)
+    H.Equal(#state.sounds, 0)
+    H.False(app.ui.banner:IsShown())
+    return state, app
+end
+
+for _, setting in ipairs({ "sound choice", "mute" }) do
+    H.Test("queued Vanish survives a " .. setting .. " change and uses the new output", function()
+        local state, app = queuedSettingsVanish()
+        local ui = app.ui
+        local requestedKit = 214748
+        if setting == "sound choice" then
+            state.api.SOUNDKIT = { READY_CHECK = requestedKit }
+            ui:OpenSettings("alerts")
+            local choice
+            for _, control in ipairs(ui.controls) do
+                if control.path == "alerts.sounds.stealth" then choice = control.frame break end
+            end
+            assert(choice):Click()
+            H.Equal(app.db:GetProfile().alerts.sounds.stealth, "ready")
+        else
+            state.api.RivalGuard_Binding("mute")
+            H.False(app.db:GetProfile().alerts.sound)
+        end
+        H.Equal(app.engine.counters.alerts, 0)
+        H.Equal(#state.sounds, 0)
+        state:Advance(0.5)
+        H.Equal(app.engine.counters.alerts, 1)
+        H.Equal(ui.banner.title:GetText(), ui:F("stealthCast", ui:T("spellVanish")))
+        H.Equal(#state.sounds, setting == "mute" and 0 or 1)
+        if setting == "sound choice" then H.Equal(state.sounds[1].id, requestedKit) end
+        state:Advance(1.5)
+        H.Equal(app.engine.counters.alerts, 1)
+        H.Equal(#state.sounds, setting == "mute" and 0 or 1)
+    end)
+end
+
+H.Test("a compatible profile switch delivers a queued Vanish after its nameplate leaves", function()
+    local state, app = queuedSettingsVanish()
+    local ui, db = app.ui, app.db
+    local requestedKit = 214749
+    state.api.SOUNDKIT = { TELL_MESSAGE = requestedKit }
+    local original = db:GetProfile()
+    local profile = assert(db:CreateProfile("World alerts"))
+    profile.alerts.muteOrdinary, profile.alerts.sounds.stealth, profile.alerts.channel = true, "whisper", "SFX"
+    state.units.nameplate1 = nil
+    state:Fire("NAME_PLATE_UNIT_REMOVED", "nameplate1")
+    H.False(app.engine:Snapshot()[1].visible)
+    state.clock.Advance(4.4)
+    ui:OpenSettings("profiles")
+    H.Equal(ui.profileRows[2].profileName, "World alerts")
+    ui.profileRows[2].use:Click()
+    H.Equal(db:GetActiveProfileName(), "World alerts")
+    H.Equal(original.alerts.sounds.stealth, "warning")
+    H.Equal(app.engine.counters.alerts, 0)
+    state:Advance(0.5)
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(ui.activeBanner.kind, "stealth")
+    H.Equal(ui.banner.title:GetText(), ui:F("stealthCast", ui:T("spellVanish")))
+    H.Equal(#state.sounds, 1)
+    H.Equal(state.sounds[1].id, requestedKit); H.Equal(state.sounds[1].channel, "SFX")
+end)
+
+for _, blocker in ipairs({ "class settings", "context settings", "profile switch" }) do
+    H.Test("a queued Vanish rejected by changed " .. blocker .. " cannot reappear after restoring eligibility", function()
+        local state, app = queuedSettingsVanish()
+        local profile, db, ui = app.db:GetProfile(), app.db, app.ui
+        if blocker == "class settings" then
+            profile.alerts.classes = { HUNTER = true }
+            app:OnSettingsChanged()
+            profile.alerts.classes = {}
+            app:OnSettingsChanged()
+        elseif blocker == "context settings" then
+            profile.context.world = false
+            app:OnSettingsChanged()
+            profile.context.world = true
+            app:OnSettingsChanged()
+        else
+            assert(db:CreateProfile("Matches", "battleground"))
+            ui:OpenSettings("profiles")
+            H.Equal(ui.profileRows[2].profileName, "Matches")
+            ui.profileRows[2].use:Click()
+            H.Equal(db:GetActiveProfileName(), "Matches")
+            ui.profileRows[1].use:Click()
+            H.Equal(db:GetActiveProfileName(), "Default")
+        end
+        state:Advance(1.5)
+        H.Equal(app.engine.counters.alerts, 0)
+        H.Equal(#state.sounds, 0)
+        H.False(ui.banner:IsShown())
+
+        state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-NewAfterSettings", 1856)
+        state:Advance(0.5)
+        H.Equal(app.engine.counters.alerts, 1)
+        H.Equal(#state.sounds, 1)
+        H.Equal(ui.activeBanner.kind, "stealth")
+    end)
+end
+
+H.Test("changing settings does not extend a queued Vanish's original freshness deadline", function()
+    local state, app = queuedSettingsVanish()
+    state.clock.Advance(4.9)
+    state.api.RivalGuard_Binding("mute")
+    state:Advance(0.5)
+    H.Equal(app.engine.counters.alerts, 0)
+    H.False(app.ui.banner:IsShown())
+    H.Equal(#state.sounds, 0)
+end)
+
+H.Test("a new urgent rule reschedules an already queued ordinary sighting", function()
+    local state, _, app = setup()
+    state:Unit("nameplate1", { guid = "Player-PriorityChange", name = "Fixture Hunter", class = "HUNTER",
+        hostile = true, isPlayer = true })
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    local profile = app.db:GetProfile()
+    local observedAt = state.clock.Now()
+    profile.rules = {{ name = "Urgent hunters", enabled = true, event = "sighting", action = "alert",
+        priority = 80, classes = { HUNTER = true }, sound = false, banner = true, cooldown = 30 }}
+    app:OnSettingsChanged()
+    H.Equal(app.engine.counters.alerts, 0)
+    state:Advance(0.5)
+    H.True(state.clock.Now() - observedAt < profile.alerts.waveWindow)
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(app.engine.history[1].reason, "custom_rule")
+    H.Equal(app.ui.activeBanner.name, "Fixture Hunter")
+    H.Equal(#state.sounds, 0)
+end)
+
 local function returnStealthFixture(state, app, unit)
     state:Advance(0.5)
     local first = app.db:GetJournal()[1]
