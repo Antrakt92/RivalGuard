@@ -43,6 +43,36 @@ local function nearbyDragHeader(ui)
     error("Nearby drag header missing")
 end
 
+local function resizeViewport(state, width, height)
+    local parent = state.api.UIParent
+    local scale = parent:GetEffectiveScale()
+    parent:SetSize(width / scale, height / scale)
+end
+
+local function compactViewport(state)
+    state.api.UIParent:SetScale(1.35)
+    resizeViewport(state, 640, 480)
+end
+
+local function fitCenteredDialog(state, frame)
+    local parent = state.api.UIParent
+    local point, relative, anchor, x, y = frame:GetPoint(1)
+    H.True(frame:IsShown())
+    H.True(frame.clamped)
+    H.Equal(point, "CENTER"); H.Equal(relative, parent); H.Equal(anchor, "CENTER")
+    H.Nil(frame:GetPoint(2))
+    local scale = frame:GetEffectiveScale() / parent:GetEffectiveScale()
+    local halfWidth = frame:GetWidth() * scale / 2
+    local halfHeight = frame:GetHeight() * scale / 2
+    local width, height = parent:GetWidth(), parent:GetHeight()
+    local centerX, centerY = width / 2 + x * scale, height / 2 + y * scale
+    H.True(centerX - halfWidth >= 0, "dialog left edge exceeds the viewport")
+    H.True(centerX + halfWidth <= width, "dialog right edge exceeds the viewport")
+    H.True(centerY - halfHeight >= 0, "dialog bottom edge exceeds the viewport")
+    H.True(centerY + halfHeight <= height, "dialog top edge exceeds the viewport")
+    return x, y
+end
+
 H.Test("actual UI initializes through strict frame methods and accessible controls", function()
     local state, _, app, ui = setup()
     H.True(ui.frame:IsShown()); H.False(ui.settings:IsShown())
@@ -481,6 +511,130 @@ H.Test("diagnostic copy window only exposes the generated bounded report", funct
     H.True(ui.copyFrame.edit.highlighted)
     H.Equal(ui.copyFrame.strata, "DIALOG")
 end)
+
+H.Test("diagnostic copy fits a compact viewport on open and resize without resetting the report", function()
+    local state, _, app, ui = setup(nil, compactViewport)
+    local reports = 0
+    function app:ExportDiagnostics()
+        reports = reports + 1
+        return "RivalGuard\ncontext=world\nalerts=ready"
+    end
+    ui:OpenSettings("support")
+    ui:ShowDiagnostics()
+    local copy = ui.copyFrame
+    local report = copy.edit:GetText()
+    H.Equal(copy:GetWidth(), 660); H.Equal(copy:GetHeight(), 490)
+    fitCenteredDialog(state, copy)
+    H.True(copy:GetScale() < 1)
+    H.True(copy.edit.highlighted); H.True(copy.edit:HasFocus())
+    resizeViewport(state, 1920, 1080)
+    state:Advance(1.1)
+    fitCenteredDialog(state, copy)
+    H.Equal(copy:GetScale(), 1)
+    H.Equal(copy.edit:GetText(), report); H.True(copy.edit:HasFocus())
+    H.Equal(reports, 1)
+    copy.edit.scripts.OnEscapePressed(copy.edit)
+    H.False(copy:IsShown()); H.False(copy.edit:HasFocus())
+    resizeViewport(state, 640, 480)
+    ui:ShowDiagnostics()
+    H.Equal(ui.copyFrame, copy)
+    fitCenteredDialog(state, copy)
+    H.Equal(copy.edit:GetText(), report); H.True(copy.edit:HasFocus())
+    H.Equal(reports, 2)
+end)
+
+H.Test("live contact details fit a narrow resize and keep the selected contact and focused note", function()
+    local state, _, app, ui = setup(nil, compactViewport)
+    local contact = app.engine:Observe({ token = "target", guid = "Player-DetailsFit", name = "Rival",
+        class = "ROGUE", hostile = true, isPlayer = true, source = "target" })
+    ui:Select(contact)
+    local detail = ui.detailsFrame
+    H.Equal(detail:GetWidth(), 470); H.Equal(detail:GetHeight(), 555)
+    fitCenteredDialog(state, detail)
+    detail.note:SetFocus()
+    detail.note:SetText("Uncommitted draft")
+    detail.note.scripts.OnTextChanged(detail.note, true)
+    resizeViewport(state, 480, 640)
+    state:Advance(1.1)
+    local narrowX = fitCenteredDialog(state, detail)
+    H.True(narrowX < 80)
+    H.Equal(ui.selected.identity, contact.identity)
+    H.Equal(detail.note:GetText(), "Uncommitted draft"); H.True(detail.note:HasFocus())
+    resizeViewport(state, 1920, 1080)
+    ui:Refresh()
+    local wideX, wideY = fitCenteredDialog(state, detail)
+    H.Equal(wideX, 80); H.Equal(wideY, 0)
+    H.Equal(detail.note:GetText(), "Uncommitted draft"); H.True(detail.note:HasFocus())
+    H.Nil(app.db:GetList()[contact.identity])
+end)
+
+H.Test("short sample details keep their horizontal offset inside a compact viewport", function()
+    local state, _, _, ui = setup(nil, compactViewport)
+    ui:Preview({ { id = "sample", name = "Sample Hunter", class = "HUNTER", visible = true, hostile = true, isPlayer = true } })
+    ui.rows[1]:Click()
+    local detail = ui.detailsFrame
+    H.Equal(detail:GetHeight(), 245)
+    local compactX = fitCenteredDialog(state, detail)
+    H.True(compactX < 80)
+    H.False(detail.note:IsShown())
+    resizeViewport(state, 1920, 1080)
+    ui:Refresh()
+    local wideX, wideY = fitCenteredDialog(state, detail)
+    H.Equal(wideX, 80); H.Equal(wideY, 0)
+    H.Equal(ui.selected.id, "sample")
+end)
+
+for _, hasSound in ipairs({ false, true }) do
+    H.Test("explanation fits on compact screens " .. (hasSound and "with" or "without") .. " last sound", function()
+        local state, _, app, ui = setup(nil, compactViewport)
+        local contact = app.engine:Observe({ token = "target", guid = "Player-ExplanationFit", name = "Rival",
+            class = "HUNTER", hostile = true, isPlayer = true, source = "target" })
+        function app:Explain()
+            return { allowed = true, reason = "event_matched", banner = true,
+                lastSound = hasSound and { kind = "sighting", status = "playback_requested" } or nil }
+        end
+        ui:Select(contact)
+        ui.detailsFrame.why:Click()
+        local why = ui.explanationFrame
+        H.Equal(why:GetHeight(), hasSound and 370 or 290)
+        H.Equal(why.lastSound:IsShown(), hasSound)
+        local reason = why.reason:GetText()
+        local _, compactY = fitCenteredDialog(state, why)
+        H.True(compactY < 80)
+        resizeViewport(state, 1920, 1080)
+        ui:Refresh()
+        local wideX, wideY = fitCenteredDialog(state, why)
+        H.Equal(wideX, 0); H.Equal(wideY, 80)
+        H.Equal(ui.selected.identity, contact.identity)
+        H.Equal(why.reason:GetText(), reason)
+    end)
+end
+
+for _, dialog in ipairs({
+    { "guideDialog", function(ui) return ui:ShowGuide(true) end, function(frame) return frame.stepText end },
+    { "rulesDialog", function(ui) ui:OpenRules() end, function(frame) return frame.nameInput end },
+    { "transferDialog", function(ui) ui:OpenTransfer("export") end, function(frame) return frame.edit end },
+}) do
+    H.Test(dialog[1] .. " fits after resizing while visible and after reopening", function()
+        local state, _, _, ui = setup()
+        dialog[2](ui)
+        local frame = ui[dialog[1]]
+        local textWidget = dialog[3](frame)
+        local text = textWidget:GetText()
+        H.Equal(frame:GetScale(), 1)
+        compactViewport(state)
+        ui:Refresh()
+        fitCenteredDialog(state, frame)
+        H.Equal(textWidget:GetText(), text)
+        frame:Hide()
+        resizeViewport(state, 1920, 1080)
+        dialog[2](ui)
+        H.Equal(ui[dialog[1]], frame)
+        fitCenteredDialog(state, frame)
+        H.Equal(frame:GetScale(), 1)
+        H.Equal(textWidget:GetText(), text)
+    end)
+end
 
 H.Test("UI teardown detaches ticker while hidden main window does not stop refreshes", function()
     local state, _, app, ui = setup()

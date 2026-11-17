@@ -4,6 +4,7 @@ local M = RG.UIModel
 
 function D.Attach(ui, app, H)
     local self = { ruleOffset = 0 }
+    local dialogs = {}
     local function t(key) return ui:T(key) end
     local function notify(key) H.notify(key) end
 
@@ -12,13 +13,18 @@ function D.Attach(ui, app, H)
         frame:SetSize(width, height); frame:SetPoint("CENTER"); frame:SetFrameStrata("DIALOG")
         frame:SetClampedToScreen(true); frame:EnableMouse(true)
         H.fill(frame); H.outline(frame)
-        ui:FitWindow(frame, width, height, 1)
+        dialogs[#dialogs + 1] = frame
         local title = H.label(frame, titleKey, 18, H.C.accent)
         title:SetPoint("TOPLEFT", 18, -17); title:SetWidth(width - 130)
         local close = H.localButton(frame, "close", 84, function() frame:Hide() end)
         close:SetPoint("TOPRIGHT", -12, -10)
         if UISpecialFrames then UISpecialFrames[#UISpecialFrames + 1] = name end
         return frame
+    end
+
+    local function showDialog(frame)
+        ui:FitWindow(frame, frame:GetWidth(), frame:GetHeight(), 1)
+        frame:Show()
     end
 
     local function textInput(parent, width, maxBytes)
@@ -290,7 +296,7 @@ function D.Attach(ui, app, H)
         if not self.rulesFrame then self:BuildRules() end
         self.ruleTab = "basic"
         self:RuleDraft(#ui:Profile().rules > 0 and 1 or nil)
-        self.rulesFrame:Show()
+        showDialog(self.rulesFrame)
     end
 
     function self:BuildTransfer()
@@ -346,7 +352,7 @@ function D.Attach(ui, app, H)
         f.edit:SetText(text)
         self.loadingTransfer = false
         f.summary:SetText(self.transferMode == "import" and t("importReady") or "")
-        f:Show(); f.edit:SetFocus()
+        showDialog(f); f.edit:SetFocus()
         if self.transferMode == "export" then f.edit:HighlightText() end
     end
 
@@ -377,6 +383,9 @@ function D.Attach(ui, app, H)
     end
 
     function self:Refresh()
+        for _, frame in ipairs(dialogs) do
+            if frame:IsShown() then ui:FitWindow(frame, frame:GetWidth(), frame:GetHeight(), 1) end
+        end
         if self.rulesFrame and self.rulesFrame:IsShown() then self:RefreshRules() end
     end
 
@@ -446,7 +455,7 @@ function D.Attach(ui, app, H)
         if not self.guideFrame then self:BuildGuide() end
         self.guideStep, self.guidePresented = 1, true
         self:RenderGuide()
-        self.guideFrame:Show()
+        showDialog(self.guideFrame)
         return true
     end
 

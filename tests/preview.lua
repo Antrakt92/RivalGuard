@@ -54,6 +54,7 @@ elseif view == "guide" then
     app.ui:ShowGuide(true)
     if page == "rules" then app.ui.guideDialog.next:Click() end
 elseif view == "journal" then app.ui:OpenSettings("journal")
+elseif view == "diagnostics" then app.ui:ShowDiagnostics()
 elseif view == "personal" then app.ui:OpenSettings("journal"); app.ui.journalPersonal:Click()
 elseif view == "rules" then app.ui:OpenRules()
 elseif view == "conditions" then app.ui:OpenRules(); app.ui.rulesDialog.conditions:Click()

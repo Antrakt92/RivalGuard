@@ -255,7 +255,7 @@ def main():
     parser.add_argument(
         "--view",
         choices=["main", "settings", "rules", "conditions", "import", "export", "details", "explanation",
-                 "banner", "locator", "wave", "guide", "journal", "personal", "launcher", "appearance"],
+                 "banner", "locator", "wave", "guide", "journal", "personal", "launcher", "appearance", "diagnostics"],
         default="settings",
     )
     parser.add_argument("--page", default="alerts")

@@ -39,6 +39,11 @@ local function paintText(widget, value)
     widget.paintedText = value
 end
 
+local function fitCenterOffset(offset, viewport, size, scale)
+    local limit = math.max(0, ((viewport - size * scale) / 2 - WINDOW_MARGIN) / scale)
+    return math.max(-limit, math.min(offset, limit))
+end
+
 local function paintShown(widget, shown)
     if widget.paintedShown == shown then return end
     widget:SetShown(shown)
@@ -214,6 +219,17 @@ function UI.New(app)
             frame.paintedScale = scale
         end
         return scale, screenWidth, screenHeight
+    end
+
+    function self:FitOffsetWindow(frame, x, y)
+        local width, height = frame:GetWidth(), frame:GetHeight()
+        local scale, screenWidth, screenHeight = self:FitWindow(frame, width, height, 1)
+        x = fitCenterOffset(x, screenWidth, width, scale)
+        y = fitCenterOffset(y, screenHeight, height, scale)
+        if frame.paintedCenterX == x and frame.paintedCenterY == y then return end
+        frame:ClearAllPoints()
+        frame:SetPoint("CENTER", UIParent, "CENTER", x, y)
+        frame.paintedCenterX, frame.paintedCenterY = x, y
     end
 
     function self:RegisterNativeSettings()
@@ -403,7 +419,7 @@ function UI.New(app)
         if saved and not (saved.point == "RIGHT" and (saved.relativePoint or saved.relative) == "RIGHT"
             and saved.x == NEARBY_DEFAULT_X and saved.y == NEARBY_DEFAULT_Y) then return end
         local x = math.max(NEARBY_DEFAULT_X, -math.max(0, (screenWidth - WINDOW_MARGIN) / scale - width))
-        local y = math.min(NEARBY_DEFAULT_Y, math.max(0, ((screenHeight - height * scale) / 2 - WINDOW_MARGIN) / scale))
+        local y = fitCenterOffset(NEARBY_DEFAULT_Y, screenHeight, height, scale)
         if x == nearbyDefaultX and y == nearbyDefaultY then return end
         main:ClearAllPoints()
         main:SetPoint("RIGHT", UIParent, "RIGHT", x, y)
@@ -1236,6 +1252,9 @@ function UI.New(app)
         end
         if detailsShown then self:ShowDetails(true) end
         if self.explanationFrame and self.explanationFrame:IsShown() then self:ShowExplanation() end
+        if self.copyFrame and self.copyFrame:IsShown() then
+            self:FitWindow(self.copyFrame, self.copyFrame:GetWidth(), self.copyFrame:GetHeight(), 1)
+        end
     end
 
     function self:OpenSettings(page)
@@ -1430,7 +1449,7 @@ function UI.New(app)
         if not self.detailsFrame then
             local detail = self:Window("RivalGuardDetails", UIParent)
             self.detailsFrame = detail
-            detail:SetSize(470, 555); detail:SetPoint("CENTER", 80, 0)
+            detail:SetSize(470, 555)
             detail:SetFrameStrata("DIALOG"); detail:SetClampedToScreen(true); detail:EnableMouse(true)
             fill(detail); outline(detail)
             detail.title = font(detail, 18, C.accent)
@@ -1639,7 +1658,7 @@ function UI.New(app)
         local remaining = math.max(0, M.Number(contact.snoozedUntil, 0) - self:Now())
         paintShown(detail.snooze, canSnooze)
         paintText(detail.snooze.label, self:T(remaining > 0 and "resumeContact" or "snoozeContact"))
-        self:FitWindow(detail, 470, detail:GetHeight(), 1)
+        self:FitOffsetWindow(detail, 80, 0)
         if not detail:IsShown() then detail:Show() end
     end
 
@@ -1652,7 +1671,7 @@ function UI.New(app)
         if not self.explanationFrame then
             local frame = self:Window("RivalGuardExplanation", UIParent)
             self.explanationFrame = frame
-            frame:SetSize(460, 290); frame:SetPoint("CENTER", 0, 80); frame:SetFrameStrata("DIALOG")
+            frame:SetSize(460, 290); frame:SetFrameStrata("DIALOG")
             frame:SetClampedToScreen(true); frame:EnableMouse(true)
             fill(frame); outline(frame)
             local titleText = label(frame, "explanation", 17, C.accent)
@@ -1705,7 +1724,7 @@ function UI.New(app)
             frame:SetHeight(height)
             frame.soundSectionShown = showSound
         end
-        self:FitWindow(frame, 460, height, 1)
+        self:FitOffsetWindow(frame, 0, 80)
         if not frame:IsShown() then frame:Show() end
     end
 
@@ -1739,8 +1758,10 @@ function UI.New(app)
         local report = app.ExportDiagnostics and app:ExportDiagnostics() or self:T("reportUnavailable")
         if type(report) ~= "string" then report = self:T("reportUnavailable") end
         if #report > 65536 then report = report:sub(1, 65536) end
-        self.copyFrame.edit:SetText(report)
-        self.copyFrame:Show(); self.copyFrame.edit:SetFocus(); self.copyFrame.edit:HighlightText()
+        local copy = self.copyFrame
+        self:FitWindow(copy, copy:GetWidth(), copy:GetHeight(), 1)
+        copy.edit:SetText(report)
+        copy:Show(); copy.edit:SetFocus(); copy.edit:HighlightText()
     end
 
     local ticker = CreateFrame("Frame", nil, UIParent)
