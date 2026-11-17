@@ -39,6 +39,8 @@ current profile would handle that new sighting in the open world.
   New rules require a known class by default. Turn off **Require known class**
   to use the general unknown-class setting, as existing rules do by default.
   **Check draft** shows which rule would win for sample opponents before you save.
+  When a sighting and a confirmed threat arrive together for the same player,
+  the threat takes precedence and uses the sound of its matching rule.
   Try near, far, a distance estimate across the limit, or an unknown distance.
   Group warnings use the wave sound. When the group has neither a sound nor a
   banner, enabled individual sounds still follow the usual sound pacing.

@@ -701,6 +701,44 @@ H.Test("stronger overflow replaces the newest weakest arrival and lets it retry"
     H.Equal(alerts[3].contact.id, newest.id)
 end)
 
+local function highestSightingRule(engine)
+    engine.profile.rules = { { name = "Immediate sighting", enabled = true, event = "sighting", classes = {},
+        priority = 100, action = "alert", banner = true, sound = true, cooldown = 30 } }
+end
+
+H.Test("contact capacity retains a Vanish over equal numeric priority sightings", function()
+    local engine, arrival, clock, alerts = queuePressureFixture()
+    engine.profile.alerts.muteOrdinary = true
+    local threat = arrival(1, "stealth")
+    engine.profile.alerts.muteOrdinary = false
+    highestSightingRule(engine)
+    for index = 2, 33 do arrival(index) end
+    H.True(engine.contacts[threat.id] ~= nil)
+    H.Equal(engine.counters.evicted, 1)
+    clock.Advance(0.25)
+    engine:Tick()
+    H.Equal(alerts[1].kind, "stealth")
+    H.Equal(alerts[1].contact.id, threat.id)
+    H.True(alerts[1].sound)
+end)
+
+H.Test("alias merge retains targeting over a higher numeric priority sighting of its owner", function()
+    local engine, observe, clock, alerts = fixture()
+    highestSightingRule(engine)
+    local known = { guid = "Player-MergedThreat", class = "ROGUE" }
+    local identified = observe("nameplate1", known)
+    local anonymous = observe("target", { class = "ROGUE", targeting = true })
+    H.True(identified.id ~= anonymous.id)
+    local merged = observe("target", { guid = known.guid, class = "ROGUE", targeting = true })
+    H.Equal(merged.id, identified.id)
+    H.Equal(#engine.pending, 1)
+    clock.Advance(0.25)
+    engine:Tick()
+    H.Equal(#alerts, 1)
+    H.Equal(alerts[1].kind, "targeting")
+    H.Equal(alerts[1].contact.id, identified.id)
+end)
+
 H.Test("capacity continuity stores at most 512 GUIDs and clears with recent sightings", function()
     local engine, observe = fixture()
     engine.profile.retention.maxContacts = 32

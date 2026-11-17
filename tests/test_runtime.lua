@@ -4294,6 +4294,85 @@ H.Test("a verified Vanish uses the newly allowed resting context before its upda
     H.Equal(#state.sounds, 1)
 end)
 
+for _, priority in ipairs({ 1, 50, 100 }) do
+    H.Test("a queued Vanish wins over the same rival's Any-rule sighting at priority " .. priority, function()
+        local state, app, profile = ruleSoundFixture()
+        local rule = soundRule("All warnings", "quest", priority)
+        rule.event = "any"
+        profile.rules = { rule }
+        app:OnSettingsChanged()
+        seeSoundRuleRival(state, 1)
+        state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-AnyRuleBurst", 1856)
+        state:Advance(0.3)
+        H.Equal(#app.engine.history, 1)
+        H.Equal(app.engine.history[1].kind, "stealth")
+        H.Equal(app.engine.history[1].reason, "custom_rule")
+        H.Equal(app.ui.banner.title:GetText(), app.ui:F("stealthCast", app.ui:T("spellVanish")))
+        H.Equal(#state.sounds, 1)
+        H.Equal(state.sounds[1].id, RULE_SOUND_KITS.IG_QUEST_LIST_COMPLETE)
+        state:Advance(1.25)
+        H.Equal(#app.engine.history, 1)
+        H.Equal(#state.sounds, 1)
+    end)
+end
+
+H.Test("a winning custom suppression still silences Vanish without canceling the ordinary sighting", function()
+    local state, app, profile = ruleSoundFixture()
+    local ordinary = soundRule("Ordinary signal", "ping", 50)
+    ordinary.event = "any"
+    local suppress = soundRule("Suppress Vanish", nil, 51)
+    suppress.event, suppress.action = "stealth", "suppress"
+    profile.rules = { ordinary, suppress }
+    app:OnSettingsChanged()
+    seeSoundRuleRival(state, 1)
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-RuleSuppressed", 1856)
+    state:Advance(0.3)
+    H.Equal(#app.engine.history, 0)
+    H.Equal(#state.sounds, 0)
+    state:Advance(1)
+    H.Equal(#app.engine.history, 1)
+    H.Equal(app.engine.history[1].kind, "sighting")
+    H.Equal(#state.sounds, 1)
+    H.Equal(state.sounds[1].id, RULE_SOUND_KITS.MAP_PING)
+end)
+
+H.Test("Vanish upgrades the same rival's active equal-priority sighting banner on a later tick", function()
+    local state, app, profile = ruleSoundFixture()
+    local rule = soundRule("All urgent banners", "quest", 100)
+    rule.event = "any"
+    profile.rules = { rule }
+    app:OnSettingsChanged()
+    seeSoundRuleRival(state, 1)
+    state:Advance(0.3)
+    H.Equal(app.ui.activeBanner.kind, "sighting")
+    H.Equal(#state.sounds, 1)
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-AfterSighting", 1856)
+    state:Advance(0.3)
+    H.Equal(#app.engine.history, 2)
+    H.Equal(app.engine.history[2].kind, "stealth")
+    H.Equal(app.ui.activeBanner.kind, "stealth")
+    H.Equal(app.ui.banner.title:GetText(), app.ui:F("stealthCast", app.ui:T("spellVanish")))
+    H.Equal(#state.sounds, 1)
+end)
+
+H.Test("a queued targeting warning wins over the same rival's higher-priority ordinary sighting", function()
+    local state, app, add = automaticLocatorFixture(false, function(profile)
+        profile.alerts.muteOrdinary = false
+        local ordinary = soundRule("Urgent sighting", nil, 100)
+        local targeting = soundRule("Custom targeting", nil, 1)
+        ordinary.sound, targeting.sound, targeting.event = false, false, "targeting"
+        profile.rules = { ordinary, targeting }
+    end)
+    add(1, true)
+    state:Advance(0.3)
+    H.Equal(#app.engine.history, 1)
+    H.Equal(app.engine.history[1].kind, "targeting")
+    H.Equal(app.ui.activeBanner.kind, "targeting")
+    state:Advance(1.25)
+    H.Equal(#app.engine.history, 1)
+    H.Equal(#state.sounds, 0)
+end)
+
 H.Test("UNIT_AURA after leaving sanctuary is eligible before the zone event", function()
     local state, _, app = setup(nil, function(fixture)
         fixture.api.C_Secrets = { ShouldAurasBeSecret = function() return false end }

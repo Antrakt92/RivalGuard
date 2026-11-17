@@ -52,6 +52,15 @@ function R.Display(profile, contact, entry)
 end
 
 local PRIORITY = { sighting = 20, returning = 30, watch = 90, targeting = 70, stealth = 100 }
+local THREAT_PRIORITY = { targeting = PRIORITY.targeting, stealth = PRIORITY.stealth }
+
+function R.CompareAlertPriority(a, b, sameContact)
+    local aThreat, bThreat = THREAT_PRIORITY[a.kind] or 0, THREAT_PRIORITY[b.kind] or 0
+    -- A fresh threat carries more useful information than the same player's arrival.
+    if sameContact and (aThreat == 0) ~= (bThreat == 0) then return aThreat - bThreat end
+    if a.priority ~= b.priority then return a.priority - b.priority end
+    return aThreat - bThreat
+end
 
 function R.ContactBlock(contact)
     if not contact or contact.hostile ~= true or contact.isPlayer ~= true then return "identity_unconfirmed" end
@@ -89,7 +98,7 @@ function R.Evaluate(profile, contact, event, context, listEntry, rangeFresh)
     if matched and matched.action == "suppress" then return nil, "custom_suppressed", matchedIndex end
     if not matched and not watched and not R.ClassMatches(profile.alerts.classes, contact.class, profile.alerts.unknownClass) then return nil, "class_filtered" end
     local decision = {
-        kind = kind, priority = matched and matched.priority or PRIORITY[kind] or 20,
+        kind = kind, priority = math.max(matched and matched.priority or PRIORITY[kind] or 20, THREAT_PRIORITY[kind] or 0),
         banner = profile.alerts.banner and (not matched or matched.banner),
         cooldown = matched and matched.cooldown or profile.alerts.cooldown,
         reason = matched and "custom_rule" or (watched and "watch_list" or "event_matched"),

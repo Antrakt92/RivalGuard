@@ -1522,7 +1522,11 @@ function UI.New(app)
         local active = self.activeBanner
         if preview and active and not active.preview then return end
         if active and item.key and active.key == item.key and active.preview == item.preview then return end
-        if not active or active.preview or item.priority > active.priority then self:ShowBanner(item, now); return end
+        local sameContact = active and (id ~= "" and id == active.id or item.identity ~= "" and item.identity == active.identity)
+        if not active or active.preview or RG.Rules.CompareAlertPriority(item, active, sameContact) > 0 then
+            self:ShowBanner(item, now)
+            return
+        end
         for i = #self.bannerQueue, 1, -1 do
             local queued = self.bannerQueue[i]
             if not bannerFresh(queued, now) then table.remove(self.bannerQueue, i)
@@ -1530,7 +1534,8 @@ function UI.New(app)
         end
         local index = #self.bannerQueue + 1
         for i, queued in ipairs(self.bannerQueue) do
-            if item.priority > queued.priority or (item.priority == queued.priority and item.priority < BANNER_URGENT_PRIORITY) then
+            local difference = RG.Rules.CompareAlertPriority(item, queued)
+            if difference > 0 or (difference == 0 and item.priority < BANNER_URGENT_PRIORITY) then
                 index = i
                 break
             end

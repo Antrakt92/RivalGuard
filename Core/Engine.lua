@@ -293,8 +293,15 @@ local function upgradeStealthEvidence(item, evidence, spell)
 end
 
 local function strongerAlert(a, b)
-    if a.decision.priority == b.decision.priority then return a.sequence < b.sequence end
-    return a.decision.priority > b.decision.priority
+    local difference = Rules.CompareAlertPriority(a.decision, b.decision)
+    if difference == 0 then return a.sequence < b.sequence end
+    return difference > 0
+end
+
+local function strongerContactAlert(a, b)
+    local difference = Rules.CompareAlertPriority(a.decision, b.decision, true)
+    if difference == 0 then return a.sequence < b.sequence end
+    return difference > 0
 end
 
 local function ordinaryAlert(decision)
@@ -348,7 +355,7 @@ function E:Queue(contact, event)
                 if event == "stealth" then upgradeStealthEvidence(item, contact.stealthEvidence, contact.stealthSpell) end
                 return false
             end
-            if age <= self.profile.alerts.waveWindow and item.decision.priority >= decision.priority then
+            if age <= self.profile.alerts.waveWindow and Rules.CompareAlertPriority(item.decision, decision, true) >= 0 then
                 if event == "targeting" then item.coversTargeting = true end
                 return false
             end
@@ -357,7 +364,8 @@ function E:Queue(contact, event)
     local coversTargeting
     for index = #self.pending, 1, -1 do
         local item = self.pending[index]
-        if item.id == contact.id and now - item.at <= self.profile.alerts.waveWindow and item.decision.priority < decision.priority then
+        if item.id == contact.id and now - item.at <= self.profile.alerts.waveWindow
+            and Rules.CompareAlertPriority(decision, item.decision, true) > 0 then
             if item.event == "sighting" then contact.arrivalQueued = false end
             coversTargeting = coversTargeting or item.event == "targeting" or item.coversTargeting
             table.remove(self.pending, index)
@@ -486,21 +494,24 @@ function E:MakeRoom()
         local priority = item.decision.priority
         if contact and priority >= URGENT_PRIORITY and now - item.at <= MAX_PENDING_AGE
             and (item.event ~= "targeting" or contact.targeting == true) then
-            urgent[item.id] = math.max(urgent[item.id] or 0, priority)
+            local previous = urgent[item.id]
+            if not previous or Rules.CompareAlertPriority(item.decision, previous) > 0 then urgent[item.id] = item.decision end
         end
     end
-    local candidate, candidatePriority, candidateVisible
+    local unqueued = { priority = 0 }
+    local candidate, candidateDecision, candidateVisible
     for _, contact in pairs(self.contacts) do
-        local priority = urgent[contact.id] or 0
+        local decision = urgent[contact.id] or unqueued
+        local difference = candidateDecision and decision ~= candidateDecision and Rules.CompareAlertPriority(decision, candidateDecision) or 0
         local visible = next(contact.tokens) ~= nil
         local discard
         if not candidate then discard = true
-        elseif priority ~= candidatePriority then discard = priority < candidatePriority
+        elseif difference ~= 0 then discard = difference < 0
         elseif visible ~= candidateVisible then discard = not visible
         elseif contact.lastSeen ~= candidate.lastSeen then discard = contact.lastSeen < candidate.lastSeen
         else discard = contact.id < candidate.id end
         if discard then
-            candidate, candidatePriority, candidateVisible = contact, priority, visible
+            candidate, candidateDecision, candidateVisible = contact, decision, visible
         end
     end
     if candidate then self:Drop(candidate.id, now) self.counters.evicted = self.counters.evicted + 1 end
@@ -560,7 +571,7 @@ function E:CoalesceContactPending(contact)
         if item.id == contact.id then mergedPending[#mergedPending + 1] = item end
     end
     if #mergedPending > 1 then
-        table.sort(mergedPending, strongerAlert)
+        table.sort(mergedPending, strongerContactAlert)
         local kept, discard = {}, {}
         for _, item in ipairs(mergedPending) do
             for _, strongest in ipairs(kept) do
