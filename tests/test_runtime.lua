@@ -2791,6 +2791,142 @@ for _, restricted in ipairs({ "all", "identity" }) do
     end)
 end
 
+local function badgeArtworkVisible(frame)
+    if not frame:IsVisible() then return false end
+    while frame do
+        if frame:GetAlpha() == 0 then return false end
+        frame = frame:GetParent()
+    end
+    return true
+end
+
+H.Test("a nameplate protected after attachment can be removed and reused without blocked combat mutations", function()
+    local state, app = badgeEvidenceFixture()
+    local ui = app.ui
+    local unit, plate = state.units.nameplate1, state.plates.nameplate1
+    local badge = assert(ui.badges.active.nameplate1)
+    local allocated = ui.badges.count
+    for _ = 1, 3 do
+        ui:Select(app.engine:Snapshot()[1])
+        ui.detailsFrame.locate:Click()
+        H.True(badgeArtworkVisible(badge.icon))
+        H.True(badgeArtworkVisible(badge.locator))
+
+        state.combat = true
+        state:Fire("PLAYER_REGEN_DISABLED")
+        plate.protected = true
+        state.units.nameplate1 = nil
+        state:Fire("NAME_PLATE_UNIT_REMOVED", "nameplate1")
+        H.Equal(#state.blocked, 0)
+        H.False(badgeArtworkVisible(badge.icon))
+        H.False(badgeArtworkVisible(badge.locator))
+        H.Nil(ui.badges.highlight)
+        H.Nil(ui.badges.active.nameplate1)
+        H.Equal(#ui.badges.pool, 1)
+
+        plate.protected, state.combat = false, false
+        state:Fire("PLAYER_REGEN_ENABLED")
+        state:Unit("nameplate1", unit)
+        state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+        H.Equal(ui.badges.active.nameplate1, badge)
+        H.Equal(badge:GetParent(), plate)
+        H.Equal(ui.badges.count, allocated)
+        H.True(badgeArtworkVisible(badge.icon))
+        H.False(badgeArtworkVisible(badge.locator))
+    end
+    H.Nil(app.diagnostics.counts.errors)
+end)
+
+H.Test("a recycled token uses a new badge while its old plate remains protected", function()
+    local state, app = badgeEvidenceFixture()
+    local ui, oldPlate = app.ui, state.plates.nameplate1
+    local oldBadge = assert(ui.badges.active.nameplate1)
+    ui:Select(app.engine:Snapshot()[1])
+    ui.detailsFrame.locate:Click()
+    H.True(badgeArtworkVisible(oldBadge.icon)); H.True(badgeArtworkVisible(oldBadge.locator))
+    local replacement = state.api.CreateFrame("Frame", nil, state.api.UIParent)
+    replacement.namePlateUnitToken = "nameplate1"
+    replacement:SetSize(120, 30)
+
+    state.combat = true
+    state:Fire("PLAYER_REGEN_DISABLED")
+    oldPlate.protected = true
+    state.plates.nameplate1 = replacement
+    local before = #state.mutations
+    -- Keep the old binding active until the normal unit refresh sees the new frame.
+    state:Fire("UNIT_FLAGS", "nameplate1")
+    H.Equal(#state.blocked, 0)
+    H.Nil(ui.badges.active.nameplate1)
+    H.Equal(oldBadge:GetParent(), oldPlate)
+    H.Equal(oldBadge:GetAlpha(), 0)
+
+    state.combat = false
+    state:Fire("PLAYER_REGEN_ENABLED")
+    state:Fire("UNIT_FLAGS", "nameplate1")
+    local newBadge = assert(ui.badges.active.nameplate1)
+    H.True(newBadge ~= oldBadge)
+    H.Equal(newBadge:GetParent(), replacement)
+    H.True(badgeArtworkVisible(newBadge.icon))
+    H.False(badgeArtworkVisible(newBadge.locator))
+    H.Equal(ui.badges.count, 2)
+    ui:Refresh()
+    H.Equal(oldBadge:GetAlpha(), 0)
+    H.False(badgeArtworkVisible(oldBadge.icon)); H.False(badgeArtworkVisible(oldBadge.locator))
+    local original = { [oldBadge] = true, [oldBadge.icon] = true, [oldBadge.locator] = true }
+    for index = before + 1, #state.mutations do H.Nil(original[state.mutations[index].frame]) end
+
+    oldPlate.protected = false
+    state:Unit("nameplate2", { guid = "Player-RecycledSafe", name = "Next rival", class = "HUNTER", hostile = true, isPlayer = true })
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+    H.Equal(ui.badges.active.nameplate2, oldBadge)
+    H.Equal(oldBadge:GetParent(), state.plates.nameplate2)
+    H.True(badgeArtworkVisible(oldBadge.icon))
+    H.False(badgeArtworkVisible(oldBadge.locator))
+    H.Equal(oldBadge.icon.texture, "Interface\\Icons\\ClassIcon_HUNTER")
+    H.Equal(ui.badges.active.nameplate1, newBadge)
+    H.Equal(ui.badges.count, 2)
+    H.Equal(#state.blocked, 0)
+    H.Nil(app.diagnostics.counts.errors)
+end)
+
+for _, protection in ipairs({ "protected", "unreadable" }) do
+    H.Test("a fresh " .. protection .. " parent hides an attached badge before another observation", function()
+        local state, app = badgeEvidenceFixture()
+        local ui, plate = app.ui, state.plates.nameplate1
+        local badge = assert(ui.badges.active.nameplate1)
+        ui:Select(app.engine:Snapshot()[1])
+        ui.detailsFrame.locate:Click()
+        H.True(badgeArtworkVisible(badge.icon))
+        H.True(badgeArtworkVisible(badge.locator))
+        local isProtected = plate.IsProtected
+        state.combat = true
+        state:Fire("PLAYER_REGEN_DISABLED")
+        if protection == "protected" then plate.protected = true
+        else
+            local secret = H.Secret("unreadable nameplate protection")
+            plate.IsProtected = function() return secret end
+        end
+        local observations = app.engine.counters.observations
+        if protection == "protected" then state:Advance(0.15)
+        else ui:Refresh() end
+        H.Equal(app.engine.counters.observations, observations)
+        H.Equal(#state.blocked, 0)
+        H.False(badgeArtworkVisible(badge.icon))
+        H.False(badgeArtworkVisible(badge.locator))
+        H.Nil(ui.badges.highlight)
+        H.Nil(ui.badges.active.nameplate1)
+        H.Equal(#ui.badges.pool, 1)
+
+        plate.protected, plate.IsProtected, state.combat = false, isProtected, false
+        state:Fire("PLAYER_REGEN_ENABLED")
+        state:Fire("UNIT_FLAGS", "nameplate1")
+        H.Equal(ui.badges.active.nameplate1, badge)
+        H.True(badgeArtworkVisible(badge.icon))
+        H.False(badgeArtworkVisible(badge.locator))
+        H.Nil(app.diagnostics.counts.errors)
+    end)
+end
+
 local function automaticLocatorFixture(enabled, configure)
     local relations, restricted = {}, H.Secret("unreadable automatic target relation")
     local state, _, app = setup(nil, function(fixture)

@@ -23,6 +23,7 @@ function B.New(getProfile)
     end
 
     local function available(frame)
+        if not frame then return false end
         for _, method in ipairs(SECURITY_METHODS) do
             if frame[method] then
                 local ok, value = pcall(frame[method], frame)
@@ -38,11 +39,13 @@ function B.New(getProfile)
     end
 
     local function acquire()
-        local badge = table.remove(self.pool)
-        if badge then return badge end
+        for i = #self.pool, 1, -1 do
+            local pooled = self.pool[i]
+            if not pooled.parent or available(pooled.parent) then return table.remove(self.pool, i) end
+        end
         if self.count >= 128 then return nil end
         self.count = self.count + 1
-        badge = CreateFrame("Frame", nil, UIParent)
+        local badge = CreateFrame("Frame", nil, UIParent)
         badge.shownState = {}
         badge:SetSize(24, 24)
         badge:EnableMouse(false)
@@ -109,6 +112,10 @@ function B.New(getProfile)
             end
         end
         show(badge, "root", true)
+        if badge.suppressed then
+            badge:SetAlpha(1)
+            badge.suppressed = nil
+        end
         return showLocator
     end
 
@@ -116,13 +123,12 @@ function B.New(getProfile)
         local highlight = self.highlight
         if not highlight then return end
         self.highlight = nil
-        show(highlight.badge, "locator", false)
-        if available(highlight.frame) then paint(highlight.badge) else show(highlight.badge, "root", false) end
+        if available(highlight.frame) then paint(highlight.badge) else self:Remove(highlight.unit, true) end
     end
 
     function self:Highlight(unit, frame, id, now, automatic)
         local badge = self.active[unit]
-        if not badge or badge.parent ~= frame or not badge.contact or badge.contact.id ~= id then return false end
+        if not badge or badge.parent ~= frame or not badge.contact or badge.contact.id ~= id or not available(frame) then return false end
         self:ClearHighlight()
         self.highlight = { unit = unit, frame = frame, badge = badge, id = id, expires = now + 3,
             checkAt = now, automatic = automatic == true }
@@ -133,8 +139,13 @@ function B.New(getProfile)
 
     function self:Set(unit, frame, contact)
         if type(unit) ~= "string" or not unit:match("^nameplate%d+$") then return end
-        if not frame or not frame.SetPoint or not available(frame) then self:Remove(unit); return end
         local badge = self.active[unit]
+        if not available(frame) then self:Remove(unit, badge and badge.parent == frame); return end
+        if not frame.SetPoint then self:Remove(unit); return end
+        if badge and badge.parent ~= frame and not available(badge.parent) then
+            self:Remove(unit, true)
+            badge = nil
+        end
         if (not badge or badge.parent ~= frame) and locked() then
             if badge then self:Remove(unit) end
             return
@@ -160,28 +171,37 @@ function B.New(getProfile)
         paint(badge)
     end
 
-    function self:Remove(unit)
+    function self:Remove(unit, unavailableParent)
         local badge = self.active[unit]
         if not badge then return end
         if self.highlight and self.highlight.unit == unit then
             self.highlight = nil
         end
         self.active[unit] = nil
-        show(badge, "locator", false)
-        show(badge, "root", false)
         badge.contact = nil
-        if not locked() then
-            badge:ClearAllPoints()
-            badge.locator:ClearAllPoints()
-            badge:SetParent(UIParent)
-            badge.parent = nil
-            badge.styleOffset = nil
+        if not unavailableParent and available(badge.parent) then
+            show(badge, "locator", false)
+            show(badge, "root", false)
+            if not locked() then
+                badge:ClearAllPoints()
+                badge.locator:ClearAllPoints()
+                badge:SetParent(UIParent)
+                badge.parent = nil
+                badge.styleOffset = nil
+            end
+        elseif not badge.suppressed then
+            -- Visibility and geometry can become protected through the plate.
+            -- Suppress owned artwork and defer reuse until the parent is safe.
+            badge:SetAlpha(0)
+            badge.suppressed = true
         end
         self.pool[#self.pool + 1] = badge
     end
 
     function self:Refresh()
-        for _, badge in pairs(self.active) do paint(badge) end
+        for unit, badge in pairs(self.active) do
+            if available(badge.parent) then paint(badge) else self:Remove(unit, true) end
+        end
     end
 
     function self:Destroy()
