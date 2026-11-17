@@ -398,15 +398,12 @@ function App:Demo()
         sample("MAGE", "demoMage", 10, 18),
     }
     contacts[2].targeting, contacts[3].watched = true, true
-    local decision = { kind = "sighting", contact = contacts[1], banner = true, sound = false, preview = true, reason = "preview" }
     self.demoContacts, self.demoUntil = nil, nil
     if self.ui and self.ui.Preview then
         local registry = {}
         for _, contact in ipairs(contacts) do registry[contact.id] = contact end
         self.demoContacts = registry
-        self.demoUntil = self.ui:Preview(contacts, decision)
-    elseif self.ui then
-        self.ui:Alert(decision)
+        self.demoUntil = self.ui:Preview(contacts)
     end
 end
 
@@ -418,6 +415,7 @@ function App:Command(text)
     elseif command == "profile" then
         if argument == "" then self.ui:OpenProfilePicker() else self:UseProfile(argument) end
     elseif command == "demo" or command == "test" then self:Demo()
+    elseif command == "alert" then self.ui:PreviewAlert()
     elseif command == "pause" then self.engine:Pause(RG.Util.Clamp(tonumber(argument), 1, 1440, 10) * 60)
     elseif command == "resume" then self.engine:Resume()
     elseif command == "mute" then self:ToggleMute()
@@ -434,7 +432,7 @@ function App:Command(text)
         end
         if not ok then self:Notify(RG.Locale.Get("identityUnknown", self.db:GetProfile().locale)) end
     elseif command == "help" then
-        self:Notify("/rg settings, move, profile [name], demo, pause [minutes], resume, mute, clear, watch, ignore, report, diagnostics")
+        self:Notify("/rg settings, move, profile [name], demo, alert, pause [minutes], resume, mute, clear, watch, ignore, report, diagnostics")
     else self.ui:Toggle() end
     self.dirty = true
 end

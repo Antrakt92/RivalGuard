@@ -22,7 +22,7 @@ the source tree and requires the packaging step below.
 
 On first login, the guide lets you keep alerts for all classes or choose
 **Hunter and Rogue**. Change that choice any time under **Alerts** in
-`/rg settings` or **Options → AddOns → RivalGuard**. Try `/rg demo` for a preview
+`/rg settings` or **Options → AddOns → RivalGuard**. Try `/rg demo` for a list preview
 that leaves your journal and lists untouched. Open **Why?** on a sample row to
 see how your current profile would handle that new sighting in the open world.
 
@@ -86,6 +86,8 @@ or **Appearance → Move Nearby**, then drag the RivalGuard title to place it.
 **Overview → Keep Nearby open without opponents** leaves it visible between encounters.
 Click the minimap button to toggle Nearby, right-click it to open settings,
 or drag it around the minimap to move the button.
+Use `/rg alert` or **Appearance → Preview alert** to preview the compact banner
+and drag it to a different position.
 Open **Options → Keybindings → RivalGuard** to assign shortcuts for Nearby,
 pausing or resuming alerts, muting sound, and highlighting the opponent in the
 current alert. The highlight works with Nearby closed when a live individual

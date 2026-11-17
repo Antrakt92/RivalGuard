@@ -434,12 +434,6 @@ function UI.New(app)
         end
     end
 
-    local function bannerDefaultPoint()
-        local width = M.Number(UIParent:GetWidth(), 1920)
-        if width <= 1150 then return -math.min(108, math.max(0, (width - 465) / 2)) end
-        return 0
-    end
-
     local main = self:Window("RivalGuardNearby", UIParent)
     self.frame = main
     main:SetSize(UI.layout.width, 410)
@@ -625,12 +619,13 @@ function UI.New(app)
 
     local banner = self:Window("RivalGuardAlert", UIParent)
     self.banner = banner
-    banner:SetSize(440, 84); banner:SetFrameStrata("HIGH"); banner:SetClampedToScreen(true)
+    banner:SetSize(280, 52); banner:SetFrameStrata("HIGH"); banner:SetClampedToScreen(true)
     banner:SetMovable(true); banner:EnableMouse(false)
-    fill(banner, { 0.035, 0.05, 0.075, 1 }); self.bannerOutline = outline(banner, { 0.37, 0.78, 0.92, 1 })
+    fill(banner, { 0.035, 0.05, 0.075, 0.94 }); self.bannerOutline = outline(banner, C.border)
+    banner.accent = banner:CreateTexture(nil, "ARTWORK")
+    banner.accent:SetPoint("TOPLEFT", 1, -1); banner.accent:SetPoint("BOTTOMLEFT", 1, 1); banner.accent:SetWidth(3)
     local function restoreBanner()
-        self.bannerDefaultOffset = bannerDefaultPoint()
-        restorePosition(banner, "alert", "TOP", self.bannerDefaultOffset, -180)
+        restorePosition(banner, "alert", "TOP", 0, -104)
     end
     local function cancelBannerMove()
         if not self.bannerMoveProfile then return end
@@ -640,12 +635,12 @@ function UI.New(app)
     end
     restoreBanner()
     banner.icon = banner:CreateTexture(nil, "ARTWORK")
-    banner.icon:SetPoint("LEFT", 14, 0); banner.icon:SetSize(42, 42)
-    banner.title = font(banner, 16, C.accent)
-    banner.title:SetPoint("TOPLEFT", 70, -14); banner.title:SetWidth(350)
+    banner.icon:SetPoint("LEFT", 12, 0); banner.icon:SetSize(28, 28)
+    banner.title = font(banner, 13, C.accent)
+    banner.title:SetPoint("TOPLEFT", 50, -9); banner.title:SetWidth(220)
     if banner.title.SetMaxLines then banner.title:SetMaxLines(1) end
-    banner.body = font(banner, 13)
-    banner.body:SetPoint("TOPLEFT", 70, -40); banner.body:SetWidth(350); banner.body:SetHeight(38)
+    banner.body = font(banner, 12)
+    banner.body:SetPoint("TOPLEFT", 50, -27); banner.body:SetWidth(220)
     banner:RegisterForDrag("LeftButton")
     banner:SetScript("OnDragStart", function()
         if self.bannerPreview then self.bannerMoveProfile = self:Profile(); banner:StartMoving() end
@@ -1352,8 +1347,6 @@ function UI.New(app)
             self.lastProfile = profile
             self.alertProfile, self.alertConfig = profile, self:AlertConfig(profile)
             self.controlsDirty = true
-        elseif not self.bannerMoveProfile and not profile.positions.alert and self.bannerDefaultOffset ~= bannerDefaultPoint() then
-            restoreBanner()
         end
         local now = self:Now()
         local preview = self.previewUntil and self.previewUntil > now
@@ -1511,7 +1504,11 @@ function UI.New(app)
         local title = kind == "stealth" and M.Stealth(item, self:Profile().locale) or self:T(BANNER_CATEGORIES[kind] or "alertTitle")
         if item.preview then title = self:T("demoLabel") .. " · " .. title end
         banner.title:SetText(title)
-        if item.count and item.count > 1 then
+        local grouped = item.count and item.count > 1
+        local height = grouped and 65 or 52
+        if banner:GetHeight() ~= height then banner:SetHeight(height) end
+        if banner.body.SetMaxLines then banner.body:SetMaxLines(grouped and 2 or 1) end
+        if grouped then
             local summary = M.Wave(item.classes, self:Profile().locale)
             banner.body:SetText(self:F("waveBody", item.count) .. (summary ~= "" and ("\n" .. summary) or ""))
         else
@@ -1522,7 +1519,10 @@ function UI.New(app)
             banner.body:SetText(name)
         end
         banner.icon:SetTexture(RG.Defaults.classSet[class] and ("Interface\\Icons\\ClassIcon_" .. class) or "Interface\\Icons\\Ability_Warrior_BattleShout")
-        banner.title:SetTextColor(unpack((kind == "watch" or kind == "stealth" or kind == "avoid") and C.gold or C.accent))
+        local accent = kind == "targeting" and C.danger
+            or (kind == "watch" or kind == "stealth" or kind == "avoid") and C.gold or C.accent
+        banner.title:SetTextColor(unpack(accent))
+        banner.accent:SetColorTexture(unpack(accent))
     end
 
     function self:ShowBanner(item, now)
@@ -1675,13 +1675,21 @@ function UI.New(app)
     end
 
     function self:PreviewAlert()
-        self:Alert({ kind = "stealth", contact = { name = self:T("demoRogue"), class = "ROGUE" }, sound = true, preview = true })
-        if app.PreviewSound then app:PreviewSound("stealth") end
-    end
-
-    function self:Preview(contacts, decision)
+        self.previewContacts, self.previewUntil = nil, nil
         self:ClosePreviewDetails()
         self.settings:Hide()
+        self:Alert({ kind = "stealth", contact = { name = self:T("demoRogue"), class = "ROGUE" }, sound = true, preview = true })
+        if app.PreviewSound then app:PreviewSound("stealth") end
+        self:Refresh()
+    end
+
+    function self:Preview(contacts)
+        self:ClosePreviewDetails()
+        self.settings:Hide()
+        if self.activeBanner and self.activeBanner.preview then
+            self.bannerUntil = self:Now()
+            self:AdvanceBanner(self.bannerUntil)
+        end
         self.previewContacts = RG.Util.Copy(contacts or {
             { id = "preview-rogue", name = self:T("demoRogue"), class = "ROGUE", visible = true, lastSeen = self:Now(), rangeMin = 10, rangeMax = 20 },
             { id = "preview-hunter", name = self:T("demoHunter"), class = "HUNTER", visible = true, lastSeen = self:Now(), rangeMin = 20, rangeMax = 40 },
@@ -1692,10 +1700,6 @@ function UI.New(app)
         end
         self.previewAliases = {}
         self.previewUntil = self:Now() + 15
-        decision = decision or { kind = "stealth", contact = self.previewContacts[1] }
-        local sample = RG.Util.Copy(decision)
-        sample.preview = true
-        self:Alert(sample)
         self:Refresh()
         return self.previewUntil
     end
@@ -1898,11 +1902,14 @@ function UI.New(app)
         local preview = contact.preview == true
         if detail.previewLayout ~= preview then
             detail.previewLayout = preview
-            detail:SetHeight(preview and 245 or 555)
+            detail:SetSize(preview and 344 or 470, preview and 184 or 555)
+            detail.title:SetWidth(preview and 218 or 344)
+            detail.info:SetWidth(preview and 308 or 432)
+            detail.notice:SetWidth(preview and 308 or 432)
             detail.notice:ClearAllPoints()
-            detail.notice:SetPoint("TOPLEFT", 18, preview and -145 or -185)
+            detail.notice:SetPoint("TOPLEFT", 18, preview and -118 or -185)
             detail.why:ClearAllPoints()
-            detail.why:SetPoint("TOPLEFT", preview and 18 or 185, preview and -197 or -261)
+            detail.why:SetPoint("TOPLEFT", preview and 18 or 185, preview and -144 or -261)
         end
         local entry, identity = listEntry(contact)
         if detail.listIdentity ~= identity then
@@ -1943,7 +1950,9 @@ function UI.New(app)
             if cleanSource ~= "" then sourceNames[#sourceNames + 1] = self:T(sourceKeys[cleanSource] or "observed") end
         end
         table.sort(sourceNames)
-        lines[#lines + 1] = self:T("reason") .. ": " .. (#sourceNames > 0 and table.concat(sourceNames, ", ") or self:T("observed"))
+        if not preview then
+            lines[#lines + 1] = self:T("reason") .. ": " .. (#sourceNames > 0 and table.concat(sourceNames, ", ") or self:T("observed"))
+        end
         paintText(detail.info, table.concat(lines, "\n"))
         paintText(detail.notice, self:T(contact.preview and "demoWhy" or "noTarget"))
         if profile.display.streamer then

@@ -579,7 +579,7 @@ H.Test("short sample details keep their horizontal offset inside a compact viewp
     ui:Preview({ { id = "sample", name = "Sample Hunter", class = "HUNTER", visible = true, hostile = true, isPlayer = true } })
     ui.rows[1]:Click()
     local detail = ui.detailsFrame
-    H.Equal(detail:GetHeight(), 245)
+    H.Equal(detail:GetHeight(), 184)
     local compactX = fitCenteredDialog(state, detail)
     H.True(compactX < 80)
     H.False(detail.note:IsShown())
@@ -922,14 +922,16 @@ H.Test("live banner priority resists waves and previews while stronger danger pr
     H.Equal(ui.activeBanner.kind, "stealth")
 end)
 
-H.Test("default banner adapts to viewport width while an intentional drag preserves its anchor", function()
+H.Test("the compact banner stays centered by default and preserves an intentional drag", function()
     local state, _, app, ui = setup()
     local banner, positions = ui.banner, app.db:GetProfile().positions
-    local _, _, _, wide = banner:GetPoint(1)
+    local point, _, relative, wide, heightOffset = banner:GetPoint(1)
+    H.Equal(point, "TOP"); H.Equal(relative, "TOP")
+    H.Equal(wide, 0); H.Equal(heightOffset, -104)
     state.api.UIParent:SetSize(1024, 576)
     ui:Refresh()
     local _, _, _, compact = banner:GetPoint(1)
-    H.True(compact < wide)
+    H.Equal(compact, wide)
     H.Nil(positions.alert)
 
     local function move(x)
