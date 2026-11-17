@@ -15,11 +15,16 @@ It cannot detect fully hidden players or provide a guaranteed all-direction rada
 
 ## Getting started
 
-Build the development ZIP with the command below and extract its `RivalGuard`
-folder into `Interface/AddOns` for your client. Open `/rg settings` or look for
-RivalGuard under **Options → AddOns**. Try `/rg demo` for a preview that leaves
-your journal and lists untouched. Open **Why?** on a sample row to see how your
-current profile would handle that new sighting in the open world.
+Use the packaged development ZIP, or build it with the command below. Extract
+its `RivalGuard` folder into `Interface/AddOns` for your client and check for
+`Interface/AddOns/RivalGuard/RivalGuard.toc`. GitHub's **Download ZIP** downloads
+the source tree and requires the packaging step below.
+
+On first login, the guide lets you keep alerts for all classes or choose
+**Hunter and Rogue**. Change that choice any time under **Alerts** in
+`/rg settings` or **Options → AddOns → RivalGuard**. Try `/rg demo` for a preview
+that leaves your journal and lists untouched. Open **Why?** on a sample row to
+see how your current profile would handle that new sighting in the open world.
 
 - **Nearby:** view current sightings and distinguish them from recently seen
   players. Click a row for evidence, personal notes or a temporary alert pause.
