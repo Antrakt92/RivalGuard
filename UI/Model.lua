@@ -136,14 +136,18 @@ function M.RangeProvenance(evidence, locale)
     if key then return RG.Locale.Get(key, locale) end
 end
 
-function M.RangeDetails(contact, locale)
-    if clean(contact.visible) ~= true or clean(contact.savedOnly) == true or clean(contact.preview) == true then return nil end
+function M.RangeEvidenceText(contact, locale)
     local evidence = clean(contact.rangeEvidence)
     local provenance = M.RangeProvenance(evidence, locale)
     if not provenance then return nil end
     local range = M.Range(contact, locale)
     if evidence == "conflict" or evidence == "unknown" then return provenance, range end
     if range ~= RG.Locale.Get("rangeUnknown", locale) then return range .. " · " .. provenance, range end
+end
+
+function M.RangeDetails(contact, locale)
+    if clean(contact.visible) ~= true or clean(contact.savedOnly) == true or clean(contact.preview) == true then return nil end
+    return M.RangeEvidenceText(contact, locale)
 end
 
 function M.Stealth(contact, locale)

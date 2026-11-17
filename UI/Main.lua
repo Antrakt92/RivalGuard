@@ -1832,7 +1832,14 @@ function UI.New(app)
         local ruleName = not self:Profile().display.streamer and M.Text(result.ruleName, "") or ""
         paintShown(frame.rule, ruleName ~= "")
         paintText(frame.rule, ruleName ~= "" and self:F("explanationMatchedRule", ruleName) or "")
-        local rangeEvidence = result.reason ~= "range_conflict" and result.reason ~= "not_observed" and M.RangeProvenance(result.rangeEvidence, locale)
+        local rangeEvidence
+        if result.reason ~= "range_conflict" and result.reason ~= "not_observed" then
+            if preview and (M.Number(result.rangeMin) or M.Number(result.rangeMax)) then
+                rangeEvidence = self:F("demoRange", M.Range(result, locale))
+            else
+                rangeEvidence = M.RangeEvidenceText(result, locale) or M.RangeProvenance(result.rangeEvidence, locale)
+            end
+        end
         ---@type { source: string, yards: number, policy: string }?
         local rangeLimit = result.rangeLimit
         local yards = type(rangeLimit) == "table" and M.Number(rangeLimit.yards)

@@ -161,6 +161,7 @@ function App:Explain(contact)
             result.reason = "not_observed"
             return result
         end
+        result.rangeMin, result.rangeMax = sample.rangeMin, sample.rangeMax
         local entry = sample.watched and { kind = "watch" } or nil
         local profile = self.db:GetProfile()
         local decision, reason, matchedIndex = RG.Rules.Evaluate(profile, sample, "sighting", { kind = "world" }, entry)

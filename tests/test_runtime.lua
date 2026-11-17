@@ -1507,6 +1507,9 @@ H.Test("a combined spell and interaction range shows the exclusive strict lower 
     H.True(ui.detailsFrame.info:GetText():find(ui:T("rangeEvidenceCombined"), 1, true) ~= nil)
     ui:ShowExplanation()
     H.Equal(ui.explanationFrame.reason:GetText(), RG.Locale.Reason("range_outside", profile.locale))
+    local explanation = app:Explain(range)
+    H.Equal(explanation.rangeMin, 20); H.Equal(explanation.rangeMax, 28); H.True(explanation.rangeMinExclusive)
+    H.True(ui.explanationFrame.rangeEvidence:GetText():find(expected, 1, true) ~= nil)
 end)
 
 for _, movesNear in ipairs({ false, true }) do
@@ -2114,6 +2117,58 @@ H.Test("Why retains the winning rule and displays its distance scope through coo
     H.Nil(report:find("rangeLimit", 1, true))
 end)
 
+H.Test("Why refreshes live distance independently of an older selection and keeps only fresh alias evidence", function()
+    local state, app, see, move = pendingRangeFixture(function(profile)
+        profile.range.enabled, profile.range.yards, profile.range.policy, profile.range.unknown = true, 20, "confirmed", false
+    end)
+    local ui = app.ui
+    see(1, 18)
+    state:Unit("focus", state.units.nameplate1)
+    state:Fire("PLAYER_FOCUS_CHANGED")
+    local selected = app.engine:Snapshot()[1]
+    ui:Select(selected); ui:ShowExplanation()
+    local function valid(yards, reason)
+        local result = app:Explain(selected)
+        H.Equal(result.rangeMin, yards); H.Equal(result.rangeMax, yards)
+        H.Equal(result.reason, reason)
+        ui:ShowExplanation()
+        local text = ui.explanationFrame.rangeEvidence:GetText()
+        H.True(text:find(ui:F("rangeMeasured", yards), 1, true) ~= nil)
+        H.True(text:find(ui:T("rangeEvidenceExact"), 1, true) ~= nil)
+        return text
+    end
+    local first = valid(18, "event_matched")
+    state.clock.Advance(0.2)
+    move(1, 26)
+    H.Equal(selected.rangeMax, 18)
+    local current = valid(26, "range_outside")
+    H.True(current ~= first)
+    H.Nil(current:find(ui:F("rangeMeasured", 18), 1, true))
+    H.True(current:find(ui:F("explanationGlobalRange", 20, ui:T("confirmed")), 1, true) ~= nil)
+
+    local function unavailable(reason)
+        local result = app:Explain(selected)
+        H.Equal(result.reason, reason)
+        H.Nil(result.rangeMin); H.Nil(result.rangeMax)
+        ui:ShowExplanation()
+        local text = ui.explanationFrame.rangeEvidence:GetText()
+        for _, yards in ipairs({ 18, 26, 17 }) do H.Nil(text:find(ui:F("rangeMeasured", yards), 1, true)) end
+    end
+    state.clock.Advance(2.1)
+    unavailable("range_unknown")
+    H.Equal(app:Explain(selected).rangeEvidence, "unknown")
+
+    move(1, 17)
+    valid(17, "event_matched")
+    state.units.nameplate1, state.plates.nameplate1 = nil, nil
+    state:Fire("NAME_PLATE_UNIT_REMOVED", "nameplate1")
+    unavailable("range_unknown")
+    H.True(app.engine:Snapshot()[1].sources.focus)
+    state.units.focus = nil
+    state:Fire("PLAYER_FOCUS_CHANGED")
+    unavailable("not_observed")
+end)
+
 H.Test("sample Why distinguishes the matching rule range from a blocking global scope", function()
     local _, _, app = setup()
     local ui, profile = app.ui, app.db:GetProfile()
@@ -2132,9 +2187,11 @@ H.Test("sample Why distinguishes the matching rule range from a blocking global 
         H.Equal(explanation.rangeLimit.source, source)
         H.Equal(explanation.rangeLimit.yards, yards)
         H.Equal(explanation.rangeLimit.policy, policy)
+        H.Equal(explanation.rangeMin, 8); H.Equal(explanation.rangeMax, 20)
         ui:ShowExplanation()
         local key = source == "rule" and "explanationRuleRange" or "explanationGlobalRange"
         H.True(ui.explanationFrame.rangeEvidence:GetText():find(ui:F(key, yards, ui:T(policy)), 1, true) ~= nil)
+        H.True(ui.explanationFrame.rangeEvidence:GetText():find(ui:F("demoRange", ui:F("rangeBracket", 8, 20)), 1, true) ~= nil)
     end
     show("custom_rule", "rule", 25, "possible")
     profile.range.enabled, profile.range.yards, profile.range.policy = true, 10, "confirmed"

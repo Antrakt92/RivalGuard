@@ -24,7 +24,7 @@ current profile would handle that new sighting in the open world.
 - **Nearby:** view current sightings and distinguish them from recently seen
   players. Click a row for evidence, personal notes or a temporary alert pause.
   **Why?** checks what the current settings would do for a new sighting and
-  shows the matching rule, applicable distance limit, configured sound and
+  shows the matching rule, fresh distance and applicable limit, configured sound and
   latest individual or group sound result when available.
   **Highlight** briefly marks the player's nameplate when the client can verify
   who it belongs to and RivalGuard can safely attach a marker.
