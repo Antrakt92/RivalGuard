@@ -73,8 +73,10 @@ Nameplates behind the camera have a separate state when the client exposes it.
 Target and focus preference comes from readable `UnitIsUnit` comparisons. The
 targeting warning retires earlier positive reads from other tokens when a
 `UNIT_TARGET` update confirms that the same player has stopped targeting you.
-This requires a readable comparison and matching identity evidence. The
-quarter-second sensor tick refreshes direct tokens and plates with a confirmed
+This requires a readable comparison and matching identity evidence. A readable
+`UNIT_FACTION` update confirming that a known player is no longer hostile
+cancels their queued warnings. Current aliases must be observed again.
+The quarter-second sensor tick refreshes direct tokens and plates with a confirmed
 selection or targeting threat. It spreads ordinary plates across four ticks for
 a nominal one-second refresh. The 128-token limit reserves one slot each for the
 target, focus, mouseover and soft enemy. Unit events remain immediate, and selection changes

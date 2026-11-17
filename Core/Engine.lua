@@ -23,6 +23,7 @@ local function safeObservation(obs)
         hostile = boolean(obs.hostile), isPlayer = boolean(obs.isPlayer),
         targeting = boolean(obs.targeting), stealth = boolean(obs.stealth),
         targetEvent = obs.targetEvent == true or nil,
+        factionEvent = obs.factionEvent == true or nil,
         currentTarget = boolean(obs.currentTarget), currentFocus = boolean(obs.currentFocus),
         dead = boolean(obs.dead),
         stealthReadable = obs.stealthReadable == true,
@@ -530,6 +531,27 @@ function E:Observe(raw)
     local binding = self.bindings[obs.token]
     local contact = binding and self.contacts[binding.id]
     if obs.isPlayer == false or obs.hostile == false then
+        if obs.factionEvent and obs.hostile == false then
+            local identity = obs.guid and ("guid:" .. obs.guid) or named
+            local owner = identity and self.contacts[self.identities[identity]]
+            if not ownerMatches(owner, obs.guid, named) then
+                owner = ownerMatches(contact, obs.guid, named) and contact or nil
+            end
+            if owner then
+                -- Reacquire each alias from a fresh read, without keeping a
+                -- cached hostile poll or touching other owners' aliases.
+                if next(owner.tokens) ~= nil then owner.lastSeen = self:Now() end
+                for token in pairs(owner.tokens) do
+                    self.bindings[token] = nil
+                    owner.tokens[token] = nil
+                end
+                owner.currentTarget, owner.currentFocus = nil, nil
+                self:Remove(obs.token)
+                self:Disqualify(owner, obs)
+                self:Changed()
+                return nil, "not_enemy_player"
+            end
+        end
         self:Remove(obs.token, ownerMatches(contact, obs.guid, named) and obs or nil)
         return nil, "not_enemy_player"
     end
@@ -618,6 +640,15 @@ function E:Observe(raw)
     return self:View(contact, now)
 end
 
+function E:Disqualify(contact, contradiction)
+    if contradiction.hostile == false then contact.hostile = false end
+    if contradiction.isPlayer == false then contact.isPlayer = false end
+    contact.targeting, contact.targetingNotified, contact.arrivalQueued = nil, nil, false
+    for index = #self.pending, 1, -1 do
+        if self.pending[index].id == contact.id then table.remove(self.pending, index) end
+    end
+end
+
 function E:Remove(token, contradiction)
     local binding = self.bindings[token]
     if not binding then return end
@@ -632,12 +663,7 @@ function E:Remove(token, contradiction)
             if contact.targetingNotified ~= nil then self:CancelTargeting(contact) end
         else self:Reconcile(contact, self:Now()) end
         if contradiction and (not visible or contact.hostile ~= true or contact.isPlayer ~= true) then
-            if contradiction.hostile == false then contact.hostile = false end
-            if contradiction.isPlayer == false then contact.isPlayer = false end
-            contact.targeting, contact.targetingNotified, contact.arrivalQueued = nil, nil, false
-            for index = #self.pending, 1, -1 do
-                if self.pending[index].id == contact.id then table.remove(self.pending, index) end
-            end
+            self:Disqualify(contact, contradiction)
         end
     end
     self:Changed()

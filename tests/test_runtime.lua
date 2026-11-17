@@ -629,6 +629,96 @@ H.Test("a recycled nameplate with a negative target relation cannot reset the pr
     H.Equal(app.engine.counters.alerts, 1)
 end)
 
+H.Test("fresh same-owner UNIT_FACTION cancels a queued cast and retires the targeting banner", function()
+    local state, app, _, original = aliasedTargetingFixture()
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-BeforeFaction", 1856)
+    local priorUnit = state.units.nameplate1
+    state:Unit("nameplate1", { guid = priorUnit.guid, name = priorUnit.name, class = priorUnit.class,
+        hostile = false, isPlayer = true })
+    state:Fire("UNIT_FACTION", "nameplate1")
+    local current = assert(app.engine:SelectedContact(original.id, original.identity))
+    H.Nil(current.sources.target)
+    H.Nil(current.sources.nameplate)
+    H.False(current.visible)
+    H.False(current.hostile)
+    app.ui:AdvanceBanner(state.clock.Now())
+    H.Nil(app.ui.activeBanner)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(#app.engine.history, 1)
+    H.False(app.ui.banner:IsShown())
+
+    state:Unit("nameplate1", priorUnit)
+    state:Fire("UNIT_FACTION", "nameplate1")
+    current = assert(app.engine:SelectedContact(original.id, original.identity))
+    H.True(current.hostile)
+    H.True(current.targeting)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 2)
+    H.Equal(app.engine.history[2].kind, "targeting")
+    H.Equal(app.ui.activeBanner.id, original.id)
+end)
+
+H.Test("an unbound plate's clean UNIT_FACTION invalidates cached aliases of its indexed GUID", function()
+    local state, app, _, original = aliasedTargetingFixture()
+    local prior = state.units.nameplate1
+    state:Unit("nameplate2", { guid = prior.guid, name = prior.name, class = prior.class,
+        hostile = false, isPlayer = true })
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+    H.True(app.sensors.active.nameplate2 ~= nil)
+    H.Nil(app.engine.bindings.nameplate2)
+    H.True(app.engine:SelectedContact(original.id, original.identity).hostile)
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-BeforeUnboundFaction", 1856)
+
+    state:Fire("UNIT_FACTION", "nameplate2")
+    local current = assert(app.engine:SelectedContact(original.id, original.identity))
+    H.False(current.visible)
+    H.False(current.hostile)
+    app.ui:AdvanceBanner(state.clock.Now())
+    H.Nil(app.ui.activeBanner)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 1)
+
+    app.sensors:Poll()
+    current = assert(app.engine:SelectedContact(original.id, original.identity))
+    H.True(current.visible)
+    H.True(current.hostile)
+    H.True(current.targeting)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 2)
+    H.Equal(app.engine.history[2].kind, "targeting")
+end)
+
+for _, scenario in ipairs({ "restricted", "recycled", "passive" }) do
+    H.Test(scenario .. " faction evidence does not erase the other alias's confirmed hostility", function()
+        local state, app, _, original = aliasedTargetingFixture()
+        state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-BeforeAmbiguousFaction", 1856)
+        if scenario == "restricted" then
+            local read, secret = state.api.UnitIsEnemy, H.Secret("unreadable hostility")
+            state.api.UnitIsEnemy = function(player, token)
+                if token == "nameplate1" then return secret end
+                return read(player, token)
+            end
+        else
+            local prior = state.units.nameplate1
+            state:Unit("nameplate1", { guid = scenario == "recycled" and "Player-FriendlyReplacement" or prior.guid,
+                name = prior.name, class = prior.class, hostile = false, isPlayer = true })
+        end
+        if scenario == "passive" then app.sensors:Poll()
+        else state:Fire("UNIT_FACTION", "nameplate1") end
+        local current = assert(app.engine:SelectedContact(original.id, original.identity))
+        H.True(current.sources.target)
+        H.True(current.hostile)
+        H.True(current.targeting)
+        app.ui:AdvanceBanner(state.clock.Now())
+        H.Equal(app.ui.activeBanner.id, original.id)
+        app.engine:Tick()
+        H.Equal(app.engine.counters.alerts, 2)
+        H.Equal(app.engine.history[2].kind, "stealth")
+        H.Equal(app.ui.activeBanner.id, original.id)
+    end)
+end
+
 for _, scenario in ipairs({ { kind = "sighting", count = 1 }, { kind = "wave", count = 3 } }) do
     H.Test("a silent " .. scenario.kind .. " banner leaves sound budget for the next warning", function()
         local state, _, app = setup()
