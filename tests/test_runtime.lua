@@ -1292,7 +1292,7 @@ H.Test("Nearby stays stable across sensor phases and drops a tooltip when its ro
     H.Equal(row.contact.identity, identity(12))
     for _ = 1, 5 do state:Advance(0.25); H.Equal(page(), firstPage) end
     H.True(tooltip:IsShown())
-    row:Click()
+    row:Click("RightButton")
     H.Equal(ui.selected.identity, identity(12))
 
     ui.frame.scripts.OnMouseWheel(ui.frame, -1)
@@ -1428,7 +1428,7 @@ H.Test("a live Nearby refresh builds only the visible page in a mixed crowd", fu
 
     local offsetEnd = #rawSnapshot(engine) - profile.display.maxRows
     checkPage(function() ui:Refresh() end, 0)
-    ui.rows[1]:Click()
+    ui.rows[1]:Click("RightButton")
     local selectedIdentity = ui.selected.identity
     checkPage(function() ui.frame.scripts.OnMouseWheel(ui.frame, -500) end, offsetEnd)
     H.Equal(ui.selected.identity, selectedIdentity)
@@ -1482,7 +1482,7 @@ H.Test("an open contact card refreshes in a crowd without building a hidden Near
     state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
     state:Advance(0.5)
     local ui = app.ui
-    ui.rows[1]:Click()
+    ui.rows[1]:Click("RightButton")
     H.Equal(ui.detailsFrame.title:GetText(), "First name-FixtureRealm")
     local snapshotCalls, rowCalls, snapshot, rows = 0, 0, app.engine.Snapshot, RG.UIModel.Rows
     app.engine.Snapshot = function(engine)
@@ -1535,7 +1535,7 @@ H.Test("an open contact card refreshes in a crowd without building a hidden Near
     H.True(ui.selected.savedOnly)
     H.True(rowCalls > 0)
     H.Equal(snapshotCalls, 0)
-    ui.rows[1]:Click()
+    ui.rows[1]:Click("RightButton")
     H.True(ui.selected.preview)
     H.False(ui.detailsFrame.locate:IsShown())
     state.clock.Advance(16)
@@ -1762,7 +1762,7 @@ for _, locale in ipairs({ "enUS", "ruRU" }) do
         local function display(expected)
             ui:Refresh()
             H.True(ui.rows[1].detailText:GetText():find(expected, 1, true) ~= nil)
-            ui.rows[1]:Click()
+            ui.rows[1]:Click("RightButton")
             H.True(ui.detailsFrame.info:GetText():find(expected, 1, true) ~= nil)
             H.True(ui.detailsFrame.info:GetText():find(ui:T("rangeEvidenceExact"), 1, true) ~= nil)
         end
@@ -1810,7 +1810,7 @@ H.Test("a combined spell and interaction range shows the exclusive strict lower 
     H.Equal(range.rangeEvidence, "combined"); H.True(range.rangeMinExclusive)
     H.Equal(app:Explain(range).reason, "range_outside")
     ui:Refresh()
-    ui.rows[1]:Click()
+    ui.rows[1]:Click("RightButton")
     local expected = ui:F("rangeExclusiveBracket", 20, 28)
     H.True(ui.rows[1].detailText:GetText():find(expected, 1, true) ~= nil)
     H.True(ui.detailsFrame.info:GetText():find(expected, 1, true) ~= nil)
@@ -2595,7 +2595,7 @@ H.Test("sample Why distinguishes the matching rule range from a blocking global 
     profile.rules = { rule }
     app:OnSettingsChanged()
     app:Demo()
-    ui.rows[1]:Click()
+    ui.rows[1]:Click("RightButton")
     H.True(ui.selected.preview)
     H.Equal(ui.selected.class, "ROGUE")
     local function show(reason, source, yards, policy)
@@ -2860,7 +2860,7 @@ H.Test("Why shows a wave member's sound outcome only for a live selection", func
     assertNoSection()
 
     app:Demo()
-    ui.rows[1]:Click()
+    ui.rows[1]:Click("RightButton")
     H.True(ui.selected.preview)
     local sample = app:Explain(ui.selected)
     H.Equal(sample.soundCue, "ping")
@@ -2907,7 +2907,7 @@ H.Test("a streamer banner delivered while Nearby is hidden shares its alias when
     H.True(ui.frame:IsShown())
     H.Equal(ui.rows[1].contact.identity, identity)
     H.Equal(ui.rows[1].nameText:GetText(), alias)
-    ui.rows[1]:Click()
+    ui.rows[1]:Click("RightButton")
     H.Equal(ui.detailsFrame.title:GetText(), alias)
     H.False(ui.detailsFrame.note:IsShown())
     H.Equal(ui.detailsFrame.note:GetText(), "")
@@ -3776,11 +3776,30 @@ H.Test("demo uses UI-only fixtures and leaves saved history and lists untouched"
     H.Equal(#state.sounds, 0)
 end)
 
+H.Test("Nearby details require a right click on a live player", function()
+    local state, _, app = setup()
+    local ui = app.ui
+    seeSoundRuleRival(state, 1)
+    state:Unit("target", state.units.nameplate1)
+    state:Fire("PLAYER_TARGET_CHANGED")
+    ui:Refresh()
+    local row = ui.rows[1]
+    H.True(row:IsVisible())
+    H.Nil(ui.detailsFrame)
+    H.Equal(#row.clickButtons, 1)
+    H.Equal(row.clickButtons[1], "RightButtonUp")
+    row:Click("LeftButton")
+    H.Nil(ui.detailsFrame)
+    row:Click("RightButton")
+    H.True(ui.detailsFrame:IsShown())
+    H.Equal(ui.selected.id, row.contact.id)
+end)
+
 H.Test("alert and Nearby previews use separate compact surfaces", function()
     local state, _, app = setup()
     local ui, slash = app.ui, state.api.SlashCmdList.RIVALGUARD
     slash("demo")
-    ui.rows[3]:Click()
+    ui.rows[3]:Click("RightButton")
     H.True(ui.detailsFrame:IsShown())
     H.Equal(ui.detailsFrame:GetWidth(), 344)
     H.Equal(ui.detailsFrame:GetHeight(), 184)
@@ -3812,7 +3831,7 @@ H.Test("demo rows check the current profile with trusted synthetic inputs", func
     local results, samples = {}, {}
     for _, row in ipairs(app.ui.rows) do
         if row:IsShown() and row.contact then
-            row:Click()
+            row:Click("RightButton")
             app.ui:ShowExplanation()
             local contact = app.ui.selected
             results[contact.class] = app:Explain(contact)
@@ -4542,7 +4561,7 @@ local function locatorFixture(raw)
     state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
     state:Advance(0.5)
     local ui = app.ui
-    ui.rows[1]:Click()
+    ui.rows[1]:Click("RightButton")
     H.Equal(ui.selected.identity, "guid:" .. unit.guid)
     H.True(ui.detailsFrame:IsShown())
     H.True(assert(ui.detailsFrame.locate, "missing nameplate highlight action"):IsShown())
@@ -6121,7 +6140,7 @@ H.Test("stationary Nearby and Details avoid repeat painting while changed contac
     app.sensors:Poll()
     ui:Refresh()
     H.Equal(ui.renderedCount, 8)
-    rowFor(1):Click()
+    rowFor(1):Click("RightButton")
     ui:Refresh()
     local detail = ui.detailsFrame
     H.True(detail:IsShown())
@@ -6173,7 +6192,7 @@ H.Test("stationary Nearby and Details avoid repeat painting while changed contac
     H.True(rowFor(1).detailText:GetText():find(lastSeenText, 1, true) ~= nil)
     H.True(detail.info:GetText():find(lastSeenText, 1, true) ~= nil)
 
-    rowFor(2):Click()
+    rowFor(2):Click("RightButton")
     state:Unit("player", { guid = "Player-RenderDiffLocal" })
     state:Unit("nameplate2target", state.units.player)
     state:Fire("UNIT_TARGET", "nameplate2")
@@ -6202,7 +6221,7 @@ H.Test("stationary Nearby and Details avoid repeat painting while changed contac
     end
     state:Fire("UNIT_FLAGS", "nameplate3")
     ui:Refresh()
-    rowFor(3):Click()
+    rowFor(3):Click("RightButton")
     H.True(detail.info:GetText():find(ui:T("rangeEvidenceExact"), 1, true) ~= nil)
     state.clock.Advance(3)
     ui:Refresh()
@@ -6399,7 +6418,7 @@ H.Test("nameplate highlight validates the current GUID and never follows a recyc
     state:Advance(0.5)
     H.False(locatorVisible(ui, "nameplate1"))
 
-    ui.rows[1]:Click()
+    ui.rows[1]:Click("RightButton")
     ui.detailsFrame.locate:Click()
     H.True(locatorVisible(ui, "nameplate1"))
     state:Unit("nameplate1", owner)
@@ -6418,14 +6437,14 @@ H.Test("nameplate highlight clears on removal and is unavailable in journal and 
     H.False(ui.detailsFrame.locate:IsShown())
 
     ui.settings:Hide()
-    ui.rows[1]:Click()
+    ui.rows[1]:Click("RightButton")
     ui.detailsFrame.locate:Click()
     H.True(locatorVisible(ui, "nameplate1"))
     state.units.nameplate1 = nil
     state:Fire("NAME_PLATE_UNIT_REMOVED", "nameplate1")
     H.False(locatorVisible(ui, "nameplate1"))
     app:Demo()
-    ui.rows[1]:Click()
+    ui.rows[1]:Click("RightButton")
     H.True(ui.selected.preview)
     H.False(ui.detailsFrame.locate:IsShown())
 end)
@@ -6449,7 +6468,7 @@ H.Test("nameplate highlight fails closed when visibility or camera state is rest
     state:Advance(0.2)
     H.False(locatorVisible(ui, "nameplate1"))
     behind = true
-    ui.rows[1]:Click()
+    ui.rows[1]:Click("RightButton")
     ui.detailsFrame.locate:Click()
     H.False(locatorVisible(ui, "nameplate1"))
 end)
@@ -6475,7 +6494,7 @@ local function recentNoteDraftFixture(raw)
     state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
     state:Advance(0.5)
     local ui = app.ui
-    ui.rows[1]:Click()
+    ui.rows[1]:Click("RightButton")
     local detail, selected = ui.detailsFrame, ui.selected
     local text = "Private draft after departure"
     detail.note:SetFocus()
@@ -7262,7 +7281,7 @@ H.Test("Recent uses the verified live list alias for display, editing, and searc
     row = assert(journalRowFor(ui, guidKey), "Recent search missed the effective personal-list note")
     H.Equal(row.contact.listKind, "avoid")
     H.Equal(row.contact.note, "Legacy lookout note")
-    ui.rows[1]:Click()
+    ui.rows[1]:Click("RightButton")
     H.False(ui.selectedFromJournal)
     H.Equal(detail.note:GetText(), "Legacy lookout note")
 end)
@@ -8266,7 +8285,7 @@ H.Test("old cast evidence expires from the live row and card while its player re
     local state, app = stealthFixture(false)
     local ui = app.ui
     state:Advance(0.5)
-    ui.rows[1]:Click()
+    ui.rows[1]:Click("RightButton")
     local cast = ui:F("stealthCast", ui:T("spellVanish"))
     H.True(ui.rows[1].detailText:GetText():find(cast, 1, true) ~= nil)
     H.True(ui.detailsFrame.info:GetText():find(cast, 1, true) ~= nil)

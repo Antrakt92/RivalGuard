@@ -631,10 +631,13 @@ function UI.New(app)
         if row.detailText.SetMaxLines then row.detailText:SetMaxLines(1) end
         row.mark = font(row, 15, C.gold, "RIGHT")
         row.mark:SetPoint("TOPRIGHT", -8, -3); row.mark:SetText("!")
-        row:SetScript("OnClick", function() if row.contact then self:Select(row.contact) end end)
+        row:RegisterForClicks("RightButtonUp")
+        row:SetScript("OnClick", function(_, mouseButton)
+            if mouseButton == "RightButton" and row.contact then self:Select(row.contact) end
+        end)
         row:SetScript("OnEnter", function()
             if not row.contact then return end
-            tooltip(row, row.nameText:GetText(), self:T("rowHint") .. "\n" .. self:T("noTarget"))
+            tooltip(row, row.nameText:GetText(), self:T("rowHint"))
         end)
         row:SetScript("OnLeave", function() hideOwnedTooltip(row) end)
         paintShown(row, false)
@@ -1459,7 +1462,7 @@ function UI.New(app)
                 paintNearbyRow(row, data, i, profile)
             end
             paintText(more, self.nearbyMoveMode == profile and self:T("nearbyDragHelp")
-                or rowCount > maxRows and self:F("moreContacts", rowCount - maxRows) or self:T("noTarget"))
+                or rowCount > maxRows and self:F("moreContacts", rowCount - maxRows) or self:T("rowHint"))
             if rowCount == 0 then
                 local titleKey, helpKey = "noEnemies", "noEnemiesHelp"
                 if not profile.enabled and not preview then titleKey, helpKey = "noDisabled", "noDisabledHelp"
@@ -2013,7 +2016,7 @@ function UI.New(app)
             lines[#lines + 1] = self:T("reason") .. ": " .. (#sourceNames > 0 and table.concat(sourceNames, ", ") or self:T("observed"))
         end
         paintText(detail.info, table.concat(lines, "\n"))
-        paintText(detail.notice, self:T(contact.preview and "demoWhy" or "noTarget"))
+        paintText(detail.notice, contact.preview and self:T("demoWhy") or "")
         if profile.display.streamer then
             self.noteDraft = nil; detail.note:ClearFocus(); detail.note:SetText("")
         elseif not refreshOnly or not (detail.note.HasFocus and detail.note:HasFocus()) then
