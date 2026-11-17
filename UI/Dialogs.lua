@@ -423,17 +423,27 @@ function D.Attach(ui, app, H)
         local rule = profile.rules[index]
         local frame = ui.ruleCheckDialog
         if not frame then
-            frame = dialog("RivalGuardRuleCheck", "ruleCheckTitle", 600, 420)
+            frame = dialog("RivalGuardRuleCheck", "ruleCheckTitle", 600, 450)
             ui.ruleCheckDialog = frame
             frame:SetFrameStrata("FULLSCREEN_DIALOG")
-            frame:SetScript("OnHide", function() self.checkedDraft, self.checkedDraftText, self.checkedAlertConfig = nil, nil, nil end)
+            frame:SetScript("OnHide", function() self.checkedRule = nil end)
             frame.scope = H.font(frame, 13, H.C.muted)
             frame.scope:SetPoint("TOPLEFT", 18, -55); frame.scope:SetWidth(564)
+            frame.distanceButtons = {}
+            for i, mode in ipairs({ "near", "threshold", "far", "unknown" }) do
+                local distanceMode = mode
+                local control = H.localButton(frame, "ruleCheckDistance_" .. mode, 132, function()
+                    self:RefreshRuleCheck()
+                    if self.checkedRule then self:PaintRuleCheck(distanceMode) end
+                end)
+                control:SetPoint("TOPLEFT", 18 + (i - 1) * 144, -89)
+                frame.distanceButtons[mode] = control
+            end
             local help = H.label(frame, "ruleCheckHelp", 12, H.C.muted)
             help:SetPoint("BOTTOMLEFT", 18, 23); help:SetWidth(564)
             frame.rows = {}
             for i = 1, 3 do
-                local row, y = {}, -112 - (i - 1) * 86
+                local row, y = {}, -132 - (i - 1) * 86
                 row.sample = H.font(frame, 14, H.C.accent)
                 row.sample:SetPoint("TOPLEFT", 18, y); row.sample:SetWidth(564)
                 row.result = H.font(frame, 13, H.C.text)
@@ -444,12 +454,40 @@ function D.Attach(ui, app, H)
             end
         end
         if ui.soundPicker then ui.soundPicker:Hide() end
+        local limit = profile.range.enabled and profile.range.yards or nil
+        if rule.range > 0 then limit = math.min(rule.range, limit or rule.range) end
+        self.checkedRule = { draft = self.ruleDraft, draftText = RG.Codec.Encode(self.ruleDraft), alertConfig = app.alertConfig,
+            profile = profile, index = index, limit = limit }
+        frame.distanceButtons.threshold:SetEnabled(limit ~= nil)
+        self:PaintRuleCheck("near")
+        showDialog(frame)
+    end
+
+    function self:PaintRuleCheck(mode)
+        local frame, checked = ui.ruleCheckDialog, self.checkedRule
+        local profile, index = checked.profile, checked.index
+        local rule = profile.rules[index]
         local event = rule.event == "any" and "sighting" or rule.event
         local eventLabel = ({ sighting = "eventSighting", returning = "eventReturning", stealth = "eventStealth", targeting = "eventTargeting" })[event]
         local context = rule.context == "any" and "world" or rule.context
         local entry = rule.list == "listed" and { kind = "watch" } or nil
-        local yards = math.min(20, rule.range > 0 and rule.range or 20, profile.range.enabled and profile.range.yards or 20)
-        frame.scope:SetText(ui:F("ruleCheckScope", t(eventLabel), t(context), t(entry and "listListed" or "listUnlisted"), yards))
+        local list = t(entry and "listListed" or "listUnlisted")
+        local lower, upper, evidence
+        if mode == "unknown" then
+            frame.scope:SetText(ui:F("ruleCheckScopeDistance", t(eventLabel), t(context), list, t("rangeUnknown")))
+        elseif mode == "threshold" and checked.limit then
+            local edge = math.floor(checked.limit)
+            lower, upper, evidence = math.max(0, edge - 4), edge + 4, "combined"
+            frame.scope:SetText(ui:F("ruleCheckScopeDistance", t(eventLabel), t(context), list, ui:F("rangeBracket", lower, upper)))
+        else
+            local yards = math.min(20, math.floor(checked.limit or 20))
+            if mode == "far" then yards = checked.limit and math.floor(checked.limit) + 1 or 45 end
+            lower, upper, evidence = yards, yards, "exact"
+            frame.scope:SetText(ui:F("ruleCheckScope", t(eventLabel), t(context), list, yards))
+        end
+        for name, control in pairs(frame.distanceButtons) do
+            control.bg:SetColorTexture(unpack(name == mode and { 0.10, 0.22, 0.28, 1 } or H.C.panel))
+        end
         local first = exampleClass(rule.classes, nil, true) or exampleClass(rule.classes)
         local other = exampleClass(rule.classes, first, false) or exampleClass(rule.classes, first)
         local examples = { first, other }
@@ -459,7 +497,7 @@ function D.Attach(ui, app, H)
             row.sample:SetShown(show); row.result:SetShown(show); row.effect:SetShown(show)
             if show then
                 local decision, reason, winner = RG.Rules.Evaluate(profile, { hostile = true, isPlayer = true, class = class,
-                    rangeMin = yards, rangeMax = yards, rangeEvidence = "exact" }, event, { kind = context }, entry)
+                    rangeMin = lower, rangeMax = upper, rangeEvidence = evidence }, event, { kind = context }, entry)
                 row.sample:SetText(class and RG.Locale.Class(class, profile.locale) or t("unknownClass"))
                 row.result:SetText(winner == index and t("ruleCheckDraftWins") or winner and ui:F("ruleCheckOtherWins", profile.rules[winner].name)
                     or t(decision and "ruleCheckStandard" or "ruleCheckNoMatch"))
@@ -474,10 +512,6 @@ function D.Attach(ui, app, H)
                 row.effect:SetText(effect)
             end
         end
-        self.checkedDraft = self.ruleDraft
-        self.checkedDraftText = RG.Codec.Encode(self.ruleDraft)
-        self.checkedAlertConfig = app.alertConfig
-        showDialog(frame)
     end
 
     function self:DeleteRule()
@@ -580,10 +614,11 @@ function D.Attach(ui, app, H)
     end
 
     function self:RefreshRuleCheck()
-        if ui.ruleCheckDialog and ui.ruleCheckDialog:IsShown() and (not self.rulesFrame:IsShown()
-            or self.checkedDraft ~= self.ruleDraft or not self:RuleDraftIsCurrent()
-            or self.checkedAlertConfig ~= app.alertConfig
-            or self.checkedDraftText ~= RG.Codec.Encode(self.ruleDraft)) then ui.ruleCheckDialog:Hide() end
+        local checked = self.checkedRule
+        if checked and (not self.rulesFrame:IsShown() or checked.draft ~= self.ruleDraft or not self:RuleDraftIsCurrent()
+            or checked.alertConfig ~= app.alertConfig or checked.draftText ~= RG.Codec.Encode(self.ruleDraft)) then
+            ui.ruleCheckDialog:Hide()
+        end
     end
 
     function self:Refresh()

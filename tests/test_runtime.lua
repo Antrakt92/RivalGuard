@@ -628,6 +628,119 @@ H.Test("rule checking respects saved tie order and replaces an edited rule in pl
     H.Equal(#app.db:GetProfile().rules, 0)
 end)
 
+H.Test("draft range scenarios distinguish possible, confirmed, and unreadable range", function()
+    local state, app, profile = ruleSoundFixture()
+    local ui, RG = app.ui, state.RG
+    profile.locale = "ruRU"
+    app:OnSettingsChanged()
+    seeSoundRuleRival(state, 1, "ROGUE")
+    ui:OpenRules()
+    local dialog = ui.rulesDialog
+    dialog.conditions:Click()
+    dialog.range:SetValue(25)
+    H.Equal(ui.dialogs.ruleDraft.rangePolicy, "possible")
+    local savedBefore = assert(RG.Codec.Encode(state.api.RivalGuardDB))
+    local pendingBefore = assert(RG.Codec.Encode(app.engine.pending))
+    local draftBefore = assert(RG.Codec.Encode(ui.dialogs.ruleDraft))
+    local check = checkRuleDraft(ui)
+    local function result(expected) H.Equal(check.rows[1].result:GetText(), ui:T(expected)) end
+    local function scope(key, distance)
+        H.Equal(check.scope:GetText(), ui:F(key, ui:T("eventSighting"), ui:T("world"), ui:T("listUnlisted"), distance))
+    end
+    local function choose(mode, expected)
+        check.distanceButtons[mode]:Click()
+        H.True(check:IsShown())
+        result(expected)
+        H.Equal(check.distanceButtons[mode].label:GetText(), ui:T("ruleCheckDistance_" .. mode))
+    end
+    result("ruleCheckDraftWins")
+    scope("ruleCheckScope", 20)
+    choose("threshold", "ruleCheckDraftWins")
+    scope("ruleCheckScopeDistance", ui:F("rangeBracket", 21, 29))
+    choose("far", "ruleCheckStandard")
+    scope("ruleCheckScope", 26)
+    choose("unknown", "ruleCheckStandard")
+    scope("ruleCheckScopeDistance", ui:T("rangeUnknown"))
+    choose("near", "ruleCheckDraftWins")
+    scope("ruleCheckScope", 20)
+    H.Equal(RG.Codec.Encode(state.api.RivalGuardDB), savedBefore)
+    H.Equal(RG.Codec.Encode(app.engine.pending), pendingBefore)
+    H.Equal(RG.Codec.Encode(ui.dialogs.ruleDraft), draftBefore)
+    H.Equal(#state.sounds, 0)
+    H.Equal(#app.engine.history, 0)
+
+    dialog.rangePolicy:Click()
+    H.Equal(ui.dialogs.ruleDraft.rangePolicy, "confirmed")
+    check.distanceButtons.far:Click()
+    H.False(check:IsShown())
+    check = checkRuleDraft(ui)
+    result("ruleCheckDraftWins")
+    choose("threshold", "ruleCheckStandard")
+    choose("unknown", "ruleCheckStandard")
+
+    dialog.rangeUnknown:Click()
+    ui:Refresh()
+    H.False(check:IsShown())
+    check = checkRuleDraft(ui)
+    choose("unknown", "ruleCheckDraftWins")
+    H.Equal(#profile.rules, 0)
+    H.Equal(RG.Codec.Encode(state.api.RivalGuardDB), savedBefore)
+    H.Equal(RG.Codec.Encode(app.engine.pending), pendingBefore)
+    H.Equal(#state.sounds, 0)
+
+    dialog.range:SetValue(0)
+    check = checkRuleDraft(ui)
+    H.False(check.distanceButtons.threshold.enabled)
+    check.distanceButtons.threshold:Click()
+    scope("ruleCheckScope", 20)
+    choose("far", "ruleCheckDraftWins")
+    scope("ruleCheckScope", 45)
+end)
+
+H.Test("draft check uses the earlier global range gate without bypassing the draft gate", function()
+    local state, app, profile = ruleSoundFixture()
+    local ui = app.ui
+    profile.range.enabled, profile.range.yards, profile.range.policy, profile.range.unknown = true, 30, "confirmed", false
+    app:OnSettingsChanged()
+    ui:OpenRules()
+    local dialog = ui.rulesDialog
+    dialog.conditions:Click()
+    dialog.range:SetValue(40)
+    dialog.rangeUnknown:Click()
+    local check = checkRuleDraft(ui)
+    H.Equal(check.rows[1].result:GetText(), ui:T("ruleCheckDraftWins"))
+    for _, case in ipairs({ { "threshold", "range_unconfirmed" }, { "far", "range_outside" }, { "unknown", "range_unknown" } }) do
+        check.distanceButtons[case[1]]:Click()
+        if case[1] == "threshold" then
+            H.Equal(check.scope:GetText(), ui:F("ruleCheckScopeDistance", ui:T("eventSighting"), ui:T("world"), ui:T("listUnlisted"), ui:F("rangeBracket", 26, 34)))
+        elseif case[1] == "far" then
+            H.Equal(check.scope:GetText(), ui:F("ruleCheckScope", ui:T("eventSighting"), ui:T("world"), ui:T("listUnlisted"), 31))
+        end
+        H.Equal(check.rows[1].result:GetText(), ui:T("ruleCheckNoMatch"))
+        H.Equal(check.rows[1].effect:GetText(), state.RG.Locale.Reason(case[2], profile.locale))
+    end
+
+    profile.range.policy, profile.range.unknown = "possible", true
+    app:OnSettingsChanged()
+    H.False(check:IsShown())
+    dialog.rangePolicy:Click()
+    H.Equal(ui.dialogs.ruleDraft.rangePolicy, "confirmed")
+    check = checkRuleDraft(ui)
+    check.distanceButtons.threshold:Click()
+    H.Equal(check.rows[1].result:GetText(), ui:T("ruleCheckDraftWins"))
+    check.distanceButtons.unknown:Click()
+    H.Equal(check.rows[1].result:GetText(), ui:T("ruleCheckDraftWins"))
+
+    dialog.rangeUnknown:Click()
+    ui:Refresh()
+    H.False(check:IsShown())
+    check = checkRuleDraft(ui)
+    check.distanceButtons.unknown:Click()
+    H.Equal(check.rows[1].result:GetText(), ui:T("ruleCheckStandard"))
+    H.Equal(#profile.rules, 0)
+    H.Equal(#state.sounds, 0)
+end)
+
 for _, locale in ipairs({ "enUS", "ruRU" }) do
     H.Test("a single-class sound rule can be drafted and named from Alerts in " .. locale, function()
         local state, app, profile = ruleSoundFixture()
