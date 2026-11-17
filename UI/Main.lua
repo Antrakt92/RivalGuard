@@ -846,36 +846,63 @@ function UI.New(app)
     y = section(profiles, "profiles", 0, "presetHelp")
     self.activeProfileText = font(profiles, 14, C.gold)
     self.activeProfileText:SetPoint("TOPLEFT", 0, y); self.activeProfileText:SetWidth(550)
-    local nameTitle = label(profiles, "profileName", 13); nameTitle:SetPoint("TOPLEFT", 0, y - 36)
+    local presetTokens = { "balanced", "farming", "quiet", "battleground" }
+    self.newPreset, self.presetChoices = "balanced", {}
+    local presetTitle = label(profiles, "preset", 13); presetTitle:SetPoint("TOPLEFT", 0, y - 36)
+    for i, preset in ipairs(presetTokens) do
+        local choice = localButton(profiles, preset, 129, function()
+            self.newPreset = preset
+            self:RefreshProfiles()
+        end)
+        choice:SetPoint("TOPLEFT", (i - 1) * 140, y - 58)
+        choice:SetScript("OnEnter", function() tooltip(choice, self:T(preset), self:T(preset .. "Tip")) end)
+        choice:SetScript("OnLeave", hideTooltip)
+        self.presetChoices[preset] = choice
+    end
+    local presetDescription = font(profiles, 13, C.muted)
+    presetDescription:SetPoint("TOPLEFT", 0, y - 95); presetDescription:SetWidth(550)
+    self.presetDescription = presetDescription
+    local nameTitle = label(profiles, "profileName", 13); nameTitle:SetPoint("TOPLEFT", 0, y - 136)
     local nameInput = CreateFrame("EditBox", nil, profiles, "InputBoxTemplate")
-    nameInput:SetPoint("TOPLEFT", 8, y - 65); nameInput:SetSize(345, 26); nameInput:SetAutoFocus(false); nameInput:SetMaxLetters(64)
+    nameInput:SetPoint("TOPLEFT", 8, y - 158); nameInput:SetSize(345, 26); nameInput:SetAutoFocus(false); nameInput:SetMaxLetters(64)
     if nameInput.SetMaxBytes then nameInput:SetMaxBytes(64) end
     nameInput:SetScript("OnEscapePressed", function(box) box:ClearFocus() end)
     self.profileInput = nameInput
-    local presetTokens = { "balanced", "farming", "quiet", "battleground" }
-    self.newPreset = "balanced"
-    local presetButton = button(profiles, self:T("balanced"), 180, function()
-        local index = 1
-        for i, value in ipairs(presetTokens) do if value == self.newPreset then index = i break end end
-        self.newPreset = presetTokens[index % #presetTokens + 1]; self:RefreshProfiles()
-    end)
-    presetButton:SetPoint("TOPLEFT", 0, y - 103); self.presetButton = presetButton
-    local presetDescription = font(profiles, 13, C.muted)
-    presetDescription:SetPoint("TOPLEFT", 0, y - 143); presetDescription:SetWidth(540)
-    self.presetDescription = presetDescription
-    local createProfile = localButton(profiles, "createProfile", 200, function()
+    local firstProfileRowY, profileRowSpacing, profilePageSize = y - 244, 39, 10
+    local function createProfile(activate)
         if not app.db.CreateProfile then notify("noProfileAPI") return end
-        local name = nameInput:GetText()
-        local ok = app.db:CreateProfile(name, self.newPreset)
-        if not ok then notify("profileError") return end
+        local name = RG.Util.Text(nameInput:GetText(), 64)
+        local created, reason = app.db:CreateProfile(name, self.newPreset)
+        if not created then
+            if reason == "profile_limit" then notify("profileLimit") else notify("profileError") end
+            return
+        end
         nameInput:SetText(""); nameInput:ClearFocus()
-        self:RefreshProfiles(); notify("profileCreated")
-    end)
-    createProfile:SetPoint("LEFT", presetButton, "RIGHT", 12, 0)
-    nameInput:SetScript("OnEnterPressed", function() createProfile:Click() end)
-    local firstProfileRowY, profileRowSpacing = y - 206, 39
+        local rowTop
+        for index, savedName in ipairs(app.db:ListProfiles()) do
+            if savedName == name then
+                self.profileOffset = math.floor((index - 1) / profilePageSize) * profilePageSize
+                rowTop = -firstProfileRowY + (index - self.profileOffset - 1) * profileRowSpacing
+                break
+            end
+        end
+        if activate then app:UseProfile(name) elseif app.Notify then app:Notify(self:F("profileCreated", name)) end
+        self:RefreshProfiles()
+        if rowTop then
+            local height = scroll:GetHeight()
+            local _, maximum = scrollbar:GetMinMaxValues()
+            local visible = math.max(rowTop + 38 - height, math.min(rowTop, scrollbar:GetValue()))
+            scrollbar:SetValue(math.max(0, math.min(maximum, visible)))
+        end
+    end
+    self.createAndUseProfile = localButton(profiles, "createAndUseProfile", 202, function() createProfile(true) end)
+    self.createAndUseProfile:SetPoint("TOPLEFT", 0, y - 194)
+    self.createAndUseProfile.bg:SetColorTexture(0.10, 0.22, 0.28, 1)
+    self.createProfile = localButton(profiles, "createProfile", 202, function() createProfile(false) end)
+    self.createProfile:SetPoint("LEFT", self.createAndUseProfile, "RIGHT", 12, 0)
+    nameInput:SetScript("OnEnterPressed", function() self.createAndUseProfile:Click() end)
     self.profileRows = {}
-    for i = 1, 10 do
+    for i = 1, profilePageSize do
         local row = CreateFrame("Frame", nil, profiles)
         row:SetPoint("TOPLEFT", 0, firstProfileRowY - (i - 1) * profileRowSpacing); row:SetSize(550, 34)
         row.nameText = font(row, 13); row.nameText:SetPoint("LEFT", 0, 0); row.nameText:SetWidth(300); row.nameText:SetJustifyV("MIDDLE")
@@ -896,8 +923,8 @@ function UI.New(app)
         end)
         row.delete:SetPoint("RIGHT", 0, 0); self.profileRows[i] = row
     end
-    local profilePrev = localButton(profiles, "previous", 120, function() self.profileOffset = math.max(0, self.profileOffset - 10); self:RefreshProfiles() end)
-    local profileNext = localButton(profiles, "next", 120, function() self.profileOffset = self.profileOffset + 10; self:RefreshProfiles() end)
+    local profilePrev = localButton(profiles, "previous", 120, function() self.profileOffset = math.max(0, self.profileOffset - profilePageSize); self:RefreshProfiles() end)
+    local profileNext = localButton(profiles, "next", 120, function() self.profileOffset = self.profileOffset + profilePageSize; self:RefreshProfiles() end)
     profileNext:SetPoint("LEFT", profilePrev, "RIGHT", 12, 0)
     self.profilePrev, self.profileNext = profilePrev, profileNext
     local exportProfile = localButton(profiles, "exportProfile", 245, function() if self.OpenTransfer then self:OpenTransfer("export") end end)
@@ -1050,14 +1077,19 @@ function UI.New(app)
         local names = app.db.ListProfiles and app.db:ListProfiles() or {}
         local activeName = app.db.GetActiveProfileName and app.db:GetActiveProfileName() or "Default"
         self.activeProfileText:SetText(self:T("selectedProfile") .. ": " .. M.Text(activeName, "Default"))
-        self.presetButton.label:SetText(self:T(self.newPreset) .. "  ›")
+        for _, preset in ipairs(presetTokens) do
+            local choice = self.presetChoices[preset]
+            local selected = preset == self.newPreset
+            choice:SetEnabled(not selected)
+            choice.bg:SetColorTexture(unpack(selected and { 0.10, 0.22, 0.28, 1 } or C.panel))
+        end
         self.presetDescription:SetText(self:T(self.newPreset .. "Tip"))
-        self.profileOffset = math.max(0, math.min(self.profileOffset, math.max(0, math.floor((#names - 1) / 10) * 10)))
-        local paginated = #names > 10
-        local footerY = firstProfileRowY - math.min(10, #names - self.profileOffset) * profileRowSpacing - 12
+        self.profileOffset = math.max(0, math.min(self.profileOffset, math.max(0, math.floor((#names - 1) / profilePageSize) * profilePageSize)))
+        local paginated = #names > profilePageSize
+        local footerY = firstProfileRowY - math.min(profilePageSize, #names - self.profileOffset) * profileRowSpacing - 12
         self.profilePrev:SetShown(paginated); self.profileNext:SetShown(paginated)
         self.profilePrev:SetEnabled(self.profileOffset > 0)
-        self.profileNext:SetEnabled(self.profileOffset + 10 < #names)
+        self.profileNext:SetEnabled(self.profileOffset + profilePageSize < #names)
         profilePrev:ClearAllPoints(); profilePrev:SetPoint("TOPLEFT", 0, footerY)
         local transferY = paginated and footerY - 43 or footerY
         exportProfile:ClearAllPoints(); exportProfile:SetPoint("TOPLEFT", 0, transferY)

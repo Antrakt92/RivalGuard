@@ -42,9 +42,10 @@ current profile would handle that new sighting in the open world.
   currently blocking warnings for new sightings outside your personal lists.
   Turn on **Highlight opponents targeting you** to mark an available nameplate
   when a targeting warning fires.
-- **Profiles:** choose a preset, create a profile, then select **Use** to apply
-  it. Imports require a preview and a new name. They do not include personal
-  lists or history. Right-click **…** on Nearby or use `/rg profile` to switch
+- **Profiles:** choose a ready-made setup and enter a name. **Create and use**
+  applies the new profile immediately. **Save without switching** adds it to
+  the list for later. Imports require a preview and a new name. They do not
+  include personal lists or history. Right-click **…** on Nearby or use `/rg profile` to switch
   quickly. `/rg profile NAME` activates an exact saved profile name.
 - **Journal:** search recent encounters or open your watch, avoid and ignore
   lists. Retain all eligible encounters, listed players or observed threats.

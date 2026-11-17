@@ -2073,6 +2073,91 @@ H.Test("the profile chooser paginates and stale names never activate replacement
     H.True(state.messages[#state.messages]:find(ui:F("profileUsed", "Field 02"), 1, true) ~= nil)
 end)
 
+H.Test("direct preset choices distinguish saving a paginated profile from creating and using one", function()
+    local state, _, app = setup(nil, function(mock) mock.locale = "ruRU" end)
+    local db, ui = app.db, app.ui
+    local original = db:GetProfile()
+    for index = 1, 10 do assert(db:CreateProfile(string.format("Field %02d", index))) end
+    ui.scroll:SetHeight(260)
+    ui:OpenSettings("profiles")
+    local function visibleRow(name)
+        for _, row in ipairs(ui.profileRows) do
+            if row:IsShown() and row.profileName == name then return row end
+        end
+    end
+    local presets = assert(ui.presetChoices, "direct preset controls are missing")
+    H.False(presets.balanced.enabled)
+    local count = #db:ListProfiles()
+    for _, preset in ipairs({ "farming", "quiet", "battleground", "balanced", "quiet" }) do
+        H.True(presets[preset].enabled)
+        presets[preset]:Click()
+        H.False(presets[preset].enabled)
+        H.Equal(presets[preset].label:GetText(), ui:T(preset))
+        H.Equal(ui.presetDescription:GetText(), ui:T(preset .. "Tip"))
+        H.Equal(#db:ListProfiles(), count)
+        H.Equal(db:GetProfile(), original)
+    end
+
+    local reserve = "Зулу резерв"
+    ui.profileInput:SetText(reserve)
+    ui.createProfile:Click()
+    H.Equal(#db:ListProfiles(), count + 1)
+    H.Equal(db:GetProfile(reserve).preset, "quiet")
+    H.False(db:GetProfile(reserve).alerts.sound)
+    H.Equal(db:GetProfile(), original)
+    H.Equal(app.engine.profile, original)
+    local saved = assert(visibleRow(reserve), "new inactive profile should be paged into view")
+    H.True(saved.use.enabled)
+    local _, _, _, _, rowY = saved:GetPoint(1)
+    local rowTop, scrollTop = -rowY, ui.scroll:GetVerticalScroll()
+    H.True(rowTop > ui.scroll:GetHeight())
+    H.True(rowTop >= scrollTop and rowTop + saved:GetHeight() <= scrollTop + ui.scroll:GetHeight())
+    H.True(state.messages[#state.messages]:find(ui:F("profileCreated", reserve), 1, true) ~= nil)
+    H.Equal(ui.profileInput:GetText(), "")
+
+    presets.battleground:Click()
+    ui.profileInput:SetText(reserve)
+    ui.createAndUseProfile:Click()
+    H.Equal(ui.profileInput:GetText(), reserve)
+    H.Equal(db:GetProfile(), original)
+    H.Equal(db:GetProfile(reserve).preset, "quiet")
+    H.Equal(#db:ListProfiles(), count + 1)
+
+    seeSoundRuleRival(state, 1, "ROGUE")
+    local matches = "Штурм поля боя"
+    ui.profileInput:SetText(matches)
+    ui.profileInput.scripts.OnEnterPressed(ui.profileInput)
+    local current = db:GetProfile()
+    H.Equal(db:GetActiveProfileName(), matches)
+    H.Equal(app.engine.profile, current)
+    H.Equal(current.preset, "battleground")
+    H.Equal(app:AlertBlock(true), "context_disabled")
+    H.False(assert(visibleRow(matches), "new active profile should be paged into view").use.enabled)
+    H.True(ui.activeProfileText:GetText():find(matches, 1, true) ~= nil)
+    H.Equal(ui.profileInput:GetText(), "")
+    H.Equal(#db:ListProfiles(), count + 2)
+    state:Advance(1.5)
+    H.Equal(app.engine.counters.alerts, 0)
+    H.Equal(#state.sounds, 0)
+    H.True(original.context.world); H.True(original.alerts.sound)
+
+    presets.farming:Click()
+    ui.profileInput:SetText("Фарм отдельно")
+    ui.createAndUseProfile:Click()
+    H.Equal(db:GetActiveProfileName(), "Фарм отдельно")
+    H.Equal(app.engine.profile.preset, "farming")
+    H.False(assert(visibleRow("Фарм отдельно")).use.enabled)
+
+    for index = #db:ListProfiles() + 1, 20 do assert(db:CreateProfile(string.format("Filler %02d", index))) end
+    local currentAtLimit = db:GetProfile()
+    ui.profileInput:SetText("Лимит профилей")
+    ui.createAndUseProfile:Click()
+    H.Equal(#db:ListProfiles(), 20)
+    H.Equal(ui.profileInput:GetText(), "Лимит профилей")
+    H.Equal(db:GetProfile(), currentAtLimit)
+    H.True(state.messages[#state.messages]:find(ui:T("profileLimit"), 1, true) ~= nil)
+end)
+
 H.Test("pause control resumes immediately and expires in an otherwise idle world", function()
     local state, _, app = setup()
     local slash = state.api.SlashCmdList.RIVALGUARD
@@ -2307,9 +2392,9 @@ for _, locale in ipairs({ "enUS", "ruRU" }) do
         ui.hunterRogueButton:Click()
         H.True(original.alerts.classes.HUNTER); H.True(original.alerts.classes.ROGUE)
         ui:OpenSettings("profiles")
-        for _ = 1, 3 do ui.presetButton:Click() end
+        ui.presetChoices.battleground:Click()
         ui.profileInput:SetText("Matches")
-        ui.profileInput.scripts.OnEnterPressed(ui.profileInput)
+        ui.createProfile:Click()
         H.Equal(db:GetActiveProfileName(), "Default")
         H.Equal(ui.profileRows[2].profileName, "Matches")
         ui.profileRows[2].use:Click()

@@ -826,13 +826,13 @@ H.Test("profile setup describes the selected preset and creation keeps the activ
     H.False(ui.profilePrev:IsShown()); H.False(ui.profileNext:IsShown())
     H.Equal(ui.presetDescription:GetText(), ui:T("balancedTip"))
     for _, preset in ipairs({ "farming", "quiet", "battleground" }) do
-        ui.presetButton:Click()
+        ui.presetChoices[preset]:Click()
         H.Equal(ui.presetDescription:GetText(), ui:T(preset .. "Tip"))
     end
     ui.profileInput:SetText("Matches")
-    ui.profileInput.scripts.OnEnterPressed(ui.profileInput)
+    ui.createProfile:Click()
     H.Equal(app.db:GetActiveProfileName(), "Default")
-    H.Equal(state.messages[#state.messages], ui:T("profileCreated"))
+    H.Equal(state.messages[#state.messages], ui:F("profileCreated", "Matches"))
     H.Equal(ui.profileRows[2].profileName, "Matches")
     ui.profileRows[2].use:Click()
     local profile = app.db:GetProfile()
