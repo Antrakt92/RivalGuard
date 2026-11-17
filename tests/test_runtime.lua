@@ -4136,6 +4136,115 @@ local function changeFixtureZone(state, instance, zonePVP)
     state:Fire("ZONE_CHANGED_NEW_AREA")
 end
 
+local function countNameplateRecoveryReads(state, app)
+    local reads, scans = 0, 0
+    local read, scan = app.client.ReadUnit, state.api.C_NamePlate.GetNamePlates
+    function app.client:ReadUnit(token, ...)
+        if token == "nameplate1" then reads = reads + 1 end
+        return read(self, token, ...)
+    end
+    state.api.C_NamePlate.GetNamePlates = function(...)
+        scans = scans + 1
+        return scan(...)
+    end
+    return function() return reads, scans end
+end
+
+H.Test("a mapped nameplate that briefly fails a poll recovers without a new add or stale cast", function()
+    local state, app, add = automaticLocatorFixture(true, function(profile)
+        profile.display.showBadges = true
+    end)
+    local ui = app.ui
+    local before = assert(add(1, true))
+    state:Advance(0.5)
+    H.True(locatorVisible(ui, "nameplate1"))
+    H.True(badgeArtworkVisible(ui.badges.active.nameplate1.icon))
+    local unit = state.units.nameplate1
+    local oldGeneration = app.sensors.active.nameplate1.generation
+    local counts = countNameplateRecoveryReads(state, app)
+    state.units.nameplate1 = nil
+    state:Advance(0.3)
+    H.Nil(app.sensors.active.nameplate1)
+    H.False(app.engine:Snapshot()[1].visible)
+    H.Nil(ui.badges.active.nameplate1)
+    H.False(locatorVisible(ui, "nameplate1"))
+    H.Nil(ui.activeBanner)
+
+    state:Unit("nameplate1", unit)
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-BeforeRecovery", 1856)
+    state:Advance(0.35)
+    local current = assert(app.engine:Snapshot()[1])
+    H.Equal(current.identity, before.identity)
+    H.True(current.visible)
+    H.True(current.targeting)
+    H.Nil(current.stealth)
+    H.True(app.sensors.active.nameplate1.generation > oldGeneration)
+    H.True(badgeArtworkVisible(ui.badges.active.nameplate1.icon))
+    H.Equal(app.engine.history[1].kind, "targeting")
+    for _, entry in ipairs(app.engine.history) do H.Equal(entry.kind, "targeting") end
+    local reads, scans = counts()
+    H.True(reads >= 2)
+    H.Equal(scans, 0)
+end)
+
+H.Test("initial add read failure recovers the plate's current owner exactly once next poll", function()
+    local state, _, app = setup()
+    local counts = countNameplateRecoveryReads(state, app)
+    local token = "nameplate1"
+    state:Unit(token, { guid = "Player-InitialTransient" })
+    state.units[token] = nil
+    state:Fire("NAME_PLATE_UNIT_ADDED", token)
+    H.Equal(counts(), 1)
+    H.Equal(#app.engine:Snapshot(), 0)
+    state:Unit(token, { guid = "Player-InitialRecovered", name = "Recovered rival", class = "HUNTER",
+        hostile = true, isPlayer = true })
+    state:Advance(0.27)
+    local observed = assert(app.engine:Snapshot()[1], "mapped plate should recover on the next scheduled poll")
+    H.Equal(observed.identity, "guid:Player-InitialRecovered")
+    H.True(observed.visible)
+    local reads, scans = counts()
+    H.Equal(reads, 2)
+    H.Equal(scans, 0)
+    state:Advance(1.25)
+    H.Equal(#app.engine.history, 1)
+    H.Equal(app.engine.history[1].kind, "sighting")
+    local journal = app.db:GetJournal()
+    H.Equal(#journal, 1)
+    H.Equal(journal[1].identity, observed.identity)
+    H.Equal(journal[1].encounters, 1)
+end)
+
+for _, stop in ipairs({ "remove event", "different frame", "retry budget" }) do
+    H.Test("a pending nameplate read recovery stops after " .. stop, function()
+        local state, _, app = setup()
+        local counts = countNameplateRecoveryReads(state, app)
+        local token = "nameplate1"
+        state:Unit(token, { guid = "Player-CanceledTransient" })
+        state.units[token] = nil
+        state:Fire("NAME_PLATE_UNIT_ADDED", token)
+        if stop == "remove event" then
+            state:Fire("NAME_PLATE_UNIT_REMOVED", token)
+        elseif stop == "different frame" then
+            state.plates[token] = state.api.CreateFrame("Frame", nil, state.api.UIParent)
+        else
+            state:Advance(1.25)
+        end
+        state:Unit(token, { guid = "Player-FreshAdd", name = "Fresh rival", class = "HUNTER",
+            hostile = true, isPlayer = true })
+        state:Advance(1.25)
+        H.Equal(#app.engine:Snapshot(), 0)
+        H.Equal(#app.db:GetJournal(), 0)
+        local reads, scans = counts()
+        H.Equal(reads, stop == "retry budget" and 4 or 1)
+        H.Equal(scans, 0)
+
+        state:Fire("NAME_PLATE_UNIT_ADDED", token)
+        local observed = assert(app.engine:Snapshot()[1])
+        H.Equal(observed.identity, "guid:Player-FreshAdd")
+        H.True(observed.visible)
+    end)
+end
+
 H.Test("nameplate discovery uses current sanctuary state before the zone event", function()
     local state, _, app = setup()
     state.zonePVP = "sanctuary"

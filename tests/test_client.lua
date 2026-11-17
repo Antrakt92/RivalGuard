@@ -283,6 +283,8 @@ H.Test("client never returns forbidden nameplate frames", function()
     frame.IsForbidden = function() return false end
     H.Equal(client:Nameplate("nameplate1"), frame)
     H.Nil(client:Nameplate("not_a_token"))
+    frame = 42
+    H.Nil(client:Nameplate("nameplate1"))
 end)
 
 H.Test("client rejects invalid class values and nonpositive levels", function()

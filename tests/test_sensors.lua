@@ -73,6 +73,58 @@ H.Test("event observations sample context once while polls share one snapshot", 
     H.Equal(reads, 8)
 end)
 
+H.Test("an unavailable mapped plate gets three scheduled retries without enumeration", function()
+    local sensors, units, _, _, _, _, _, api = fixture()
+    local plate, lookups, reads, scans = {}, 0, 0, 0
+    api.C_NamePlate = {
+        GetNamePlateForUnit = function()
+            lookups = lookups + 1
+            return plate
+        end,
+        GetNamePlates = function() scans = scans + 1; return {} end,
+    }
+    api.UnitExists = function(token)
+        if token == "nameplate1" then reads = reads + 1 end
+        return units[token] ~= nil
+    end
+    sensors:Start()
+    sensors:OnEvent("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    H.Equal(reads, 1); H.Equal(lookups, 1)
+    sensors:Poll()
+    H.Equal(reads, 1); H.Equal(lookups, 1)
+    for _ = 1, 5 do sensors:Poll(true) end
+    H.Equal(reads, 4); H.Equal(lookups, 4)
+    H.Equal(scans, 1)
+    H.Nil(sensors.active.nameplate1)
+    H.Nil(next(sensors.plateRetries))
+end)
+
+H.Test("retry capacity cannot increase the current poll plate-read budget", function()
+    local sensors, units, _, _, _, _, _, api = fixture()
+    local plate, recoveredReads, activeReads = {}, 0, 0
+    api.C_NamePlate = { GetNamePlateForUnit = function() return plate end }
+    api.UnitIsUnit = function(token, other) return token:match("target$") ~= nil and other == "player" end
+    api.UnitExists = function(token)
+        if token == "nameplate999" then recoveredReads = recoveredReads + 1
+        elseif token:match("^nameplate") then activeReads = activeReads + 1 end
+        return units[token] ~= nil
+    end
+    sensors:Start()
+    sensors:OnEvent("NAME_PLATE_UNIT_ADDED", "nameplate999")
+    H.True(sensors.plateRetries.nameplate999 ~= nil)
+    for index = 1, 124 do
+        local token = "nameplate" .. index
+        units[token] = player("Rival " .. index, "Player-Active-" .. index)
+        sensors:OnEvent("NAME_PLATE_UNIT_ADDED", token)
+    end
+    H.Equal(sensors.plateCount, 124)
+    activeReads = 0
+    for _ = 1, 3 do sensors:Poll(true) end
+    H.Equal(activeReads, 124 * 3)
+    H.Equal(recoveredReads, 1)
+    H.Nil(next(sensors.plateRetries))
+end)
+
 H.Test("sensors never correlate casts after removal or from mismatched current owners", function()
     local sensors, units, observed, _, casts = fixture()
     units.nameplate1 = player()

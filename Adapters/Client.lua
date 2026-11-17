@@ -81,6 +81,7 @@ function Client:Nameplate(token)
     if not token or type(ns) ~= "table" then return nil end
     local frame = self:Safe(ns.GetNamePlateForUnit, token, false)
     if not frame then return nil end
+    if type(frame) ~= "table" and type(frame) ~= "userdata" then return nil end
     if type(frame.IsForbidden) == "function" then
         local forbidden = self:Boolean(self:Safe(frame.IsForbidden, frame))
         if forbidden ~= false then return nil end

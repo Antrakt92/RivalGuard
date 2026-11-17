@@ -17,6 +17,7 @@ local MAX_ACTIVE = 128
 local MAX_PLATES = MAX_ACTIVE - RG.Util.Count(DIRECT)
 local POLL_SECONDS = 0.25
 local PLATE_PHASES = 4
+local PLATE_RETRY_POLLS = 3
 local PLATE_EVENTS = { NAME_PLATE_UNIT_ADDED = true, NAME_PLATE_UNIT_REMOVED = true }
 local SAMPLE_BOUNDARY = {
     ADDON_RESTRICTION_STATE_CHANGED = true,
@@ -26,7 +27,7 @@ local SAMPLE_BOUNDARY = {
 }
 
 function Sensors.New(app, client, api)
-    return setmetatable({ app = app, client = client, api = api or _G, active = {}, count = 0, plateCount = 0,
+    return setmetatable({ app = app, client = client, api = api or _G, active = {}, plateRetries = {}, count = 0, plateCount = 0,
         generation = 0, elapsed = 0, phase = 0, running = false, loading = false }, Sensors)
 end
 
@@ -52,7 +53,14 @@ function Sensors:Observe(token, source, behindCamera, event)
     end
     local state = self.active[token]
     local obs = self.client:ReadUnit(token, source, state and state.awaitingEligibility)
-    if not obs then self:Remove(token); return end
+    if not obs then
+        self:Remove(token)
+        if not DIRECT[token] and RG.Util.Count(self.plateRetries) < MAX_PLATES then
+            local frame = self.client:Nameplate(token)
+            if frame then self.plateRetries[token] = { frame = frame, pollsLeft = PLATE_RETRY_POLLS } end
+        end
+        return
+    end
     if event == "UNIT_TARGET" then obs.targetEvent = true
     elseif event == "UNIT_FACTION" then obs.factionEvent = true end
     self:Record(obs, behindCamera, event)
@@ -65,6 +73,7 @@ function Sensors:Record(obs, behindCamera, event)
         self:Call("SetContext", self.client:Context())
     end
     local token = obs.token
+    self.plateRetries[token] = nil
     local state = self.active[token]
     local name = obs.nameComplete and obs.name or nil
     if state and ((state.guid and obs.guid and state.guid ~= obs.guid)
@@ -96,8 +105,10 @@ end
 
 function Sensors:Remove(token)
     token = self.client:IsToken(token)
-    if token then self.client:ForgetToken(token) end
-    if not token or not self.active[token] then return end
+    if not token then return end
+    self.plateRetries[token] = nil
+    self.client:ForgetToken(token)
+    if not self.active[token] then return end
     self.active[token], self.count = nil, self.count - 1
     if not DIRECT[token] then self.plateCount = self.plateCount - 1 end
     self:Call("Remove", token)
@@ -108,6 +119,7 @@ function Sensors:Remove(token)
 end
 
 function Sensors:Clear()
+    self.plateRetries = {}
     local tokens = {}
     for token in pairs(self.active) do tokens[#tokens + 1] = token end
     for _, token in ipairs(tokens) do self:Remove(token) end
@@ -131,7 +143,23 @@ function Sensors:Seed()
         visited = visited + 1
         if visited > MAX_ACTIVE then break end
         local token = self.client:NameplateToken(frame)
-        if token and not self.active[token] then self:Observe(token, "nameplate") end
+        if token and not self.active[token] and not self.plateRetries[token] then self:Observe(token, "nameplate") end
+    end
+end
+
+function Sensors:RecoverPlates(budget)
+    for token, retry in pairs(self.plateRetries) do
+        retry.pollsLeft = retry.pollsLeft - 1
+        if budget > 0 and self.plateCount < MAX_PLATES then
+            budget = budget - 1
+            if not rawequal(self.client:Nameplate(token), retry.frame) then
+                self.plateRetries[token] = nil
+            else
+                local obs = self.client:ReadUnit(token, "nameplate")
+                if obs then self:Record(obs) end
+            end
+        end
+        if retry.pollsLeft == 0 then self.plateRetries[token] = nil end
     end
 end
 
@@ -160,6 +188,8 @@ function Sensors:Poll(scheduled)
                 tokens[#tokens + 1] = token
             end
         end
+        -- Retry last poll's unavailable plates using the same read budget.
+        if scheduled and next(self.plateRetries) then self:RecoverPlates(MAX_PLATES - #tokens) end
         for _, token in ipairs(tokens) do self:Observe(token, "poll") end
         for token in pairs(DIRECT) do self:Observe(token, self.active[token] and "poll" or token) end
         -- Discovery still works at a bounded cadence when an event is denied.
