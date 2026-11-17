@@ -86,9 +86,11 @@ Decorations must respect forbidden frames and the client's protected-operation
 rules. Adapter checks and simulated tests do not verify in-game appearance or
 protected behavior.
 
-Support reads the enemy-nameplate and always-show preferences independently.
+Support and the quick tour read the enemy-nameplate and always-show preferences independently.
 A clean false for always-show with enemy nameplates enabled identifies WoW's
 automatic mode. Preference reads do not establish current nameplate availability.
+For these two preferences, `CVAR_UPDATE` schedules a re-read on the next UI refresh.
+The event payload is never used as a preference value.
 
 ## Reference declarations
 

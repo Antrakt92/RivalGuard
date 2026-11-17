@@ -83,6 +83,7 @@ matching advanced rules can override the alert class filter.
 
 Enable enemy nameplates in WoW to provide the broadest available coverage.
 **Always Show Nameplates** can help when automatic mode hides enemy plates.
+The quick tour shows a setup hint when WoW reports either of these limitations.
 Your current target can still provide information when plates are unavailable.
 Class icons use the current nameplate reading. Watch and Avoid markers require
 the current plate to match the saved player's identity.

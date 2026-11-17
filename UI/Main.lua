@@ -1387,11 +1387,8 @@ function UI.New(app)
                 if appStatus.capabilities and appStatus.capabilities.nameplateEvents == false then
                     lines[#lines + 1] = self:T("nameplateEventsLimited")
                 end
-                if appStatus.nameplates == false then
-                    lines[#lines + 1] = self:T("nameplatesOff")
-                elseif appStatus.nameplates == true and appStatus.alwaysNameplates == false then
-                    lines[#lines + 1] = self:T("nameplatesAutomatic")
-                end
+                local coverageHint = M.NameplateCoverageHint(appStatus)
+                if coverageHint then lines[#lines + 1] = self:T(coverageHint) end
                 if appStatus.writable == false then lines[#lines + 1] = self:T("sessionOnly") end
                 self.supportStatus:SetText(table.concat(lines, "\n\n"))
             end

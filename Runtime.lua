@@ -520,6 +520,7 @@ if type(CreateFrame) == "function" then
     local frame = CreateFrame("Frame")
     frame:RegisterEvent("ADDON_LOADED")
     frame:RegisterEvent("PLAYER_LOGOUT")
+    pcall(frame.RegisterEvent, frame, "CVAR_UPDATE")
     frame:SetScript("OnEvent", function(_, event, name)
         if event == "ADDON_LOADED" and name == addonName then
             local ok = pcall(app.Initialize, app)
@@ -532,6 +533,12 @@ if type(CreateFrame) == "function" then
             end
         elseif event == "PLAYER_LOGOUT" and app.initialized then
             if app.db.writable then app.api.RivalGuardDB = app.db.root end
+        elseif event == "CVAR_UPDATE" and app.initialized then
+            local key = app.client:Text(name, 64)
+            key = key and key:lower()
+            if key == "nameplateshowenemies" or key == "nameplateshowall" then
+                app.ui.statusAt, app.dirty = nil, true
+            end
         end
     end)
     frame:SetScript("OnUpdate", function(_, elapsed) app:Update(elapsed) end)

@@ -16,6 +16,12 @@ local function clean(value)
     return value
 end
 
+function M.NameplateCoverageHint(status)
+    if not status then return nil end
+    if status.nameplates == false then return "nameplatesOff" end
+    if status.nameplates == true and status.alwaysNameplates == false then return "nameplatesAutomatic" end
+end
+
 function M.Text(value, fallback, maximum)
     value = clean(value)
     if type(value) ~= "string" then return fallback or "" end

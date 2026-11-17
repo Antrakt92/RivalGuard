@@ -865,11 +865,14 @@ function D.Attach(ui, app, H)
     function self:Refresh()
         self:CurrentSoundPicker()
         if ui.profilePicker and ui.profilePicker:IsShown() and not self:ProfilePickerIsCurrent(ui.profilePicker) then ui.profilePicker:Hide() end
+        if self.guideFrame and self.guideFrame:IsShown() then
+            self:RefreshGuideClassChoices()
+            self:RefreshGuideCoverage()
+        end
         for _, frame in ipairs(dialogs) do
             if frame:IsShown() then ui:FitWindow(frame, frame:GetWidth(), frame:GetHeight(), 1) end
         end
         if self.rulesFrame and self.rulesFrame:IsShown() then self:RefreshRules() else self:RefreshRuleCheck() end
-        if self.guideFrame and self.guideFrame:IsShown() then self:RefreshGuideClassChoices() end
     end
 
     local GUIDE_STEPS = {
@@ -890,6 +893,15 @@ function D.Attach(ui, app, H)
         end
     end
 
+    function self:RefreshGuideCoverage()
+        local f = self.guideFrame
+        local key = self.guideStep ~= 2 and M.NameplateCoverageHint(ui.statusCache) or nil
+        local height = key and 386 or 340
+        if f:GetHeight() ~= height then f:SetHeight(height) end
+        f.coverage:SetShown(key ~= nil)
+        if key then f.coverage:SetText(t(key)) end
+    end
+
     function self:RenderGuide()
         local f = self.guideFrame
         local step = GUIDE_STEPS[self.guideStep]
@@ -899,6 +911,8 @@ function D.Attach(ui, app, H)
         f.openAlerts:SetShown(step[1] == "guideRules")
         f.preview:SetShown(step[1] ~= "guideRules")
         self:RefreshGuideClassChoices()
+        self:RefreshGuideCoverage()
+        if f:IsShown() then ui:FitWindow(f, f:GetWidth(), f:GetHeight(), 1) end
         f.next.label:SetText(t(self.guideStep == #GUIDE_STEPS and "guideDone" or "next"))
     end
 
@@ -915,6 +929,8 @@ function D.Attach(ui, app, H)
         f.heading:SetPoint("TOPLEFT", 20, -95); f.heading:SetWidth(550)
         f.body = H.font(f, 15, H.C.text)
         f.body:SetPoint("TOPLEFT", 20, -150); f.body:SetWidth(550)
+        f.coverage = H.font(f, 13, H.C.gold)
+        f.coverage:SetPoint("TOPLEFT", 20, -222); f.coverage:SetWidth(550)
         f.preview = H.localButton(f, "guidePreview", 210, function()
             self:FinishGuide()
             app:Demo()

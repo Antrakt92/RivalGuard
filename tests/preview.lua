@@ -26,6 +26,10 @@ if view == "settings" and page == "support-limited" then
     end
     state.cvars.nameplateShowAll = false
 end
+if view == "guide" and (page == "coverage-off" or page == "coverage-automatic" or page == "coverage-trust") then
+    state.cvars.nameplateShowEnemies = page == "coverage-automatic"
+    state.cvars.nameplateShowAll = false
+end
 local RG = state:LoadTOC()
 state:Fire("ADDON_LOADED", "RivalGuard")
 local app = RG.instance
@@ -95,6 +99,10 @@ elseif view == "guide" then
     app.ui:ShowGuide(true)
     if page == "rules" or page == "focused" then app.ui.guideDialog.next:Click() end
     if page == "focused" then app.ui.guideDialog.hunterRogue:Click() end
+    if page == "coverage-trust" then
+        app.ui.guideDialog.next:Click()
+        app.ui.guideDialog.next:Click()
+    end
 elseif view == "journal" then
     if page == "last-page" then
         for i = 11, 13 do

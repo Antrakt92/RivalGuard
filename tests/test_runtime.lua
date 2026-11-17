@@ -3680,6 +3680,92 @@ H.Test("the copied diagnostics include sanitized context coverage and global ale
     end
 end)
 
+H.Test("the first-run guide shows disabled and automatic nameplate hints only where relevant", function()
+    local writes = 0
+    local function writeCVar() writes = writes + 1 end
+    local state, RG, app = setup(nil, function(mock)
+        mock.locale = "ruRU"
+        mock.cvars.nameplateShowEnemies, mock.cvars.nameplateShowAll = false, true
+        mock.api.C_CVar = { GetCVarBool = function(key) return mock.cvars[key] end, SetCVar = writeCVar }
+        mock.api.GetCVarBool, mock.api.SetCVar = function() return true end, writeCVar
+    end)
+    local ui, guide = app.ui, assert(app.ui.guideDialog)
+    local profile = assert(RG.Codec.Encode(app.db:GetProfile()))
+    H.True(guide:IsShown())
+    H.True(guide.coverage:IsShown())
+    H.Equal(guide.coverage:GetText(), ui:T("nameplatesOff"))
+    guide.next:Click()
+    H.False(guide.coverage:IsShown())
+    guide.next:Click()
+    H.True(guide.coverage:IsShown())
+    H.Equal(guide.coverage:GetText(), ui:T("nameplatesOff"))
+
+    state.cvars.nameplateShowEnemies, state.cvars.nameplateShowAll = true, false
+    state:Fire("CVAR_UPDATE", "nameplateShowEnemies", "1")
+    state:Advance(0.3)
+    guide.back:Click()
+    H.False(guide.coverage:IsShown())
+    guide.back:Click()
+    H.True(guide.coverage:IsShown())
+    H.Equal(guide.coverage:GetText(), ui:T("nameplatesAutomatic"))
+    guide.skip:Click()
+    H.True(app.db:HasSeenGuide())
+    H.Equal(RG.Codec.Encode(app.db:GetProfile()), profile)
+    H.Equal(writes, 0)
+end)
+
+H.Test("guide nameplate coverage follows clean CVar reads after live updates and ignores event values", function()
+    local writes = 0
+    local function writeCVar() writes = writes + 1 end
+    local state, RG, app = setup(nil, function(mock)
+        mock.cvars.nameplateShowEnemies, mock.cvars.nameplateShowAll = true, false
+        mock.api.C_CVar = { GetCVarBool = function(key) return mock.cvars[key] end, SetCVar = writeCVar }
+        mock.api.SetCVar = writeCVar
+    end)
+    local ui, guide = app.ui, assert(app.ui.guideDialog)
+    local profile = assert(RG.Codec.Encode(app.db:GetProfile()))
+    local secret = H.Secret("unreadable CVar value or event name")
+    local function expected(key)
+        H.Equal(guide.coverage:IsShown(), key ~= nil)
+        if key then H.Equal(guide.coverage:GetText(), ui:T(key)) end
+    end
+    local function update(name, eventValue, key)
+        H.False(app.dirty)
+        state:Fire("CVAR_UPDATE", name, eventValue)
+        H.True(app.dirty)
+        state:Advance(0.3)
+        expected(key)
+    end
+    state:Advance(0.3)
+    expected("nameplatesAutomatic")
+    state:Fire("CVAR_UPDATE", secret, "0")
+    H.False(app.dirty)
+    state:Fire("CVAR_UPDATE", "nameplateShowFriends", "0")
+    H.False(app.dirty)
+
+    state.cvars.nameplateShowAll = true
+    update("NAMEPLATESHOWALL", "0", nil)
+    state.cvars.nameplateShowAll = secret
+    update("nAmEpLaTeShOwAlL", "0", nil)
+    state.cvars.nameplateShowEnemies = false
+    update("NAMEPLATESHOWENEMIES", "1", "nameplatesOff")
+    state.cvars.nameplateShowEnemies, state.cvars.nameplateShowAll = nil, false
+    update("nameplateShowEnemies", "0", nil)
+    state.cvars.nameplateShowEnemies = true
+    update("nameplateShowEnemies", secret, "nameplatesAutomatic")
+
+    guide.next:Click()
+    expected(nil)
+    state.cvars.nameplateShowEnemies = false
+    update("nameplateShowEnemies", true, nil)
+    guide.next:Click()
+    expected("nameplatesOff")
+    state.cvars.nameplateShowEnemies, state.cvars.nameplateShowAll = true, true
+    update("nameplateShowEnemies", false, nil)
+    H.Equal(RG.Codec.Encode(app.db:GetProfile()), profile)
+    H.Equal(writes, 0)
+end)
+
 H.Test("navigating and skipping a first-run class guide keeps the default alert settings", function()
     local state, RG, app = setup()
     local guide = assert(app.ui.guideDialog)
