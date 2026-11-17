@@ -2007,7 +2007,7 @@ H.Test("threat journal records confirmed cast and does not regenerate cleared en
     H.Equal(app.db:GetJournal()[1].encounters, 1)
 end)
 
-local function stealthFixture(readable)
+local function stealthFixture(readable, configure)
     local unit = { guid = "Player-StealthLifecycle", name = "Fixture Rival", class = "ROGUE", hostile = true, isPlayer = true }
     local state, _, app = setup(nil, function(fixture)
         if not readable then return end
@@ -2016,7 +2016,9 @@ local function stealthFixture(readable)
             if token == "nameplate1" and index == 1 and unit.aura then return { spellId = unit.aura } end
         end }
     end)
-    app.db:GetProfile().retention.journalMode = "threats"
+    local profile = app.db:GetProfile()
+    profile.retention.journalMode = "threats"
+    if configure then configure(profile) end
     app:ProfileChanged()
     state:Unit("nameplate1", unit)
     state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
@@ -2134,6 +2136,92 @@ H.Test("an expired retained Vanish can be evicted ahead of live contacts", funct
     H.Equal(#app.engine.pending, 0)
     state:Advance(0.3)
     H.Equal(#state.sounds, sounds)
+end)
+
+H.Test("old cast evidence expires from the live row and card while its player remains observed", function()
+    local state, app = stealthFixture(false)
+    local ui = app.ui
+    state:Advance(0.5)
+    ui.rows[1]:Click()
+    local cast = ui:F("stealthCast", ui:T("spellVanish"))
+    H.True(ui.rows[1].detailText:GetText():find(cast, 1, true) ~= nil)
+    H.True(ui.detailsFrame.info:GetText():find(cast, 1, true) ~= nil)
+    local lastSeen = ui.selected.lastSeen
+    state.clock.Advance(7.3)
+    app.sensors:Poll()
+    ui:Refresh()
+    H.True(app.engine:Snapshot()[1].visible)
+    H.Equal(app.engine:Snapshot()[1].stealth, "confirmed")
+    H.True(ui.selected.lastSeen > lastSeen)
+
+    state.clock.Advance(0.4)
+    app.sensors:Poll()
+    ui:Refresh()
+    local current = app.engine:Snapshot()[1]
+    H.True(current.visible)
+    H.Nil(current.stealth)
+    H.Nil(current.stealthAt)
+    H.Nil(current.stealthSpell)
+    H.Nil(ui.rows[1].detailText:GetText():find(cast, 1, true))
+    H.Nil(ui.detailsFrame.info:GetText():find(cast, 1, true))
+    H.Equal(app.engine.counters.alerts, 1)
+end)
+
+H.Test("positive aura refreshes stealth recency while only a clean negative rearms the episode", function()
+    local state, app, unit = stealthFixture(true, function(profile) profile.alerts.cooldown = 0 end)
+    state:Advance(0.5)
+    H.Equal(app.engine.counters.alerts, 1)
+    unit.aura = 1784
+    state:Fire("UNIT_AURA", "nameplate1")
+    local firstAura = app.engine:Snapshot()[1].stealthAt
+    state.clock.Advance(6)
+    state:Fire("UNIT_AURA", "nameplate1")
+    local refreshed = app.engine:Snapshot()[1]
+    H.Equal(refreshed.stealthEvidence, "aura")
+    H.Equal(refreshed.stealthAt, state.clock.Now())
+    H.True(refreshed.stealthAt > firstAura)
+    state.clock.Advance(3)
+    app.sensors:Poll()
+    H.Equal(app.engine:Snapshot()[1].stealth, "confirmed")
+    H.Equal(app.engine.counters.alerts, 1)
+
+    unit.aura = H.Secret("restricted active stealth aura")
+    state:Fire("UNIT_AURA", "nameplate1")
+    H.Equal(app.engine:Snapshot()[1].stealthAt, refreshed.stealthAt)
+    state.clock.Advance(5.2)
+    app.sensors:Poll()
+    H.Nil(app.engine:Snapshot()[1].stealth)
+    unit.aura = 1784
+    state:Fire("UNIT_AURA", "nameplate1")
+    state:Advance(0.5)
+    H.Equal(app.engine:Snapshot()[1].stealthEvidence, "aura")
+    H.Equal(app.engine.counters.alerts, 1)
+
+    unit.aura = nil
+    state:Fire("UNIT_AURA", "nameplate1")
+    H.Nil(app.engine:Snapshot()[1].stealth)
+    unit.aura = 1784
+    state:Fire("UNIT_AURA", "nameplate1")
+    state:Advance(0.5)
+    H.Equal(app.engine.counters.alerts, 2)
+    H.Equal(app.ui.banner.title:GetText(), app.ui:T("stealthAura"))
+end)
+
+H.Test("resuming threat history does not record an expired cast as a new threat", function()
+    local state, app = stealthFixture(false, function(profile) profile.retention.journalDays = 0 end)
+    state:Advance(0.5)
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(#app.db:GetJournal(), 0)
+    state.clock.Advance(8.1)
+    app.db:GetProfile().retention.journalDays = 7
+    app:ProfileChanged()
+    app.sensors:Poll()
+    H.True(app.engine:Snapshot()[1].visible)
+    H.Equal(#app.db:GetJournal(), 0)
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-NewThreat", 1856)
+    H.Equal(#app.db:GetJournal(), 1)
+    H.Equal(app.db:GetJournal()[1].identity, "guid:Player-StealthLifecycle")
+    H.Equal(app.db:GetJournal()[1].encounters, 1)
 end)
 
 local function camouflageFixture(interface)

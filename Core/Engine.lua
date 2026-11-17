@@ -5,6 +5,7 @@ E.__index = E
 local MAX_PENDING_AGE = 5
 local EVICTED_ENCOUNTER_LIMIT = 512
 local MAX_RANGE_AGE = 2
+local RECENT_STEALTH_SECONDS = 8
 local URGENT_PRIORITY, SOUND_ESCALATION_GAP = 70, 0.25
 local RANGE_EVIDENCE = { exact = true, spell = true, interaction = true, combined = true, conflict = true, unknown = true }
 
@@ -126,7 +127,12 @@ end
 
 function E:View(contact, now)
     local entry = self:ListEntry(contact)
-    local hasRange = contact.rangeAt ~= nil and freshRange(contact, now or self:Now())
+    now = now or self:Now()
+    local hasRange = freshRange(contact, now)
+    -- Keep the underlying episode until a clean change, while exposing only
+    -- recent evidence to the UI and to new journal decisions.
+    local hasRecentStealth = contact.stealthAt ~= nil and now >= contact.stealthAt
+        and now - contact.stealthAt <= RECENT_STEALTH_SECONDS
     local sources = {}
     for token in pairs(contact.tokens) do
         local binding = self.bindings[token]
@@ -136,8 +142,10 @@ function E:View(contact, now)
         id = contact.id, identity = contact.identity, name = contact.name, realm = contact.realm,
         class = contact.class, level = contact.level, hostile = contact.hostile, isPlayer = contact.isPlayer,
         visible = next(contact.tokens) ~= nil, firstSeen = contact.firstSeen, lastSeen = contact.lastSeen,
-        sources = sources, stealth = contact.stealth, stealthAt = contact.stealthAt,
-        stealthEvidence = contact.stealthEvidence, stealthSpell = contact.stealthSpell,
+        sources = sources, stealth = hasRecentStealth and contact.stealth or nil,
+        stealthAt = hasRecentStealth and contact.stealthAt or nil,
+        stealthEvidence = hasRecentStealth and contact.stealthEvidence or nil,
+        stealthSpell = hasRecentStealth and contact.stealthSpell or nil,
         targeting = contact.targeting, rangeMin = hasRange and contact.rangeMin or nil, rangeMax = hasRange and contact.rangeMax or nil,
         rangeMinExclusive = hasRange and contact.rangeMinExclusive or false,
         rangeEvidence = hasRange and contact.rangeEvidence or "unknown",
@@ -583,8 +591,7 @@ function E:Observe(raw)
     local oldStealth = contact.stealth or (previous and previous.stealth)
     if obs.stealthReadable then
         if obs.stealth == true then
-            if contact.stealthEvidence ~= "aura" then contact.stealthAt = now end
-            contact.stealth, contact.stealthEvidence, contact.stealthSpell = "confirmed", "aura", nil
+            contact.stealth, contact.stealthAt, contact.stealthEvidence, contact.stealthSpell = "confirmed", now, "aura", nil
         elseif obs.stealth == false then
             contact.stealth, contact.stealthAt, contact.stealthEvidence, contact.stealthSpell = nil, nil, nil, nil
         end

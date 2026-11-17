@@ -57,6 +57,11 @@ first clean return to hostile player status checks auras again. Steady-state
 polling does not walk aura lists. A disappearing nameplate does not establish
 stealth.
 
+The live list and contact card show readable stealth observations for up to
+eight seconds after the latest cast or positive aura read. This is how long the
+observation is displayed. Queued notifications keep the evidence they received
+at the time, and unreadable auras cannot start a new stealth episode.
+
 For Retail 12.x, the cast and aura allowlists include Hunter Camouflage
 (`199483`). The data extracted from the supported build identifies it as a
 [Hunter talent](https://github.com/simulationcraft/simc/blob/261a2115904af6e8484bf4eb8ab545ebe88c2054/engine/dbc/generated/trait_data.inc#L194)
