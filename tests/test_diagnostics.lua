@@ -12,6 +12,7 @@ H.Test("diagnostic report excludes names GUIDs notes and arbitrary strings", fun
     local report = diagnostics:Export({ nameplates = true, classReadable = false, private = "PrivatePlayer" }, {
         counters = { alerts = 3 }, contacts = { ["PrivateGUID"] = { name = "PrivatePlayer", note = "PrivateNote" } }, pending = {},
         queueBlocks = { PrivateReason = 12, class_filtered = 2, cooldown = "PrivateValue", paused = math.huge, ignored = 0 },
+        soundOutcomes = { playback_requested = 1, sound_gap = 0.5, playback_unconfirmed = "PrivateCue", PrivateEvent = 3 },
     })
     H.True(report:find("observations=2", 1, true) ~= nil)
     H.Nil(report:find("PrivatePlayer", 1, true))
@@ -20,7 +21,9 @@ H.Test("diagnostic report excludes names GUIDs notes and arbitrary strings", fun
     H.Nil(report:find("secret failure", 1, true))
     H.True(report:find("other", 1, true) ~= nil)
     H.True(report:find("\n  class_filtered=2\n", 1, true) ~= nil)
-    for _, value in ipairs({ "PrivateReason", "PrivateValue", "cooldown=", "paused=", "ignored=" }) do
+    H.True(report:find("\n  playback_requested=1\n", 1, true) ~= nil)
+    for _, value in ipairs({ "PrivateReason", "PrivateValue", "cooldown=", "paused=", "ignored=",
+        "PrivateCue", "PrivateEvent", "sound_gap=", "playback_unconfirmed=" }) do
         H.Nil(report:find(value, 1, true))
     end
 end)

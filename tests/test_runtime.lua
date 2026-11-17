@@ -2602,15 +2602,21 @@ H.Test("Why shows a live contact's last sound outcome separately from current al
     H.Equal(show(2, "playback_requested", "lastSoundRequested").reason, "disabled")
     H.Equal(ui.explanationFrame.reason:GetText(), RG.Locale.Reason("disabled", "ruRU"))
 
-    ui:ShowDiagnostics()
+    state.api.SlashCmdList.RIVALGUARD("diagnostics")
     local report = ui.copyFrame.edit:GetText()
+    H.True(ui.copyFrame:IsShown())
+    H.True(ui.copyFrame.edit:HasFocus())
+    H.True(ui.copyFrame.edit.highlighted)
     H.Nil(report:find("Private Sound", 1, true))
     H.Nil(report:find("Player-SoundOutcome-", 1, true))
     H.Nil(report:find("lastSound=", 1, true))
     H.Nil(report:find("soundCue", 1, true))
     for _, status in ipairs({ "not_requested", "sound_gap", "playback_requested", "playback_unconfirmed" }) do
-        H.Nil(report:find(status, 1, true))
+        H.True(report:find("  " .. status .. "=1\n", 1, true) ~= nil, status)
     end
+    app:Demo()
+    state.api.SlashCmdList.RIVALGUARD("diagnostics")
+    H.Equal(ui.copyFrame.edit:GetText(), report)
 end)
 
 H.Test("Why shows current custom and inherited cues without rewriting the last cue", function()
@@ -2719,6 +2725,7 @@ H.Test("Why shows a wave member's sound outcome only for a live selection", func
     H.Equal(ui.explanationFrame.lastSoundHeading:GetText(), ui:F("lastSoundHeading", ui:T("eventWave")))
     H.Equal(ui.explanationFrame.lastSound:GetText(), ui:T("lastSoundRequested") .. "\n" .. ui:F("soundCueEvidence", ui:T("soundReady")))
     local report = app:ExportDiagnostics()
+    H.True(report:find("  playback_requested=1\n", 1, true) ~= nil, "one group sound should count once")
     for _, member in ipairs(members) do
         H.Nil(report:find(member.identity, 1, true)); H.Nil(report:find(member.name, 1, true))
     end

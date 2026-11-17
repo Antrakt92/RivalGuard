@@ -422,6 +422,7 @@ function App:Command(text)
     elseif command == "resume" then self.engine:Resume()
     elseif command == "mute" then self:ToggleMute()
     elseif command == "clear" then self.engine:ClearRecent()
+    elseif command == "diagnostics" then self.ui:ShowDiagnostics()
     elseif command == "report" or command == "status" then self.ui:OpenSettings("support")
     elseif command == "watch" or command == "ignore" then
         local obs = self.client:ReadUnit("target", "target")
@@ -432,7 +433,7 @@ function App:Command(text)
         end
         if not ok then self:Notify(RG.Locale.Get("identityUnknown", self.db:GetProfile().locale)) end
     elseif command == "help" then
-        self:Notify("/rg settings, profile [name], demo, pause [minutes], resume, mute, clear, watch, ignore, report")
+        self:Notify("/rg settings, profile [name], demo, pause [minutes], resume, mute, clear, watch, ignore, report, diagnostics")
     else self.ui:Toggle() end
     self.dirty = true
 end

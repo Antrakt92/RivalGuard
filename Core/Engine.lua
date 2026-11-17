@@ -74,7 +74,7 @@ function E.New(config)
         pending = {}, history = {}, cooldowns = {}, snoozes = {}, serial = 0, sequence = 0,
         evictedEncounters = {}, evictionSlots = {}, evictionCursor = 0,
         counters = { observations = 0, alerts = 0, suppressed = 0, evicted = 0, queueOverflow = 0, rangeAliasConflicts = 0 },
-        queueBlocks = {},
+        queueBlocks = {}, soundOutcomes = {},
         pausedUntil = nil, lastSound = -math.huge, lastSoundPriority = 0, soundOutcomeSequence = 0, revision = 0,
     }, E)
 end
@@ -342,8 +342,12 @@ function E:CancelTargeting(contact)
     end
 end
 
+local function countOutcome(counters, key)
+    counters[key] = math.min(1000000000, (counters[key] or 0) + 1)
+end
+
 local function blockQueue(engine, reason)
-    engine.queueBlocks[reason] = math.min(1000000000, (engine.queueBlocks[reason] or 0) + 1)
+    countOutcome(engine.queueBlocks, reason)
     return false
 end
 
@@ -831,6 +835,7 @@ local function rememberContactSound(engine, id, kind, status, soundCue)
 end
 
 local function rememberSoundOutcome(engine, decision, status, cue, group)
+    countOutcome(engine.soundOutcomes, status)
     if group then
         for _, item in ipairs(group) do rememberContactSound(engine, item.id, decision.kind, status, cue) end
     elseif decision.contact then

@@ -39,6 +39,18 @@ local alertBlocks = { disabled = true, paused = true, context_disabled = true, s
 local queueBlocks = { "class_filtered", "contact_snoozed", "context_disabled", "cooldown", "custom_suppressed", "dead",
     "disabled", "event_disabled", "flight", "identity_unconfirmed", "ignored", "ordinary_muted", "outputs_disabled", "paused",
     "range_conflict", "range_outside", "range_unconfirmed", "range_unknown", "resting", "sanctuary", "unknown", "watch_only" }
+local soundOutcomes = { "not_requested", "playback_requested", "playback_unconfirmed", "sound_gap" }
+
+local function appendCounts(lines, heading, counts, allowed)
+    if type(counts) ~= "table" then return end
+    for _, key in ipairs(allowed) do
+        local count = counts[key]
+        if U.IsFinite(count) and count > 0 and count % 1 == 0 then
+            if heading then lines[#lines + 1] = heading; heading = nil end
+            lines[#lines + 1] = "  " .. key .. "=" .. count
+        end
+    end
+end
 
 local function knownValue(value, choices)
     return type(value) == "string" and choices[value] and value or "unknown"
@@ -73,16 +85,8 @@ function Diag:Export(capabilities, engine, state)
         for _, key in ipairs(U.SortedKeys(engine.counters)) do lines[#lines + 1] = "  " .. key .. "=" .. engine.counters[key] end
         lines[#lines + 1] = "  contacts=" .. U.Count(engine.contacts)
         lines[#lines + 1] = "  pending=" .. #engine.pending
-        if engine.queueBlocks then
-            local heading = "Alert attempts blocked before queueing:"
-            for _, reason in ipairs(queueBlocks) do
-                local count = engine.queueBlocks[reason]
-                if U.IsFinite(count) and count > 0 and count % 1 == 0 then
-                    if heading then lines[#lines + 1] = heading; heading = nil end
-                    lines[#lines + 1] = "  " .. reason .. "=" .. count
-                end
-            end
-        end
+        appendCounts(lines, "Alert attempts blocked before queueing:", engine.queueBlocks, queueBlocks)
+        appendCounts(lines, "Alert sound outcomes:", engine.soundOutcomes, soundOutcomes)
     end
     lines[#lines + 1] = "Recent error codes:"
     for _, item in ipairs(self.errors) do lines[#lines + 1] = "  " .. item.code end
