@@ -161,7 +161,9 @@ function DB.ValidateProfile(value, strict)
 end
 
 local function newRoot()
-    return { schemaVersion = RG.schemaVersion, activeProfile = "Default", profiles = { Default = D.NewProfile() }, lists = {}, journal = {}, onboardingSeen = false }
+    return { schemaVersion = RG.schemaVersion, activeProfile = "Default", profiles = { Default = D.NewProfile() },
+        lists = {}, journal = {}, journalPolicy = { days = D.profile.retention.journalDays, maximum = D.profile.retention.maxJournal },
+        onboardingSeen = false }
 end
 
 local function newerEncounter(a, b)
@@ -189,6 +191,11 @@ function DB.New(raw)
         return self
     end
     self.root.onboardingSeen = raw.onboardingSeen == true
+    if type(raw.journalPolicy) == "table" then
+        local policy = self.root.journalPolicy
+        policy.days = math.floor(U.Clamp(raw.journalPolicy.days, 1, 90, policy.days))
+        policy.maximum = math.floor(U.Clamp(raw.journalPolicy.maximum, 50, 1000, policy.maximum))
+    end
     local count = 1
     if type(raw.profiles) == "table" then
         local function restore(name)
@@ -365,14 +372,19 @@ function DB:Record(contact, epoch, zone)
 end
 
 function DB:Prune(epoch)
-    local policy = self:GetProfile().retention
+    local retention = self:GetProfile().retention
+    local policy = self.root.journalPolicy
+    -- Zero pauses new records. Existing entries keep their last active expiry
+    -- and size limits, including after reload.
+    if retention.journalDays > 0 then
+        policy.days, policy.maximum = retention.journalDays, retention.maxJournal
+    end
     local journal, lookup = self.root.journal, self.journalByIdentity
-    local maximum = policy.journalDays == 0 and 0 or policy.maxJournal
-    local cutoff = U.IsFinite(epoch) and epoch > 0 and epoch - policy.journalDays * 86400
+    local cutoff = U.IsFinite(epoch) and epoch > 0 and epoch - policy.days * 86400
     local removed = 0
     for index = #journal, 1, -1 do
         local item = journal[index]
-        if index <= maximum and (not cutoff or item.lastSeen >= cutoff) then break end
+        if index <= policy.maximum and (not cutoff or item.lastSeen >= cutoff) then break end
         lookup[item.identity], journal[index] = nil, nil
         removed = removed + 1
     end

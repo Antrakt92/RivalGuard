@@ -667,6 +667,28 @@ H.Test("loss of epoch clock never rewrites an earlier saved encounter with a fak
     H.True(recovered[1].lastSeen > 0)
 end)
 
+H.Test("switching to zero journal days suspends recording and preserves the previous expiry through reload", function()
+    local state, _, app = setup()
+    local now = state.api.time()
+    app.db:GetProfile().retention.journalDays = 14
+    assert(app.db:Record({ identity = "guid:Player-Existing", name = "Existing" }, now - 10 * 86400))
+    local quiet = assert(app.db:CreateProfile("No recording"))
+    quiet.retention.journalDays = 0
+    assert(app.db:SetProfile("No recording"))
+    app:ProfileChanged()
+    H.Equal(#app.db:GetJournal(), 1)
+    local recorded = app.db:Record({ identity = "guid:Player-New", name = "New" }, now)
+    H.False(recorded)
+
+    state:Fire("PLAYER_LOGOUT")
+    local _, _, reloaded = setup(state.api.RivalGuardDB)
+    H.Equal(reloaded.db:GetActiveProfileName(), "No recording")
+    H.Equal(#reloaded.db:GetJournal(), 1)
+    H.Equal(reloaded.db:GetJournal()[1].identity, "guid:Player-Existing")
+    H.Equal(reloaded.db:Prune(now + 5 * 86400), 1)
+    H.Equal(#reloaded.db:GetJournal(), 0)
+end)
+
 H.Test("status uses clean C_CVar evidence and falls back only when the reader is absent", function()
     local state, _, app = setup()
     local legacyReads = 0

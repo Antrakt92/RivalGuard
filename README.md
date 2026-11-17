@@ -45,8 +45,10 @@ RivalGuard does not change game settings. Range estimates depend on what the
 client can measure for observed units and may be a bracket or unavailable.
 You can control whether uncertain distances qualify for alerts.
 
-Personal lists and notes remain local. Recent meetings are retained in the
-journal for a configurable period; set retention to zero to disable it.
+Personal lists and notes remain local. The current profile's positive retention
+period applies to saved encounters. Zero stops new records and keeps the
+previous expiry period for existing ones. Use **Clear recent history** to
+delete existing encounters immediately.
 `/rg clear` clears recent session sightings while keeping players still in view.
 
 ## Development checks
