@@ -162,7 +162,9 @@ function App:Explain(contact)
             return result
         end
         local entry = sample.watched and { kind = "watch" } or nil
-        local decision, reason = RG.Rules.Evaluate(self.db:GetProfile(), sample, "sighting", { kind = "world" }, entry)
+        local profile = self.db:GetProfile()
+        local decision, reason, matchedIndex = RG.Rules.Evaluate(profile, sample, "sighting", { kind = "world" }, entry)
+        result.ruleName, result.rangeLimit = RG.Rules.ExplanationScope(profile, matchedIndex, reason)
         if not decision then result.reason = reason; return result end
         if not decision.sound and not decision.banner then result.reason = "wave_only"; return result end
         result.allowed, result.reason = true, decision.reason

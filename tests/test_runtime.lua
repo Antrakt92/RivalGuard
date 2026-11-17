@@ -2065,6 +2065,85 @@ for _, scenario in ipairs({ { kind = "sighting", count = 1 }, { kind = "wave", c
     end)
 end
 
+H.Test("Why retains the winning rule and displays its distance scope through cooldown and suppression", function()
+    local state, app, see, move = pendingRangeFixture(function(profile)
+        profile.locale = "ruRU"
+        profile.range.enabled, profile.range.yards, profile.range.policy = true, 35, "confirmed"
+        local rule = soundRule("Private rule label", "quest", 80)
+        rule.range, rule.rangePolicy = 20, "possible"
+        profile.rules = { rule }
+    end)
+    local ui, profile = app.ui, app.db:GetProfile()
+    local rule = profile.rules[1]
+    local function show(reason, source, yards, policy, ruleVisible)
+        local contact = app.engine:Snapshot()[1]
+        local result = app:Explain(contact)
+        H.Equal(result.reason, reason)
+        H.Equal(result.ruleName, ruleVisible and rule.name or nil)
+        H.Equal(result.rangeLimit.source, source)
+        H.Equal(result.rangeLimit.yards, yards)
+        H.Equal(result.rangeLimit.policy, policy)
+        ui:Select(contact); ui:ShowExplanation()
+        local frame = ui.explanationFrame
+        local key = source == "rule" and "explanationRuleRange" or "explanationGlobalRange"
+        H.True(frame.rangeEvidence:GetText():find(ui:F(key, yards, ui:T(policy)), 1, true) ~= nil)
+        H.Equal(frame.rule:GetText(), ruleVisible and ui:F("explanationMatchedRule", rule.name) or "")
+    end
+
+    see(1, 18)
+    show("custom_rule", "rule", 20, "possible", true)
+    state:Advance(0.5)
+    H.Equal(app.engine.history[1].reason, "custom_rule")
+    show("cooldown", "rule", 20, "possible", true)
+    move(1, 48)
+    show("range_outside", "global", 35, "confirmed", false)
+    move(1, 16)
+    rule.action = "suppress"
+    app:OnSettingsChanged()
+    show("custom_suppressed", "rule", 20, "possible", true)
+    rule.action, rule.sound, rule.banner = "alert", false, false
+    app:OnSettingsChanged()
+    show("outputs_disabled", "rule", 20, "possible", true)
+
+    profile.display.streamer = true
+    app:OnSettingsChanged()
+    H.Equal(ui.explanationFrame.rule:GetText(), "")
+    H.True(ui.explanationFrame.rangeEvidence:GetText():find(ui:F("explanationRuleRange", 20, ui:T("possible")), 1, true) ~= nil)
+    local report = app:ExportDiagnostics()
+    H.Nil(report:find(rule.name, 1, true))
+    H.Nil(report:find("rangeLimit", 1, true))
+end)
+
+H.Test("sample Why distinguishes the matching rule range from a blocking global scope", function()
+    local _, _, app = setup()
+    local ui, profile = app.ui, app.db:GetProfile()
+    local rule = soundRule("Sample-only explanation fixture", "ready", 80)
+    rule.range, rule.rangePolicy, rule.classes = 25, "possible", { ROGUE = true }
+    profile.rules = { rule }
+    app:OnSettingsChanged()
+    app:Demo()
+    ui.rows[1]:Click()
+    H.True(ui.selected.preview)
+    H.Equal(ui.selected.class, "ROGUE")
+    local function show(reason, source, yards, policy)
+        local explanation = app:Explain(ui.selected)
+        H.Equal(explanation.reason, reason)
+        H.Equal(explanation.ruleName, source == "rule" and rule.name or nil)
+        H.Equal(explanation.rangeLimit.source, source)
+        H.Equal(explanation.rangeLimit.yards, yards)
+        H.Equal(explanation.rangeLimit.policy, policy)
+        ui:ShowExplanation()
+        local key = source == "rule" and "explanationRuleRange" or "explanationGlobalRange"
+        H.True(ui.explanationFrame.rangeEvidence:GetText():find(ui:F(key, yards, ui:T(policy)), 1, true) ~= nil)
+    end
+    show("custom_rule", "rule", 25, "possible")
+    profile.range.enabled, profile.range.yards, profile.range.policy = true, 10, "confirmed"
+    app:OnSettingsChanged()
+    show("range_unconfirmed", "global", 10, "confirmed")
+    H.Equal(#app.db:GetJournal(), 0)
+    H.Equal(#app.engine.history, 0)
+end)
+
 H.Test("Why shows a live contact's last sound outcome separately from current alert rules", function()
     local playback, requests = false, 0
     local state, RG, app = setup(nil, function(fixture)

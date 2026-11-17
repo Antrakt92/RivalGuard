@@ -24,6 +24,19 @@ function R.RangeMatches(config, contact, rangeFresh)
     return true, "range_possible"
 end
 
+function R.ExplanationScope(profile, matchedIndex, reason)
+    local rule = profile.rules[matchedIndex]
+    if rule and rule.range and rule.range > 0 then
+        return rule.name, { source = "rule", yards = rule.range, policy = rule.rangePolicy }
+    end
+    local range = profile.range
+    if range.enabled and (reason == "range_unknown" or reason == "range_conflict"
+        or reason == "range_outside" or reason == "range_unconfirmed") then
+        return nil, { source = "global", yards = range.yards, policy = range.policy }
+    end
+    return rule and rule.name
+end
+
 function R.ContextMatches(config, context)
     local kind = context.kind or "world"
     if config[kind] ~= true then return false, "context_disabled" end

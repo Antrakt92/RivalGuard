@@ -257,7 +257,8 @@ function E:ExplainView(id, event)
     local now = self:Now()
     local result = { allowed = false, rangeEvidence = freshRange(contact, now) and contact.rangeEvidence or "unknown" }
     if self:SnoozedUntil(contact) then result.reason = "contact_snoozed"; return result end
-    local decision, reason = self:Explain(contact, event, now)
+    local decision, reason, matchedIndex = self:Explain(contact, event, now)
+    result.ruleName, result.rangeLimit = Rules.ExplanationScope(self.profile, matchedIndex, reason)
     if not decision then result.reason = reason; return result end
     if self.pausedUntil and now < self.pausedUntil then result.reason = "paused"; return result end
     result.kind = decision.kind
@@ -266,7 +267,7 @@ function E:ExplainView(id, event)
     local at = self.cooldowns[contact.id .. ":" .. (decision.dedupKey or decision.kind)]
     if at and now - at < decision.cooldown then result.reason = "cooldown"; return result end
     result.allowed, result.reason, result.priority = true, decision.reason, decision.priority
-    result.ruleName, result.sound, result.banner = decision.ruleName, decision.sound, decision.banner
+    result.sound, result.banner = decision.sound, decision.banner
     return result
 end
 

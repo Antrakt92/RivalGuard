@@ -1806,6 +1806,9 @@ function UI.New(app)
             frame.event:SetPoint("TOPLEFT", 18, -57); frame.event:SetWidth(420)
             frame.reason = font(frame, 14, C.text)
             frame.reason:SetPoint("TOPLEFT", 18, -89); frame.reason:SetWidth(420)
+            frame.rule = font(frame, 13, C.accent)
+            frame.rule:SetPoint("TOPLEFT", 18, -143); frame.rule:SetWidth(420)
+            if frame.rule.SetMaxLines then frame.rule:SetMaxLines(2) end
             frame.rangeEvidence = font(frame, 13, C.muted)
             frame.rangeEvidence:SetPoint("TOPLEFT", 18, -150); frame.rangeEvidence:SetWidth(420)
             frame.outputs = font(frame, 13, C.accent)
@@ -1826,8 +1829,21 @@ function UI.New(app)
         paintText(frame.event, self:T(preview and "demoSighting" or "explanationSighting"))
         paintText(frame.help, self:T(preview and "demoExplanationHelp" or "explanationHelp"))
         paintText(frame.reason, RG.Locale.Reason(result.reason or "unavailable", locale))
+        local ruleName = not self:Profile().display.streamer and M.Text(result.ruleName, "") or ""
+        paintShown(frame.rule, ruleName ~= "")
+        paintText(frame.rule, ruleName ~= "" and self:F("explanationMatchedRule", ruleName) or "")
         local rangeEvidence = result.reason ~= "range_conflict" and result.reason ~= "not_observed" and M.RangeProvenance(result.rangeEvidence, locale)
-        paintText(frame.rangeEvidence, rangeEvidence or "")
+        ---@type { source: string, yards: number, policy: string }?
+        local rangeLimit = result.rangeLimit
+        local yards = type(rangeLimit) == "table" and M.Number(rangeLimit.yards)
+        local limitText
+        if rangeLimit and yards then
+            local key = rangeLimit.source == "rule" and "explanationRuleRange" or "explanationGlobalRange"
+            local threshold = tostring(yards):gsub("%.", self:T("decimalSeparator"))
+            limitText = self:F(key, threshold, self:T(rangeLimit.policy == "confirmed" and "confirmed" or "possible"))
+        end
+        local evidenceText = rangeEvidence and limitText and (rangeEvidence .. "\n" .. limitText) or rangeEvidence or limitText or ""
+        paintText(frame.rangeEvidence, evidenceText)
         local output
         if result.allowed == true then
             if result.sound == true and result.banner == true then output = "explanationSoundBanner"
@@ -1844,10 +1860,19 @@ function UI.New(app)
         paintShown(frame.lastSound, showSound)
         paintText(frame.lastSoundHeading, showSound and self:F("lastSoundHeading", self:T(soundEvent)) or "")
         paintText(frame.lastSound, showSound and withSoundCue(self:T(soundStatus), lastCue) or "")
-        local height = showSound and 370 or 290
-        if frame.soundSectionShown ~= showSound then
+        local ruleSpace, limitSpace = ruleName ~= "" and 38 or 0, limitText and 19 or 0
+        local extra = ruleSpace + limitSpace
+        if frame.ruleSpace ~= ruleSpace or frame.scopeSpace ~= extra then
+            frame.rangeEvidence:ClearAllPoints(); frame.rangeEvidence:SetPoint("TOPLEFT", 18, -150 - ruleSpace)
+            frame.outputs:ClearAllPoints(); frame.outputs:SetPoint("TOPLEFT", 18, -178 - extra)
+            frame.lastSoundHeading:ClearAllPoints(); frame.lastSoundHeading:SetPoint("TOPLEFT", 18, -226 - extra)
+            frame.lastSound:ClearAllPoints(); frame.lastSound:SetPoint("TOPLEFT", 18, -253 - extra)
+            frame.ruleSpace, frame.scopeSpace = ruleSpace, extra
+        end
+        local height = (showSound and 370 or 290) + extra
+        if frame.explanationHeight ~= height then
             frame:SetHeight(height)
-            frame.soundSectionShown = showSound
+            frame.explanationHeight = height
         end
         self:FitOffsetWindow(frame, 0, 80)
         if not frame:IsShown() then frame:Show() end

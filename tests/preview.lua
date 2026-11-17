@@ -138,7 +138,17 @@ elseif view == "details" and page == "range-boundary" then
     app.ui:Select(contact)
 elseif view == "details" then app.ui:Select(app.engine:Snapshot()[1])
 elseif view == "explanation" then
-    if page == "wave-sound" then
+    if page == "rule-scope" then
+        app.engine:Clear()
+        local profile = app.db:GetProfile()
+        profile.rules = { { enabled = true, event = "sighting", classes = { HUNTER = true }, action = "alert", priority = 70,
+            name = locale == "ruRU" and "Охотник рядом с маршрутом патруля" or "Hunter near the patrol route",
+            cooldown = 30, range = 20.25, rangePolicy = "confirmed", sound = true, banner = true } }
+        state.api.UnitDistanceSquared = function() return 19 * 19, true end
+        state:Unit("nameplate80", { guid = "Player-RuleScopePreview", name = "Fixture", class = "HUNTER", hostile = true, isPlayer = true })
+        state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate80")
+        state:Advance(0.6)
+    elseif page == "wave-sound" then
         app.engine:Clear()
         for i = 1, 3 do
             local token = "nameplate" .. (80 + i)
