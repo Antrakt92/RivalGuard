@@ -30,6 +30,8 @@ current profile would handle that new sighting in the open world.
 - **Alerts:** choose audible classes independently from display classes. Set
   a sound for each event, control repeat timing and add optional rules for
   particular classes, situations, lists or estimated distances.
+  Turn on **Highlight opponents targeting you** to mark an available nameplate
+  when a targeting warning fires.
 - **Profiles:** choose a preset, create a profile, then select **Use** to apply
   it. Imports require a preview and a new name. They do not include personal
   lists or history.

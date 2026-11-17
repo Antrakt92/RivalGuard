@@ -1085,6 +1085,179 @@ local function locatorVisible(ui, token)
     return badge ~= nil and badge.locator ~= nil and badge.locator:IsVisible()
 end
 
+local function automaticLocatorFixture(enabled, configure)
+    local relations, restricted = {}, H.Secret("unreadable automatic target relation")
+    local state, _, app = setup(nil, function(fixture)
+        local compare = fixture.api.UnitIsUnit
+        fixture.api.UnitIsUnit = function(first, second)
+            if second == "player" and relations[first] then return restricted end
+            return compare(first, second)
+        end
+    end)
+    local profile = app.db:GetProfile()
+    profile.display.showBadges = false
+    if enabled ~= nil then profile.display.highlightTargeting = enabled end
+    profile.alerts.muteOrdinary, profile.alerts.cooldown = true, 0
+    if configure then configure(profile) end
+    app:ProfileChanged()
+    state:Unit("player", { guid = "Player-AutomaticSelf" })
+    local function proof(token, targeting)
+        relations[token .. "target"] = targeting == nil
+        state.units[token .. "target"] = targeting and state.units.player or nil
+    end
+    local function add(index, targeting)
+        local token, guid = "nameplate" .. index, "Player-Automatic-" .. index
+        state:Unit(token, { guid = guid, name = "Rival " .. index, class = "ROGUE", hostile = true, isPlayer = true })
+        proof(token, targeting)
+        state:Fire("NAME_PLATE_UNIT_ADDED", token)
+        for _, view in ipairs(app.engine:Snapshot()) do if view.identity == "guid:" .. guid then return view end end
+    end
+    local function target(index, targeting)
+        local token = "nameplate" .. index
+        proof(token, targeting)
+        state:Fire("UNIT_TARGET", token)
+    end
+    return state, app, add, target
+end
+
+H.Test("automatic targeting highlight is off by default and opt-in applies only to new warnings", function()
+    local state, app, add, target = automaticLocatorFixture()
+    local ui, profile = app.ui, app.db:GetProfile()
+    H.True(profile.display.highlightTargeting ~= true)
+    add(1, true)
+    state:Advance(0.5)
+    H.Equal(app.engine.history[1].kind, "targeting")
+    H.False(locatorVisible(ui, "nameplate1"))
+    profile.display.highlightTargeting = true
+    app:ProfileChanged()
+    state:Advance(0.5)
+    H.False(locatorVisible(ui, "nameplate1"))
+
+    target(1, false)
+    target(1, true)
+    state:Advance(0.5)
+    H.Equal(app.engine.history[2].kind, "targeting")
+    H.True(locatorVisible(ui, "nameplate1"))
+    H.True(ui.badges.highlight.automatic)
+    H.False(profile.display.showBadges)
+    state:Advance(3.6)
+    H.False(locatorVisible(ui, "nameplate1"))
+    H.Nil(ui.badges.highlight)
+    H.Equal(app.engine.counters.alerts, 2)
+end)
+
+H.Test("automatic nameplate highlights preserve the first marker and yield to a manual highlight", function()
+    local state, app, add = automaticLocatorFixture(true)
+    local ui = app.ui
+    add(1, true)
+    state:Advance(0.5)
+    H.True(locatorVisible(ui, "nameplate1"))
+    add(2, true)
+    state:Advance(0.5)
+    H.Equal(app.engine.counters.alerts, 2)
+    H.True(locatorVisible(ui, "nameplate1"))
+    H.False(locatorVisible(ui, "nameplate2"))
+
+    ui:Select(assert(add(3, false)))
+    ui.detailsFrame.locate:Click()
+    H.True(locatorVisible(ui, "nameplate3"))
+    H.False(locatorVisible(ui, "nameplate1"))
+    H.True(ui.badges.highlight.automatic ~= true)
+    add(4, true)
+    state:Advance(0.5)
+    H.Equal(app.engine.counters.alerts, 3)
+    H.True(locatorVisible(ui, "nameplate3"))
+    H.False(locatorVisible(ui, "nameplate4"))
+end)
+
+H.Test("automatic highlighting follows a sound-only warning after its pacing delay", function()
+    local state, app, add, target = automaticLocatorFixture(true, function(profile) profile.alerts.banner = false end)
+    local ui = app.ui
+    add(1, true)
+    state:Advance(0.5)
+    H.Equal(#state.sounds, 1)
+    H.True(locatorVisible(ui, "nameplate1"))
+    H.Nil(ui.activeBanner)
+
+    target(1, false)
+    add(2, true)
+    state:Advance(0.5)
+    H.Nil(ui.badges.highlight)
+    H.Equal(#state.sounds, 1)
+    state:Advance(1.2)
+    H.Equal(#state.sounds, 2)
+    H.True(locatorVisible(ui, "nameplate2"))
+    H.Nil(ui.activeBanner)
+end)
+
+H.Test("automatic highlights clear when targeting is unreadable or the user pauses or snoozes", function()
+    local state, app, add, target = automaticLocatorFixture(true)
+    local ui = app.ui
+    local view = assert(add(1, true))
+    state:Advance(0.5)
+    H.True(locatorVisible(ui, "nameplate1"))
+    assert(app:Snooze(view, 10))
+    state:Advance(0.3)
+    H.False(locatorVisible(ui, "nameplate1"))
+    assert(app:Snooze(view, 10))
+    local function retrigger()
+        target(1, false)
+        target(1, true)
+        state:Advance(0.5)
+        H.True(locatorVisible(ui, "nameplate1"))
+    end
+    retrigger()
+    state.api.SlashCmdList.RIVALGUARD("pause 1")
+    state:Advance(0.3)
+    H.False(locatorVisible(ui, "nameplate1"))
+    state.api.SlashCmdList.RIVALGUARD("resume")
+    retrigger()
+    target(1, nil)
+    state:Advance(0.3)
+    H.False(locatorVisible(ui, "nameplate1"))
+    target(1, true)
+    state:Advance(0.3)
+    H.False(locatorVisible(ui, "nameplate1"))
+    retrigger()
+    target(1, false)
+    state:Advance(0.3)
+    H.False(locatorVisible(ui, "nameplate1"))
+    retrigger()
+    state.units.nameplate1 = nil
+    state:Fire("NAME_PLATE_UNIT_REMOVED", "nameplate1")
+    H.False(locatorVisible(ui, "nameplate1"))
+end)
+
+H.Test("automatic highlights require a targeting warning and freshly verified nameplate owner", function()
+    local filteredState, filtered, addFiltered = automaticLocatorFixture(true, function(profile)
+        profile.alerts.classes = { HUNTER = true }
+    end)
+    addFiltered(1, true)
+    filteredState:Advance(0.5)
+    H.Equal(filtered.engine.counters.alerts, 0)
+    H.False(locatorVisible(filtered.ui, "nameplate1"))
+
+    local state, app, add = automaticLocatorFixture(true)
+    add(1, true)
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-AutomaticSupersedes", 1856)
+    state:Advance(0.5)
+    H.Equal(app.engine.history[1].kind, "stealth")
+    H.False(locatorVisible(app.ui, "nameplate1"))
+    add(2, true)
+    state:Unit("nameplate2", { guid = "Player-RecycledAuto", name = "Other", class = "ROGUE", hostile = true, isPlayer = true })
+    app.engine:Tick()
+    H.Equal(app.engine.history[2].kind, "targeting")
+    H.False(locatorVisible(app.ui, "nameplate2"))
+
+    local waveState, wave, addWave = automaticLocatorFixture(true, function(profile)
+        profile.alerts.muteOrdinary = false
+    end)
+    for index = 1, 3 do addWave(index, false) end
+    waveState:Advance(1.25)
+    H.Equal(wave.engine.history[1].kind, "wave")
+    H.Nil(wave.ui.badges.highlight)
+end)
+
 H.Test("stationary nameplate polling reads all opponents without repainting unchanged badges", function()
     local state, _, app = setup()
     local ui = app.ui

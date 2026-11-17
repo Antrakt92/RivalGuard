@@ -29,7 +29,17 @@ for index, class in ipairs(classes) do
     if index == 1 then app:Watch(contact) end
 end
 app.ui:Refresh()
-if view == "settings" then app.ui:OpenSettings(page)
+if view == "settings" then
+    app.ui:OpenSettings(page == "targeting" and "alerts" or page)
+    if page == "targeting" then
+        for _, control in ipairs(app.ui.controls) do
+            if control.path == "display.highlightTargeting" then
+                local _, _, _, _, y = control.frame:GetPoint(1)
+                app.ui.scrollbar:SetValue(-y - 160)
+                break
+            end
+        end
+    end
 elseif view == "guide" then
     app.ui:ShowGuide(true)
     if page == "rules" then app.ui.guideDialog.next:Click() end
@@ -59,20 +69,32 @@ elseif view == "banner" then app.ui:PreviewAlert()
 elseif view == "locator" then
     local token = "nameplate80"
     local name = locale == "ruRU" and "Пример противника" or "Example opponent"
+    if page == "automatic" then
+        app.engine:Clear()
+        local display = app.db:GetProfile().display
+        display.highlightTargeting, display.showBadges = true, false
+        state:Unit("player", { guid = "Player-LocatorLocal" })
+        state:Unit(token .. "target", { guid = "Player-LocatorLocal" })
+    end
     state:Unit(token, { guid = "Player-LocatorPreview", name = name, class = "ROGUE", hostile = true, isPlayer = true })
     local plate = state.plates[token]
-    plate:SetSize(155, 18); plate:SetPoint("CENTER", state.api.UIParent, "CENTER", 0, 60)
+    plate:SetSize(155, 18); plate:SetPoint("CENTER", state.api.UIParent, "CENTER", 0, page == "automatic" and -40 or 60)
     local bar = plate:CreateTexture(nil, "BACKGROUND")
     bar:SetAllPoints(); bar:SetColorTexture(0.66, 0.14, 0.18, 1)
     local plateName = plate:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     plateName:SetPoint("CENTER"); plateName:SetText(name)
     state:Fire("NAME_PLATE_UNIT_ADDED", token)
-    local id = assert(app.sensors.active[token].contactID)
-    for _, contact in ipairs(app.engine:Snapshot()) do
-        if contact.id == id then app.ui:Select(contact); break end
+    if page == "automatic" then
+        state:Advance(0.45)
+        assert(app.ui.badges.highlight and app.ui.badges.highlight.automatic, "automatic locator preview did not attach")
+    else
+        local id = assert(app.sensors.active[token].contactID)
+        for _, contact in ipairs(app.engine:Snapshot()) do
+            if contact.id == id then app.ui:Select(contact); break end
+        end
+        app.ui.detailsFrame.locate:Click()
+        assert(app.ui.badges.highlight, "locator preview did not attach")
     end
-    app.ui.detailsFrame.locate:Click()
-    assert(app.ui.badges.highlight, "locator preview did not attach")
 elseif view == "wave" then
     app.ui:Alert({ kind = "wave", count = 38, classes = { ROGUE = 12, HUNTER = 10, MAGE = 8, WARRIOR = 8 }, banner = true })
 elseif view ~= "main" and view ~= "launcher" then error("unknown preview view") end

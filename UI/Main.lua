@@ -686,7 +686,10 @@ function UI.New(app)
     y = check(alerts, "unknownRange", "range.unknown", y)
     for index = firstRangeControl, #self.controls do self.controls[index].requiresRange = true end
     y = section(alerts, "alertOutput", y - 8)
-    for _, entry in ipairs({ { "alertsEnabled", "alerts.enabled" }, { "sound", "alerts.sound" }, { "banner", "alerts.banner" }, { "alertStealth", "alerts.stealth", "alertStealthTip" }, { "alertTargeting", "alerts.targeting", "alertTargetingTip" }, { "watchedOnly", "alerts.watchedOnly", "watchedOnlyTip" }, { "muteOrdinary", "alerts.muteOrdinary", "muteOrdinaryTip" } }) do
+    for _, entry in ipairs({ { "alertsEnabled", "alerts.enabled" }, { "sound", "alerts.sound" }, { "banner", "alerts.banner" },
+        { "alertStealth", "alerts.stealth", "alertStealthTip" }, { "alertTargeting", "alerts.targeting", "alertTargetingTip" },
+        { "highlightTargeting", "display.highlightTargeting", "highlightTargetingTip" },
+        { "watchedOnly", "alerts.watchedOnly", "watchedOnlyTip" }, { "muteOrdinary", "alerts.muteOrdinary", "muteOrdinaryTip" } }) do
         y = check(alerts, entry[1], entry[2], y, entry[3])
     end
     y = slider(alerts, "cooldown", "alerts.cooldown", y - 10, 5, 180, 5, "cooldownTip")
@@ -1231,6 +1234,7 @@ function UI.New(app)
 
     function self:ClearBanners()
         self.bannerQueue = {}
+        if self.badges.highlight and self.badges.highlight.automatic then self.badges:ClearHighlight() end
         if self.activeBanner and self.activeBanner.preview then return end
         self.activeBanner, self.bannerUntil, self.bannerPreview = nil, nil, false
         banner:Hide(); banner:EnableMouse(false)
@@ -1361,7 +1365,7 @@ function UI.New(app)
 
     function self:Select(contact)
         if self.explanationFrame then self.explanationFrame:Hide() end
-        self.badges:ClearHighlight()
+        if self.badges.highlight and not self.badges.highlight.automatic then self.badges:ClearHighlight() end
         self.selected = contact
         self.noteDraft = nil
         self.locateFailed = nil
@@ -1696,7 +1700,7 @@ function UI.New(app)
         local highlight = self.badges.highlight
         local now = (bannersActive or self.previewUntil or highlight) and self:Now()
         if highlight and (now >= highlight.checkAt or now >= highlight.expires) then
-            if now >= highlight.expires or app:HighlightFrame(highlight.id, highlight.unit) ~= highlight.frame then
+            if now >= highlight.expires or app:HighlightFrame(highlight.id, highlight.unit, highlight.automatic) ~= highlight.frame then
                 self.badges:ClearHighlight()
             else
                 highlight.checkAt = now + 0.125

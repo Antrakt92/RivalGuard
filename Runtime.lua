@@ -137,26 +137,41 @@ function App:HasTargetingEvidence(id)
         and contact.isPlayer == true and contact.dead ~= true
 end
 
-function App:HighlightFrame(id, token)
+function App:HighlightFrame(id, token, automatic)
+    local profile = self.db:GetProfile()
     local contact = self.engine.contacts[id]
     local binding = self.engine.bindings[token]
-    if not self.db:GetProfile().enabled or not contact or not contact.guid or not binding or binding.id ~= id
+    if not profile.enabled or not contact or not contact.guid or not binding or binding.id ~= id
         or not contact.tokens[token] then return nil end
     local entry = self.engine:ListEntry(contact)
     if entry and entry.kind == "ignore" then return nil end
-    return self.client:VisibleEnemyPlate(token, contact.guid)
+    if automatic then
+        local pausedUntil = self.engine.pausedUntil
+        if not profile.display.highlightTargeting or not profile.alerts.enabled or not profile.alerts.targeting
+            or not self:HasTargetingEvidence(id) or self.engine:SnoozedUntil(contact)
+            or not RG.Rules.ContextMatches(profile.context, self.engine.context)
+            or (pausedUntil and pausedUntil > self.engine:Now()) then return nil end
+    end
+    local frame = self.client:VisibleEnemyPlate(token, contact.guid)
+    if frame and (not automatic or self.client:UnitMatch(token .. "target", "player") == true) then return frame end
 end
 
-function App:HighlightContact(selection)
-    self.ui.badges:ClearHighlight()
+function App:HighlightContact(selection, automatic)
+    local badges = self.ui.badges
+    local now = self.engine:Now()
+    if automatic then
+        if badges.highlight and now < badges.highlight.expires then return false end
+    else
+        badges:ClearHighlight()
+    end
     if not selection or selection.preview or selection.savedOnly
         or (selection.sources and selection.sources.journal) then return false end
     local contact = self.engine.contacts[selection.id]
     if not contact or not contact.guid or selection.identity ~= "guid:" .. contact.guid then return false end
     for _, token in ipairs(RG.Util.SortedKeys(contact.tokens)) do
         if token:match("^nameplate%d+$") then
-            local frame = self:HighlightFrame(contact.id, token)
-            if frame and self.ui.badges:Highlight(token, frame, contact.id, self.engine:Now()) then return true end
+            local frame = self:HighlightFrame(contact.id, token, automatic)
+            if frame and badges:Highlight(token, frame, contact.id, now, automatic) then return true end
         end
     end
     return false
@@ -188,7 +203,8 @@ function App:UIContactUpdated(token, observation, contact)
     if highlight and highlight.unit == token then
         local owner = self.engine.contacts[highlight.id]
         if not owner or not observation or not observation.guid or observation.guid ~= owner.guid or observation.hostile ~= true
-            or observation.isPlayer ~= true or observation.dead ~= false or observation.behindCamera == true then
+            or observation.isPlayer ~= true or observation.dead ~= false or observation.behindCamera == true
+            or (highlight.automatic and observation.targeting ~= true) then
             self.ui.badges:ClearHighlight()
         end
     end
@@ -329,6 +345,10 @@ function App:Initialize()
             if self.ui then
                 local ok = pcall(self.ui.Alert, self.ui, decision)
                 if not ok then self.diagnostics:Error("ui_alert") end
+                if decision.kind == "targeting" and self.db:GetProfile().display.highlightTargeting then
+                    local highlightOK = pcall(self.HighlightContact, self, decision.contact, true)
+                    if not highlightOK then self.diagnostics:Error("ui_highlight") end
+                end
             end
             return soundAccepted
         end,

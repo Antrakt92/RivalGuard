@@ -114,11 +114,12 @@ function B.New(getProfile)
         if available(highlight.frame) then paint(highlight.badge) else show(highlight.badge, "root", false) end
     end
 
-    function self:Highlight(unit, frame, id, now)
+    function self:Highlight(unit, frame, id, now, automatic)
         local badge = self.active[unit]
         if not badge or badge.parent ~= frame or not badge.contact or badge.contact.id ~= id then return false end
         self:ClearHighlight()
-        self.highlight = { unit = unit, frame = frame, badge = badge, id = id, expires = now + 3, checkAt = now }
+        self.highlight = { unit = unit, frame = frame, badge = badge, id = id, expires = now + 3,
+            checkAt = now, automatic = automatic == true }
         if paint(badge) then return true end
         self.highlight = nil
         return false

@@ -26,12 +26,16 @@ H.Test("profile export preview import are detached and never replace existing pr
     local RG = addon()
     local db = RG.Database.New()
     db:GetProfile().alerts.classes.ROGUE = true
+    H.False(db:GetProfile().display.highlightTargeting)
+    db:GetProfile().display.highlightTargeting = true
     local text = assert(db:ExportProfile())
     local preview = assert(db:PreviewImport(text))
+    H.True(preview.display.highlightTargeting)
     preview.alerts.classes.ROGUE = false
     H.True(db:GetProfile().alerts.classes.ROGUE)
     local imported = assert(db:ImportProfile("Imported", text))
     H.True(imported.alerts.classes.ROGUE)
+    H.True(imported.display.highlightTargeting)
     local again, reason = db:ImportProfile("Imported", text)
     H.Nil(again); H.Equal(reason, "profile_exists")
     H.Equal(db.root.profiles.Imported, imported)
@@ -45,9 +49,11 @@ H.Test("saved variables recovery detaches tables and keeps future schema untouch
     local RG = addon()
     local profile = RG.Defaults.NewProfile()
     profile.alerts.cooldown = 91
+    profile.display.highlightTargeting = nil
     local raw = { schemaVersion = 1, activeProfile = "Saved", profiles = { Saved = profile }, lists = {}, journal = {} }
     local db = RG.Database.New(raw)
     H.Equal(db:GetActiveProfileName(), "Saved")
+    H.False(db:GetProfile().display.highlightTargeting)
     db:GetProfile().alerts.cooldown = 12
     H.Equal(raw.profiles.Saved.alerts.cooldown, 91)
     local future = { schemaVersion = 999, marker = "preserve" }
@@ -89,6 +95,7 @@ H.Test("strict profile imports reject unknown fields malformed rules and unsafe 
     rejected(function(p) p.alerts.channel = "Invalid" end)
     rejected(function(p) p.range.policy = "Invalid" end)
     rejected(function(p) p.display.maxRows = 3.5 end)
+    rejected(function(p) p.display.highlightTargeting = "true" end)
 end)
 
 H.Test("watchlists validate durable identities and notes without partial updates", function()
