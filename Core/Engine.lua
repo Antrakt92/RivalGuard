@@ -1,0 +1,369 @@
+local _, RG = ...
+local U, D, Rules = RG.Util, RG.Defaults, RG.Rules
+local E = RG.Register("Engine", {})
+E.__index = E
+
+local SPELLS = {
+    [1784] = "Stealth", [1785] = "Stealth", [1786] = "Stealth", [1787] = "Stealth", [8822] = "Stealth",
+    [5215] = "Prowl", [6783] = "Prowl", [9913] = "Prowl",
+    [1856] = "Vanish", [1857] = "Vanish", [11327] = "Vanish", [11329] = "Vanish",
+    [20580] = "Shadowmeld", [58984] = "Shadowmeld", [66] = "Invisibility", [3680] = "Invisibility", [11392] = "Invisibility",
+}
+
+local function boolean(value) if type(value) == "boolean" then return value end end
+local function safeObservation(obs)
+    if type(obs) ~= "table" then return nil end
+    local token = U.Text(obs.token, 64)
+    if not token or not token:match("^[%w_]+$") then return nil end
+    local clean = {
+        token = token, source = U.Text(obs.source, 32) or "unit", guid = U.Text(obs.guid, 128),
+        name = U.Text(obs.name, 160), realm = U.Text(obs.realm, 96),
+        class = D.classSet[obs.class] and obs.class or nil,
+        level = U.IsFinite(obs.level) and math.floor(U.Clamp(obs.level, 1, 999, 1)) or nil,
+        hostile = boolean(obs.hostile), isPlayer = boolean(obs.isPlayer),
+        targeting = boolean(obs.targeting), stealth = boolean(obs.stealth),
+        dead = boolean(obs.dead),
+        stealthReadable = obs.stealthReadable == true,
+        behindCamera = boolean(obs.behindCamera),
+    }
+    if U.IsFinite(obs.rangeMin) and obs.rangeMin >= 0 and obs.rangeMin <= 10000 then clean.rangeMin = obs.rangeMin end
+    if U.IsFinite(obs.rangeMax) and obs.rangeMax >= 0 and obs.rangeMax <= 10000 then clean.rangeMax = obs.rangeMax end
+    if clean.rangeMin and clean.rangeMax and clean.rangeMin > clean.rangeMax then clean.rangeMin, clean.rangeMax = nil, nil end
+    return clean
+end
+
+local function nameIdentity(obs)
+    if not obs.name then return nil end
+    local suffix = obs.realm and ("-" .. obs.realm)
+    if suffix and obs.name:sub(-#suffix) ~= suffix then return "name:" .. obs.name .. suffix end
+    return "name:" .. obs.name
+end
+
+function E.New(config)
+    config = config or {}
+    return setmetatable({
+        clock = config.clock or function() return 0 end,
+        epoch = config.epoch or function() return 0 end,
+        profile = config.profile or D.NewProfile(), context = config.context or { kind = "world" },
+        lists = config.lists or {}, onAlert = config.onAlert or function() end,
+        onEncounter = config.onEncounter, onChange = config.onChange,
+        contacts = {}, identities = {}, bindings = {}, tokenSerial = 0,
+        pending = {}, history = {}, cooldowns = {}, serial = 0, sequence = 0,
+        counters = { observations = 0, alerts = 0, suppressed = 0, evicted = 0 },
+        pausedUntil = nil, lastSound = -math.huge, revision = 0,
+    }, E)
+end
+
+function E:Now() return self.clock() end
+
+function E:ListEntry(contact)
+    if contact.identity and self.lists[contact.identity] then return self.lists[contact.identity] end
+    if contact.nameIdentity then return self.lists[contact.nameIdentity] end
+end
+
+function E:View(contact)
+    local entry = self:ListEntry(contact)
+    local sources = {}
+    for token in pairs(contact.tokens) do
+        local binding = self.bindings[token]
+        if binding then sources[binding.source] = true end
+    end
+    return {
+        id = contact.id, identity = contact.identity, name = contact.name, realm = contact.realm,
+        class = contact.class, level = contact.level, hostile = contact.hostile, isPlayer = contact.isPlayer,
+        visible = next(contact.tokens) ~= nil, firstSeen = contact.firstSeen, lastSeen = contact.lastSeen,
+        sources = sources, stealth = contact.stealth, stealthAt = contact.stealthAt,
+        targeting = contact.targeting, rangeMin = contact.rangeMin, rangeMax = contact.rangeMax,
+        watched = entry and (entry.kind == "watch" or entry.kind == "avoid") or false,
+        listKind = entry and entry.kind, note = entry and entry.note,
+        behindCamera = contact.behindCamera,
+        dead = contact.dead,
+    }
+end
+
+function E:Changed()
+    self.revision = self.revision + 1
+    if self.onChange then self.onChange() end
+end
+
+function E:Explain(contact, event)
+    local view = contact.tokens and self:View(contact) or contact
+    return Rules.Evaluate(self.profile, view, event or "sighting", self.context, self:ListEntry(contact))
+end
+
+function E:Queue(contact, event)
+    local now = self:Now()
+    local decision, reason = self:Explain(contact, event)
+    contact.lastReason = reason or (decision and decision.reason)
+    if not decision then self.counters.suppressed = self.counters.suppressed + 1 return false end
+    if self.pausedUntil and now < self.pausedUntil then return false end
+    local key = contact.id .. ":" .. (decision.dedupKey or decision.kind)
+    local cooldown = self.cooldowns[key]
+    if cooldown and now - cooldown < decision.cooldown then contact.lastReason = "cooldown" return false end
+    for _, item in ipairs(self.pending) do
+        if item.id == contact.id and (item.decision.dedupKey or item.decision.kind) == (decision.dedupKey or decision.kind) then return false end
+        if item.id == contact.id and now - item.at <= self.profile.alerts.waveWindow and item.decision.priority >= decision.priority then return false end
+    end
+    for index = #self.pending, 1, -1 do
+        local item = self.pending[index]
+        if item.id == contact.id and now - item.at <= self.profile.alerts.waveWindow and item.decision.priority < decision.priority then table.remove(self.pending, index) end
+    end
+    self.sequence = self.sequence + 1
+    self.pending[#self.pending + 1] = { id = contact.id, event = event, decision = decision, at = now, sequence = self.sequence, revision = self.revision }
+    if #self.pending > self.profile.retention.maxContacts then table.remove(self.pending, 1) end
+    return true
+end
+
+function E:Drop(id)
+    local contact = self.contacts[id]
+    if not contact then return end
+    for token in pairs(contact.tokens) do self.bindings[token] = nil end
+    for identity, owner in pairs(self.identities) do if owner == id then self.identities[identity] = nil end end
+    self.contacts[id] = nil
+    for index = #self.pending, 1, -1 do if self.pending[index].id == id then table.remove(self.pending, index) end end
+    for key in pairs(self.cooldowns) do if key:sub(1, #id + 1) == id .. ":" then self.cooldowns[key] = nil end end
+end
+
+function E:MakeRoom()
+    if U.Count(self.contacts) < self.profile.retention.maxContacts then return end
+    local candidate
+    for _, contact in pairs(self.contacts) do
+        if not candidate or (next(candidate.tokens) ~= nil and next(contact.tokens) == nil)
+            or ((next(candidate.tokens) ~= nil) == (next(contact.tokens) ~= nil) and contact.lastSeen < candidate.lastSeen) then candidate = contact end
+    end
+    if candidate then self:Drop(candidate.id) self.counters.evicted = self.counters.evicted + 1 end
+end
+
+function E:Merge(target, other)
+    if target.id == other.id then return target end
+    for token in pairs(other.tokens) do
+        target.tokens[token] = true
+        if self.bindings[token] then self.bindings[token].id = target.id end
+    end
+    target.firstSeen = math.min(target.firstSeen, other.firstSeen)
+    target.lastSeen = math.max(target.lastSeen, other.lastSeen)
+    target.arrivalNotified = target.arrivalNotified or other.arrivalNotified
+    target.arrivalQueued = target.arrivalQueued or other.arrivalQueued
+    target.encounterRecorded = target.encounterRecorded or other.encounterRecorded
+    target.notifiedClass = target.notifiedClass or other.notifiedClass
+    for _, field in ipairs({ "class", "level", "name", "realm", "guid", "identity", "nameIdentity", "rangeMin", "rangeMax", "targeting", "hostile", "isPlayer" }) do
+        if target[field] == nil then target[field] = other[field] end
+    end
+    if other.stealth and not target.stealth then target.stealth, target.stealthAt = other.stealth, other.stealthAt end
+    for identity, owner in pairs(self.identities) do if owner == other.id then self.identities[identity] = target.id end end
+    for _, item in ipairs(self.pending) do if item.id == other.id then item.id = target.id end end
+    for kind in pairs({ sighting = true, returning = true, watch = true, targeting = true, stealth = true, identified = true }) do
+        local old = self.cooldowns[other.id .. ":" .. kind]
+        if old then self.cooldowns[target.id .. ":" .. kind] = math.max(old, self.cooldowns[target.id .. ":" .. kind] or -math.huge) end
+        self.cooldowns[other.id .. ":" .. kind] = nil
+    end
+    self.contacts[other.id] = nil
+    return target
+end
+
+function E:Observe(raw)
+    local obs = safeObservation(raw)
+    if not obs then return nil, "invalid_observation" end
+    if obs.isPlayer == false or obs.hostile == false then self:Remove(obs.token) return nil, "not_enemy_player" end
+    local now = self:Now()
+    self.counters.observations = self.counters.observations + 1
+    local identity = obs.guid and ("guid:" .. obs.guid) or nameIdentity(obs)
+    local named = nameIdentity(obs)
+    local binding = self.bindings[obs.token]
+    local contact = binding and self.contacts[binding.id]
+    -- A token can be recycled. A new clean GUID never inherits its old owner.
+    if contact and obs.guid and contact.guid and contact.guid ~= obs.guid then
+        self:Remove(obs.token)
+        contact, binding = nil, nil
+    elseif contact and not obs.guid and named and contact.nameIdentity and contact.nameIdentity ~= named then
+        self:Remove(obs.token)
+        contact, binding = nil, nil
+    end
+    local known = identity and self.identities[identity]
+    if not known and named then
+        local nameOwner = self.identities[named]
+        local namedContact = nameOwner and self.contacts[nameOwner]
+        if namedContact and (not obs.guid or not namedContact.guid or namedContact.guid == obs.guid) then known = nameOwner end
+    end
+    if known and self.contacts[known] then
+        if contact and contact.id ~= known then contact = self:Merge(self.contacts[known], contact)
+        else contact = self.contacts[known] end
+    end
+    if not contact then
+        self:MakeRoom()
+        self.serial = self.serial + 1
+        contact = { id = "c" .. self.serial, tokens = {}, firstSeen = now, lastSeen = now }
+        self.contacts[contact.id] = contact
+    end
+    local wasVisible = next(contact.tokens) ~= nil
+    local away = now - contact.lastSeen
+    if not binding or binding.id ~= contact.id then
+        self.tokenSerial = self.tokenSerial + 1
+        self.bindings[obs.token] = { id = contact.id, generation = self.tokenSerial, source = obs.source }
+    end
+    contact.tokens[obs.token] = true
+    contact.lastSeen = now
+    if obs.guid then contact.guid, contact.identity = obs.guid, "guid:" .. obs.guid end
+    if obs.name then contact.name, contact.realm, contact.nameIdentity = obs.name, obs.realm, named end
+    if not contact.identity then contact.identity = identity end
+    if contact.identity then self.identities[contact.identity] = contact.id end
+    if named then self.identities[named] = contact.id end
+    local oldClass = contact.class
+    if obs.class then contact.class = obs.class end
+    if obs.level then contact.level = obs.level end
+    -- Fresh unknowns do not become a negative answer or erase established identity.
+    contact.hostile, contact.isPlayer = obs.hostile, obs.isPlayer
+    contact.rangeMin, contact.rangeMax = obs.rangeMin, obs.rangeMax
+    contact.behindCamera = obs.behindCamera
+    local wasTargeting = contact.targeting
+    if obs.targeting ~= nil then contact.targeting = obs.targeting end
+    local oldStealth = contact.stealth
+    if obs.stealthReadable then
+        if obs.stealth == true then contact.stealth, contact.stealthAt = "confirmed", contact.stealthAt or now
+        elseif obs.stealth == false then contact.stealth, contact.stealthAt = nil, nil end
+    end
+    contact.dead = obs.dead
+    if not contact.encounterRecorded and self.onEncounter and contact.identity and contact.name and contact.hostile == true and contact.isPlayer == true then
+        contact.encounterRecorded = true
+        self.onEncounter(self:View(contact), self.epoch())
+    end
+    if not contact.arrivalNotified and not contact.arrivalQueued then
+        contact.arrivalQueued = self:Queue(contact, "sighting")
+    elseif not wasVisible and away >= self.profile.alerts.returnAfter then
+        self:Queue(contact, "returning")
+        if self.onEncounter then self.onEncounter(self:View(contact), self.epoch()) end
+    end
+    if not oldClass and contact.class and contact.arrivalNotified and not contact.notifiedClass then self:Queue(contact, "identified") end
+    if contact.stealth and not oldStealth then self:Queue(contact, "stealth") end
+    if contact.targeting and wasTargeting ~= true then self:Queue(contact, "targeting") end
+    self:Changed()
+    return self:View(contact)
+end
+
+function E:Remove(token)
+    local binding = self.bindings[token]
+    if not binding then return end
+    local contact = self.contacts[binding.id]
+    self.bindings[token] = nil
+    if contact then
+        contact.tokens[token] = nil
+        if next(contact.tokens) == nil then contact.lastSeen = self:Now() contact.targeting = nil end
+    end
+    self:Changed()
+end
+
+function E:Cast(token, spellID)
+    if not U.IsFinite(spellID) or not SPELLS[spellID] then return false end
+    local binding = self.bindings[token]
+    local contact = binding and self.contacts[binding.id]
+    if not contact then return false end
+    local now = self:Now()
+    if contact.lastStealthCast and now - contact.lastStealthCast < 1 then return false end
+    contact.lastStealthCast, contact.stealth, contact.stealthAt = now, "confirmed", now
+    self:Queue(contact, "stealth")
+    self:Changed()
+    return true
+end
+
+function E:Emit(decision, now)
+    if decision.sound then
+        if now - self.lastSound < self.profile.alerts.soundGap then decision.sound = false
+        else self.lastSound = now end
+    end
+    if not decision.sound and not decision.banner then return end
+    self.counters.alerts = self.counters.alerts + 1
+    U.ArrayPush(self.history, { at = now, kind = decision.kind, id = decision.contact and decision.contact.id, reason = decision.reason }, self.profile.retention.maxHistory)
+    self.onAlert(decision)
+end
+
+function E:Tick()
+    local now = self:Now()
+    if self.pausedUntil and now >= self.pausedUntil then self.pausedUntil = nil end
+    local ready, waiting = {}, {}
+    for _, item in ipairs(self.pending) do
+        if item.decision.priority >= 70 or now - item.at >= self.profile.alerts.waveWindow then ready[#ready + 1] = item
+        else waiting[#waiting + 1] = item end
+    end
+    self.pending = waiting
+    table.sort(ready, function(a, b)
+        if a.decision.priority == b.decision.priority then return a.sequence < b.sequence end
+        return a.decision.priority > b.decision.priority
+    end)
+    local ordinary, accepted = {}, {}
+    for _, item in ipairs(ready) do
+        local contact = self.contacts[item.id]
+        local decision = contact and self:Explain(contact, item.event)
+        if decision and not (self.pausedUntil and now < self.pausedUntil) then
+            local key = contact.id .. ":" .. (decision.dedupKey or decision.kind)
+            if not accepted[key] and (not self.cooldowns[key] or now - self.cooldowns[key] >= decision.cooldown) then
+                accepted[key] = true
+                self.cooldowns[key] = now
+                decision.contact = self:View(contact)
+                contact.arrivalNotified, contact.arrivalQueued = true, false
+                if contact.class then contact.notifiedClass = contact.class end
+                if decision.kind == "sighting" or decision.kind == "returning" then ordinary[#ordinary + 1] = decision
+                else self:Emit(decision, now) end
+            end
+        elseif contact and item.event == "sighting" then
+            contact.arrivalQueued = false
+        end
+    end
+    if #ordinary >= self.profile.alerts.waveThreshold then
+        local classes, sound, banner = {}, false, false
+        for _, decision in ipairs(ordinary) do
+            local class = decision.contact.class or "UNKNOWN"
+            classes[class] = (classes[class] or 0) + 1
+            sound, banner = sound or decision.sound, banner or decision.banner
+        end
+        self:Emit({ kind = "wave", count = #ordinary, classes = classes, priority = 35, sound = sound, banner = banner, reason = "multiple_sightings" }, now)
+    else
+        for _, decision in ipairs(ordinary) do self:Emit(decision, now) end
+    end
+    local expired = {}
+    for id, contact in pairs(self.contacts) do
+        if next(contact.tokens) == nil and now - contact.lastSeen > self.profile.retention.contactSeconds then expired[#expired + 1] = id end
+    end
+    for _, id in ipairs(expired) do self:Drop(id) end
+    for key, at in pairs(self.cooldowns) do if now - at > 1800 then self.cooldowns[key] = nil end end
+    if #expired > 0 then self:Changed() end
+end
+
+function E:Snapshot()
+    local result = {}
+    for _, contact in pairs(self.contacts) do
+        local view = self:View(contact)
+        if Rules.Display(self.profile, view) then result[#result + 1] = view end
+    end
+    table.sort(result, function(a, b)
+        if a.watched ~= b.watched then return a.watched end
+        if a.visible ~= b.visible then return a.visible end
+        if a.lastSeen ~= b.lastSeen then return a.lastSeen > b.lastSeen end
+        return a.id < b.id
+    end)
+    return result
+end
+
+function E:SetProfile(profile)
+    self.profile = profile
+    self.pending = {}
+    for _, contact in pairs(self.contacts) do contact.arrivalQueued = false end
+    self:Changed()
+end
+
+function E:SetContext(context)
+    self.context = context or { kind = "world" }
+    self:Changed()
+end
+
+function E:Pause(seconds)
+    self.pausedUntil = self:Now() + U.Clamp(seconds, 1, 86400, 600)
+    self.pending = {}
+    self:Changed()
+end
+
+function E:Resume() self.pausedUntil = nil self:Changed() end
+
+function E:Clear()
+    self.contacts, self.identities, self.bindings, self.pending, self.cooldowns = {}, {}, {}, {}, {}
+    self:Changed()
+end

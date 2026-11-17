@@ -1,0 +1,13 @@
+dist/
+artifacts/
+__pycache__/
+*.pyc
+.tools/
+.agent-context/
+AGENTS.md
+AGENTS.override.md
+CLAUDE.md
+AUDIT.md
+PLAN.md
+NOTES.md
+.env*

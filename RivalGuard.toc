@@ -1,0 +1,26 @@
+## Interface: 120105, 16001
+## Title: RivalGuard
+## Notes: Enemy awareness, configurable alerts and personal watch lists.
+## Notes-ruRU: Наблюдение за противниками, настраиваемые предупреждения и личные списки.
+## Author: Antrakt92
+## Version: 0.1.0-dev
+## Category: PvP
+## IconTexture: Interface\AddOns\RivalGuard\Media\Icon
+## SavedVariables: RivalGuardDB
+
+Core/Bootstrap.lua
+Core/Util.lua
+Core/Defaults.lua
+Core/Codec.lua
+Core/Database.lua
+Core/Rules.lua
+Core/Engine.lua
+Core/Diagnostics.lua
+Core/Audio.lua
+Adapters/Client.lua
+Adapters/Sensors.lua
+Locale/Strings.lua
+UI/Model.lua
+UI/Badges.lua
+UI/Main.lua
+Runtime.lua

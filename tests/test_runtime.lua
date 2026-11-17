@@ -1,0 +1,113 @@
+local H = RGTest
+local W = assert(loadfile(H.root .. "/tests/support/wow.lua"))()
+
+local function setup(raw)
+    local state = W.New()
+    state.api.RivalGuardDB = raw
+    local RG = state:LoadTOC()
+    state:Fire("ADDON_LOADED", "RivalGuard")
+    H.True(RG.instance.initialized == true, "addon did not initialize from actual TOC")
+    return state, RG, RG.instance
+end
+
+H.Test("manifest load and addon event initialize once with slash commands", function()
+    local state, _, app = setup()
+    H.Equal(state.api.RivalGuardDB, app.db.root)
+    H.Equal(type(state.api.SlashCmdList.RIVALGUARD), "function")
+    H.Equal(state.api.SLASH_RIVALGUARD2, "/rg")
+    local count = #state.frames
+    state:Fire("ADDON_LOADED", "RivalGuard")
+    H.Equal(#state.frames, count)
+    H.Nil(app.diagnostics.counts.errors)
+end)
+
+H.Test("integrated sensors engine and UI deliver one alert with configured sound channel", function()
+    local state, _, app = setup()
+    app.db:GetProfile().alerts.channel = "Dialog"
+    state:Unit("nameplate1", { guid = "Player-fixture-A", name = "PrivateEnemy", class = "ROGUE", hostile = true, isPlayer = true })
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    state:Advance(1.5)
+    H.Equal(#app.engine:Snapshot(), 1)
+    H.True(app.ui.rows[1]:IsShown())
+    H.Equal(app.ui.rows[1].nameText:GetText(), "PrivateEnemy")
+    H.Equal(#state.sounds, 1)
+    H.Equal(state.sounds[1].channel, "Dialog")
+    H.Equal(#app.db:GetJournal(), 1)
+    H.Nil(app.diagnostics.counts.errors)
+end)
+
+H.Test("slash pause resume mute and settings operate without hidden side effects", function()
+    local state, _, app = setup()
+    local slash = state.api.SlashCmdList.RIVALGUARD
+    slash("pause 2"); H.Equal(app.engine.pausedUntil, state.clock.Now() + 120)
+    slash("resume"); H.Nil(app.engine.pausedUntil)
+    slash("mute"); H.False(app.db:GetProfile().alerts.sound)
+    slash("settings"); H.True(app.ui.settings:IsShown())
+    slash("help"); H.True(#state.messages > 0)
+    H.Equal(#state.sounds, 0)
+    H.Equal(#app.engine:Snapshot(), 0)
+end)
+
+H.Test("demo uses UI-only fixtures and leaves saved history and lists untouched", function()
+    local state, RG, app = setup()
+    local before = assert(RG.Codec.Encode(app.db.root))
+    state.api.SlashCmdList.RIVALGUARD("demo")
+    H.Equal(#app.engine:Snapshot(), 0)
+    H.Equal(#app.db:GetJournal(), 0)
+    H.Equal(next(app.db:GetList()), nil)
+    H.Equal(assert(RG.Codec.Encode(app.db.root)), before)
+    H.True(app.ui.banner:IsShown())
+    state:Advance(20)
+    H.Equal(#app.engine:Snapshot(), 0)
+    H.Equal(#state.sounds, 0)
+end)
+
+H.Test("future saved schema survives initialization settings actions and logout", function()
+    local raw = { schemaVersion = 999, activeProfile = "Future", important = { keep = "untouched" } }
+    local state, _, app = setup(raw)
+    H.False(app.db.writable)
+    H.Equal(state.api.RivalGuardDB, raw)
+    app:ToggleMute()
+    state:Fire("PLAYER_LOGOUT")
+    H.Equal(state.api.RivalGuardDB, raw)
+    H.Equal(raw.important.keep, "untouched")
+    H.Nil(raw.profiles)
+end)
+
+H.Test("runtime diagnostics report redacts observed identities and error details", function()
+    local state, _, app = setup()
+    state:Unit("nameplate1", { guid = "Player-PrivateGUID", name = "PrivateEnemy", class = "ROGUE", hostile = true, isPlayer = true })
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    state:Advance(1)
+    app:SetNote(app.engine:Snapshot()[1], "PrivateNote")
+    app.ui.Refresh = function() error("PrivateEnemy PrivateGUID PrivateNote") end
+    app.dirty = true; app:Update(1)
+    local report = app:ExportDiagnostics()
+    H.Nil(report:find("PrivateEnemy", 1, true)); H.Nil(report:find("PrivateGUID", 1, true)); H.Nil(report:find("PrivateNote", 1, true))
+    H.True(report:find("ui_refresh", 1, true) ~= nil)
+end)
+
+H.Test("target watch and ignore commands toggle only explicit selected identity", function()
+    local state, _, app = setup()
+    state:Unit("target", { guid = "Player-Target", name = "Enemy", class = "HUNTER", hostile = true, isPlayer = true })
+    state.api.SlashCmdList.RIVALGUARD("watch")
+    H.Equal(app.db:GetList()["guid:Player-Target"].kind, "watch")
+    state.api.SlashCmdList.RIVALGUARD("watch")
+    H.Nil(app.db:GetList()["guid:Player-Target"])
+    state.api.SlashCmdList.RIVALGUARD("ignore")
+    H.Equal(app.db:GetList()["guid:Player-Target"].kind, "ignore")
+    H.Equal(#app.engine:Snapshot(), 0)
+end)
+
+H.Test("simulated combat UI refresh never mutates protected action attributes", function()
+    local state, _, app = setup()
+    state.combat = true
+    state:Fire("PLAYER_REGEN_DISABLED")
+    app.ui:OpenSettings("appearance")
+    app:Demo()
+    state:Advance(1)
+    H.Equal(#state.blocked, 0)
+    for _, mutation in ipairs(state.mutations) do H.True(mutation.action ~= "SetAttribute") end
+    state.combat = false
+    state:Fire("PLAYER_REGEN_ENABLED")
+end)
