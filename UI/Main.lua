@@ -241,10 +241,16 @@ function UI.New(app)
         self:SettingsChanged()
     end
 
+    local function listEntry(contact)
+        if app.ResolveList then return app:ResolveList(contact) end
+        local identity = M.EditableIdentity(contact)
+        if identity then return app.db:GetList()[identity], identity end
+    end
+
     local function setList(contact, kind, note)
+        if app.SetList then return app:SetList(contact, kind, note) end
         local identity = M.EditableIdentity(contact)
         if not identity then return nil end
-        if app.SetList then return app:SetList(contact, kind, note) end
         local ok = app.db.SetList and app.db:SetList(identity, kind, note, contact)
         if ok then app:ProfileChanged() end
         return ok
@@ -1209,15 +1215,22 @@ function UI.New(app)
             detail.info:SetPoint("TOPLEFT", 18, -57); detail.info:SetWidth(432)
             detail.notice = label(detail, "noTarget", 11, C.muted)
             detail.notice:SetPoint("TOPLEFT", 18, -155); detail.notice:SetWidth(432)
+            local function selectedList()
+                local contact = self.selected
+                local entry, identity = listEntry(contact)
+                if identity ~= detail.listIdentity then
+                    self:ShowDetails(true)
+                    return nil
+                end
+                if identity then return contact, entry, identity end
+            end
             local actions = { "watch", "avoid", "ignore" }
             detail.listActions = {}
             for i, action in ipairs(actions) do
                 local kind = action
                 local b = localButton(detail, action, 130, function()
-                    local contact = self.selected
+                    local contact, entry = selectedList()
                     if not contact then return end
-                    if not M.EditableIdentity(contact) then notify("identityUnknown") return end
-                    local entry = app.db:GetList()[contact.identity]
                     local ok = setList(contact, kind, entry and entry.note)
                     if not ok then notify("saveFailed") return end
                     self:SettingsChanged(); self:ShowDetails(true)
@@ -1226,9 +1239,8 @@ function UI.New(app)
                 detail.listActions[kind] = b
             end
             local remove = localButton(detail, "removeList", 150, function()
-                local contact = self.selected
-                if not M.EditableIdentity(contact) then notify("identityUnknown") return end
-                local entry = app.db:GetList()[contact.identity]
+                local contact, entry = selectedList()
+                if not contact then return end
                 if not entry then return end
                 local ok = setList(contact, entry.note and "note" or nil, entry.note)
                 if not ok then notify("saveFailed") return end
@@ -1245,7 +1257,7 @@ function UI.New(app)
             detail.note:SetAutoFocus(false); detail.note:SetMaxLetters(512)
             if detail.note.SetMaxBytes then detail.note:SetMaxBytes(512) end
             detail.note:SetScript("OnTextChanged", function(box, userInput)
-                local identity = M.EditableIdentity(self.selected)
+                local identity = detail.listIdentity
                 if userInput and identity and not self:Profile().display.streamer then
                     self.noteDraft = { identity = identity, text = box:GetText() }
                 end
@@ -1255,8 +1267,8 @@ function UI.New(app)
             end)
             detail:SetScript("OnHide", function() self.noteDraft = nil; detail.note:ClearFocus() end)
             local save = localButton(detail, "saveNote", 160, function()
-                local contact = self.selected
-                if not M.EditableIdentity(contact) or self:Profile().display.streamer then return end
+                local contact = selectedList()
+                if not contact or self:Profile().display.streamer then return end
                 if not app.SetNote then notify("noListAPI") return end
                 local ok = app:SetNote(contact, detail.note:GetText())
                 detail.note:ClearFocus()
@@ -1287,10 +1299,10 @@ function UI.New(app)
             help:SetPoint("TOPLEFT", 18, -445); help:SetWidth(432)
             detail.identityHelp = help
             detail.removeSaved = localButton(detail, "deleteRecord", 220, function()
-                local contact = self.selected
-                if not M.EditableIdentity(contact) or not contact.savedOnly then return end
-                if self.removeEntryIdentity ~= contact.identity or (self.removeEntryAt or 0) < self:Now() then
-                    self.removeEntryIdentity, self.removeEntryAt = contact.identity, self:Now() + 6
+                local contact, _, identity = selectedList()
+                if not contact or not contact.savedOnly then return end
+                if self.removeEntryIdentity ~= identity or (self.removeEntryAt or 0) < self:Now() then
+                    self.removeEntryIdentity, self.removeEntryAt = identity, self:Now() + 6
                     detail.removeSaved.label:SetText(self:T("deleteRecordNow"))
                     return
                 end
@@ -1305,13 +1317,17 @@ function UI.New(app)
         local detail, contact = self.detailsFrame, self.selected
         if not contact then detail:Hide() return end
         local profile = self:Profile()
-        local identity = M.EditableIdentity(contact)
+        local entry, identity = listEntry(contact)
+        if detail.listIdentity ~= identity then
+            detail.listIdentity = identity
+            self.noteDraft = nil
+            detail.note:ClearFocus()
+        end
         local name = M.Text(contact.name, self:T(contact.savedOnly and "nameUnavailable" or "unknownPlayer"))
         if profile.display.streamer then name = self:T("unknownPlayer") end
         detail.title:SetText(name)
         local class = M.Text(contact.class, "")
         local lines = { RG.Defaults.classSet[class] and RG.Locale.Class(class, self:Profile().locale) or self:T("unknownClass") }
-        local entry = contact.identity and app.db:GetList()[contact.identity]
         local state = contact
         if self.selectedOutside and contact.visible then
             state = { visible = false, lastSeen = contact.lastSeen }
@@ -1349,7 +1365,7 @@ function UI.New(app)
         end
         detail.removeMembership:SetEnabled(identity ~= nil and entry ~= nil and entry.kind ~= "note")
         detail.removeSaved:SetShown(contact.savedOnly == true and identity ~= nil and entry ~= nil)
-        local confirming = self.removeEntryIdentity == contact.identity and (self.removeEntryAt or 0) >= self:Now()
+        local confirming = self.removeEntryIdentity == identity and (self.removeEntryAt or 0) >= self:Now()
         detail.removeSaved.label:SetText(self:T(confirming and "deleteRecordNow" or "deleteRecord"))
         local canSnooze = self:CanSnooze(contact)
         local remaining = math.max(0, M.Number(contact.snoozedUntil, 0) - self:Now())

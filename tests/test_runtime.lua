@@ -486,6 +486,88 @@ H.Test("watch ignore and note actions preserve notes through repeated toggles", 
     H.Nil(app.db:GetList()[contact.identity].note)
 end)
 
+H.Test("a promoted GUID keeps editing the same existing name-based watch record", function()
+    local identity = "name:Enemy-FixtureRealm"
+    local state, _, app = setup({ schemaVersion = 1, onboardingSeen = true, lists = {
+        [identity] = { kind = "watch", name = "Enemy-FixtureRealm", note = "Original note", class = "ROGUE" },
+    } })
+    local unit = { name = "Enemy", realm = "FixtureRealm", class = "ROGUE", hostile = true, isPlayer = true }
+    state:Unit("nameplate1", unit)
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    local before = app.engine:Snapshot()[1]
+    app.ui:Select(before)
+    local detail = app.ui.detailsFrame
+    H.Equal(detail.note:GetText(), "Original note")
+
+    unit.guid = "Player-Promoted"
+    state:Fire("UNIT_NAME_UPDATE", "nameplate1")
+    state:Advance(0.5)
+    local promoted = app.engine:Snapshot()[1]
+    H.Equal(promoted.id, before.id)
+    H.Equal(promoted.identity, "guid:Player-Promoted")
+    H.Equal(detail.note:GetText(), "Original note")
+    detail.note:SetText("Revised note")
+    detail.saveNote:Click()
+    H.Nil(app.db:GetList()[promoted.identity])
+    H.Equal(app.db:GetList()[identity].note, "Revised note")
+    H.Equal(app.engine:Snapshot()[1].listKind, "watch")
+
+    detail.removeMembership:Click()
+    H.Equal(app.db:GetList()[identity].kind, "note")
+    H.Equal(app.db:GetList()[identity].note, "Revised note")
+    assert(app:Watch(promoted))
+    H.Equal(app.db:GetList()[identity].kind, "watch")
+    assert(app:Ignore(promoted))
+    H.Equal(app.db:GetList()[identity].kind, "ignore")
+    H.Equal(app.db:GetList()[identity].note, "Revised note")
+end)
+
+H.Test("a collision invalidates a draft for a name alias without hiding explicit GUID records", function()
+    local identity = "name:Same-FixtureRealm"
+    local state, _, app = setup({ schemaVersion = 1, onboardingSeen = true, lists = {
+        [identity] = { kind = "watch", name = "Same-FixtureRealm", note = "Legacy private note", class = "ROGUE" },
+    } })
+    local first = { guid = "Player-First", name = "Same", realm = "FixtureRealm", class = "ROGUE", hostile = true, isPlayer = true }
+    state:Unit("nameplate1", first)
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    local selected = app.engine:Snapshot()[1]
+    app.ui:Select(selected)
+    local detail = app.ui.detailsFrame
+    H.Equal(detail.note:GetText(), "Legacy private note")
+    detail.note:SetFocus()
+    detail.note:SetText("Unsaved alias draft")
+
+    state:Unit("nameplate2", { guid = "Player-Second", name = first.name, realm = first.realm, class = first.class, hostile = true, isPlayer = true })
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+    detail.saveNote:Click()
+    H.Equal(app.db:GetList()[identity].note, "Legacy private note")
+    H.Nil(app.db:GetList()[selected.identity])
+    H.Equal(detail.note:GetText(), "")
+    H.False(detail.note:HasFocus())
+    detail.note:SetText("First GUID only")
+    detail.saveNote:Click()
+    H.Equal(app.db:GetList()[selected.identity].note, "First GUID only")
+    H.Nil(app.db:GetList()["guid:Player-Second"])
+    local mismatched = { id = selected.id, identity = "guid:Player-Second", name = first.name }
+    H.Nil(app:SetNote(mismatched, "Wrong player"))
+    H.Nil(app.db:GetList()[mismatched.identity])
+    app.engine:Clear()
+    H.Nil(app:SetNote(selected, "Stale observation"))
+    H.Equal(app.db:GetList()[selected.identity].note, "First GUID only")
+
+    app.ui:OpenSettings("journal")
+    app.ui.journalPersonal:Click()
+    for _, row in ipairs(app.ui.journalRows) do
+        if row.contact and row.contact.identity == identity then row:Click(); break end
+    end
+    H.True(app.ui.selected.savedOnly)
+    H.Equal(detail.note:GetText(), "Legacy private note")
+    detail.note:SetText("Edited explicitly")
+    detail.saveNote:Click()
+    H.Equal(app.db:GetList()[identity].note, "Edited explicitly")
+    H.Equal(app.db:GetList()[selected.identity].note, "First GUID only")
+end)
+
 H.Test("threat journal records a confirmed threat that develops after the first sighting exactly once", function()
     local state, _, app = setup()
     app.db:GetProfile().retention.journalMode = "threats"

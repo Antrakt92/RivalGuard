@@ -123,37 +123,41 @@ function App:OnWorldChanged()
     if self.ui and self.ui.ClearBanners then self.ui:ClearBanners() end
 end
 
-function App:Watch(contact)
-    if not contact or not contact.identity then return nil, "unknown_identity" end
-    local entry = self.db:GetList()[contact.identity]
-    local kind = "watch"
-    if entry and entry.kind == "watch" then kind = entry.note and "note" or nil end
-    local ok, err = self.db:SetList(contact.identity, kind, entry and entry.note, contact)
-    if ok then self:ProfileChanged() end
-    return ok, err
+function App:ResolveList(contact)
+    local identity = RG.UIModel.EditableIdentity(contact)
+    if not identity then return nil end
+    if contact.savedOnly or (contact.sources and contact.sources.journal) or not contact.id then
+        return self.db:GetList()[identity], identity
+    end
+    local current = self.engine.contacts[contact.id]
+    if not current or not current.identity then return nil end
+    if current.identity ~= identity and (current.ambiguousIdentity or current.nameIdentity ~= identity) then return nil end
+    local entry, key = self.engine:ListEntry(current)
+    return entry, key or current.identity
 end
 
-function App:Ignore(contact)
-    if not contact or not contact.identity then return nil, "unknown_identity" end
-    local entry = self.db:GetList()[contact.identity]
-    local kind = "ignore"
-    if entry and entry.kind == "ignore" then kind = entry.note and "note" or nil end
+function App:ToggleList(contact, kind)
+    local entry, identity = self:ResolveList(contact)
+    if not identity then return nil, "unknown_identity" end
+    if entry and entry.kind == kind then kind = entry.note and "note" or nil end
     return self:SetList(contact, kind)
 end
 
+function App:Watch(contact) return self:ToggleList(contact, "watch") end
+function App:Ignore(contact) return self:ToggleList(contact, "ignore") end
+
 function App:SetNote(contact, note)
-    if not contact or not contact.identity then return nil, "unknown_identity" end
-    local entry = self.db:GetList()[contact.identity]
-    local ok, err = self.db:SetList(contact.identity, entry and entry.kind or "note", note, contact)
-    if ok then self:ProfileChanged() end
-    return ok, err
+    local entry, identity = self:ResolveList(contact)
+    if not identity then return nil, "unknown_identity" end
+    if note == nil then note = "" end
+    return self:SetList(contact, entry and entry.kind or "note", note)
 end
 
 function App:SetList(contact, kind, note)
-    if not contact or not contact.identity then return nil, "unknown_identity" end
-    local entry = self.db:GetList()[contact.identity]
+    local entry, identity = self:ResolveList(contact)
+    if not identity then return nil, "unknown_identity" end
     if note == nil then note = entry and entry.note end
-    local ok, err = self.db:SetList(contact.identity, kind, note, contact)
+    local ok, err = self.db:SetList(identity, kind, note, contact)
     if ok then
         if kind == "ignore" and self.ui and self.ui.SuppressContactBanners then
             self.ui:SuppressContactBanners(contact.id, contact.identity)

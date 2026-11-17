@@ -63,8 +63,10 @@ end
 function E:Now() return self.clock() end
 
 function E:ListEntry(contact)
-    if contact.identity and self.lists[contact.identity] then return self.lists[contact.identity] end
-    if contact.nameIdentity and not contact.ambiguousIdentity then return self.lists[contact.nameIdentity] end
+    if contact.identity and self.lists[contact.identity] then return self.lists[contact.identity], contact.identity end
+    if contact.nameIdentity and not contact.ambiguousIdentity and self.lists[contact.nameIdentity] then
+        return self.lists[contact.nameIdentity], contact.nameIdentity
+    end
 end
 
 function E:IndexName(name, id, add)
