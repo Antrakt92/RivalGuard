@@ -58,6 +58,57 @@ H.Test("quick class chips update only display filtering and preserve audible sel
     H.True(app.changes > 0)
 end)
 
+H.Test("settings clear known classes independently and let any two classes alert", function()
+    local _, RG, app, ui = setup()
+    local profile = app.db:GetProfile()
+    local function clickButton(page, key)
+        for _, child in ipairs(page.children) do
+            if child.label and child.label:GetText() == ui:T(key) then child:Click(); return end
+        end
+        error("missing button " .. key)
+    end
+    local function toggleAlertClass(class)
+        for _, control in ipairs(ui.controls) do
+            for _, chip in ipairs(control.chips or {}) do
+                if chip.group == "alerts" and chip.class == class then chip.frame:Click(); return end
+            end
+        end
+        error("missing alert class " .. class)
+    end
+    local function evaluate(class, listEntry)
+        return RG.Rules.Evaluate(profile, { hostile = true, isPlayer = true, class = class }, "sighting", { kind = "world" }, listEntry)
+    end
+
+    ui:OpenSettings("overview")
+    clickButton(ui.pages.overview, "clearClassSelection")
+    H.False(RG.Rules.Display(profile, { class = "ROGUE" }))
+    H.True(RG.Rules.Display(profile, {}))
+    H.True(evaluate("ROGUE").sound)
+    ui:OpenSettings("alerts")
+    clickButton(ui.pages.alerts, "clearClassSelection")
+    H.Nil(evaluate("ROGUE"))
+    H.True(evaluate(nil).banner)
+    H.False(evaluate(nil).sound)
+    H.Equal(evaluate("ROGUE", { kind = "watch" }).kind, "watch")
+    toggleAlertClass("HUNTER")
+    toggleAlertClass("MAGE")
+    H.True(evaluate("HUNTER").sound)
+    H.True(evaluate("MAGE").sound)
+    H.Nil(evaluate("ROGUE"))
+    toggleAlertClass("HUNTER")
+    toggleAlertClass("MAGE")
+    H.Nil(evaluate("MAGE"))
+    local imported = assert(app.db:ImportProfile("Cleared classes", assert(app.db:ExportProfile())))
+    for _, class in ipairs(RG.Defaults.classes) do
+        H.False(imported.display.classes[class])
+        H.False(imported.alerts.classes[class])
+    end
+    clickButton(ui.pages.alerts, "all")
+    H.True(evaluate("ROGUE").sound)
+    H.False(RG.Rules.Display(profile, { class = "ROGUE" }))
+    H.True(profile.alerts.unknownClass)
+end)
+
 H.Test("UI row recycling clears absent contacts and keeps Unicode names", function()
     local _, _, app, ui = setup()
     app.engine:Observe({ token = "nameplate1", guid = "A", name = "Разбойник", class = "ROGUE", hostile = true, isPlayer = true, source = "nameplate" })
@@ -174,6 +225,43 @@ H.Test("advanced rule editor uses detached drafts and applies valid rules on sav
     H.Equal(app.db:GetProfile().rules[1], rule)
     dialog.delete:Click()
     H.Equal(#app.db:GetProfile().rules, 0)
+end)
+
+H.Test("clear selection in a rule supports arbitrary subsets and profile transfer", function()
+    local _, RG, app, ui = setup()
+    ui:OpenRules()
+    local dialog = ui.rulesDialog
+    local profile = app.db:GetProfile()
+    dialog.nameInput:SetText("Selected class rule")
+    dialog.clearClasses:Click()
+    H.Equal(#profile.rules, 0)
+    dialog.save:Click()
+    local savedClasses = profile.rules[1].classes
+    local imported = assert(app.db:ImportProfile("Cleared selection", assert(app.db:ExportProfile())))
+    for _, class in ipairs(RG.Defaults.classes) do
+        H.False(savedClasses[class])
+        H.False(imported.rules[1].classes[class])
+    end
+
+    local function applies(class)
+        local decision = RG.Rules.Evaluate(profile, { hostile = true, isPlayer = true, class = class }, "sighting", { kind = "world" })
+        return decision and decision.ruleName
+    end
+    H.Nil(applies("ROGUE"))
+    H.Equal(applies(nil), "Selected class rule")
+    for _, chip in ipairs(dialog.classes) do
+        if chip.class == "HUNTER" or chip.class == "MAGE" then chip.frame:Click() end
+    end
+    H.False(savedClasses.HUNTER)
+    H.False(savedClasses.MAGE)
+    dialog.save:Click()
+    H.Equal(applies("HUNTER"), "Selected class rule")
+    H.Equal(applies("MAGE"), "Selected class rule")
+    H.Nil(applies("ROGUE"))
+    dialog.allClasses:Click()
+    dialog.save:Click()
+    H.Nil(next(profile.rules[1].classes))
+    H.Equal(applies("ROGUE"), "Selected class rule")
 end)
 
 H.Test("stale rule draft cannot overwrite a switched profile", function()

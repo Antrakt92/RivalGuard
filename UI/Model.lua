@@ -79,6 +79,12 @@ function M.ClassEnabled(classes, class)
     return classes[class] == true
 end
 
+function M.ClearClasses()
+    local classes = {}
+    for _, class in ipairs(RG.Defaults.classes) do classes[class] = false end
+    return classes
+end
+
 function M.ToggleClass(classes, class)
     local result = RG.Util.Copy(type(classes) == "table" and classes or {})
     if next(result) == nil then
