@@ -33,8 +33,9 @@ current profile would handle that new sighting in the open world.
 - **Journal:** search recent encounters or open your watch, avoid and ignore
   lists. Retain all eligible encounters, listed players or observed threats.
 - **Support:** see available sensors, why alerts are quiet here and which
-  nameplate options affect coverage. Copy a report with player identities and
-  notes removed or replay the first-run guide.
+  nameplate options affect coverage. The copyable report includes the current
+  detection status and any global alert blocker. Player identities and notes
+  stay private. You can also replay the first-run guide.
 
 Click the minimap button to show or hide Nearby. Right-click it to open
 settings, or drag it around the minimap to move it.

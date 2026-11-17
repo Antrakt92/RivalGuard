@@ -76,8 +76,12 @@ function App:AlertBlock()
     if not allowed then return reason end
     if alerts.banner then return nil end
     if alerts.sound then
-        for _, sound in pairs(alerts.sounds) do
-            if sound ~= "none" then return nil end
+        for kind, sound in pairs(alerts.sounds) do
+            local eventEnabled = (kind ~= "stealth" or alerts.stealth) and (kind ~= "targeting" or alerts.targeting)
+            local ordinary = kind == "sighting" or kind == "returning" or kind == "wave"
+            if sound ~= "none" and eventEnabled and not (ordinary and (alerts.muteOrdinary or alerts.watchedOnly)) then
+                return nil
+            end
         end
     end
     return "outputs_disabled"
@@ -137,7 +141,14 @@ function App:Snooze(contact, seconds)
 end
 
 function App:ExportDiagnostics()
-    return self.diagnostics:Export(self.client:Capabilities(), self.engine)
+    local status = self:Status()
+    return self.diagnostics:Export(status.capabilities, self.engine, {
+        context = self.engine.context.kind,
+        detection = status.detectionState,
+        alertBlock = self:AlertBlock(),
+        nameplates = status.nameplates,
+        alwaysNameplates = status.alwaysNameplates,
+    })
 end
 
 function App:UIContactUpdated(token, _, contact)

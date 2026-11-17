@@ -20,6 +20,22 @@ H.Test("diagnostic report excludes names GUIDs notes and arbitrary strings", fun
     H.True(report:find("other", 1, true) ~= nil)
 end)
 
+H.Test("copied state accepts only recognized status codes and booleans", function()
+    local diagnostics = addon().Diagnostics.New()
+    local report = diagnostics:Export(nil, nil, { context = "arena", detection = "limited", nameplates = false })
+    for _, line in ipairs({ "context=arena", "detection=limited", "alertBlock=none", "nameplates=false", "alwaysNameplates=unknown" }) do
+        H.True(report:find("  " .. line .. "\n", 1, true) ~= nil)
+    end
+    report = diagnostics:Export(nil, nil, {
+        context = "PrivateZone", detection = "PrivateProfile", alertBlock = "PrivateReason",
+        nameplates = 1, alwaysNameplates = true, extra = "PrivateField",
+    })
+    for _, line in ipairs({ "context=unknown", "detection=unknown", "alertBlock=unknown", "nameplates=unknown", "alwaysNameplates=true" }) do
+        H.True(report:find("  " .. line .. "\n", 1, true) ~= nil)
+    end
+    H.Nil(report:find("Private", 1, true))
+end)
+
 H.Test("diagnostic errors throttle duplicate codes and snapshots are detached", function()
     local RG = addon()
     local clock = H.Clock(100)

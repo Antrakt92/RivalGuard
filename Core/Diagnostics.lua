@@ -32,11 +32,32 @@ function Diag:Snapshot()
     return { counts = U.Copy(self.counts), errors = U.Copy(self.errors) }
 end
 
-function Diag:Export(capabilities, engine)
+local contextKinds = { world = true, battleground = true, arena = true, instance = true }
+local detectionStates = { active = true, limited = true, disabled = true }
+local alertBlocks = { disabled = true, paused = true, context_disabled = true, sanctuary = true,
+    resting = true, flight = true, outputs_disabled = true }
+
+local function knownValue(value, choices)
+    return type(value) == "string" and choices[value] and value or "unknown"
+end
+
+local function booleanValue(value)
+    return type(value) == "boolean" and tostring(value) or "unknown"
+end
+
+function Diag:Export(capabilities, engine, state)
     local lines = { "RivalGuard " .. RG.version, "Report excludes player names, GUIDs, notes and watch lists.", "Capabilities:" }
     for _, key in ipairs(U.SortedKeys(capabilities or {})) do
         local value = capabilities[key]
         if type(value) == "boolean" or U.IsFinite(value) then lines[#lines + 1] = "  " .. code(key) .. "=" .. tostring(value) end
+    end
+    if state then
+        lines[#lines + 1] = "Current state:"
+        lines[#lines + 1] = "  context=" .. knownValue(state.context, contextKinds)
+        lines[#lines + 1] = "  detection=" .. knownValue(state.detection, detectionStates)
+        lines[#lines + 1] = "  alertBlock=" .. (state.alertBlock == nil and "none" or knownValue(state.alertBlock, alertBlocks))
+        lines[#lines + 1] = "  nameplates=" .. booleanValue(state.nameplates)
+        lines[#lines + 1] = "  alwaysNameplates=" .. booleanValue(state.alwaysNameplates)
     end
     lines[#lines + 1] = "Counters:"
     for _, key in ipairs(U.SortedKeys(self.counts)) do lines[#lines + 1] = "  " .. key .. "=" .. self.counts[key] end

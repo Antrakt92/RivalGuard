@@ -537,6 +537,91 @@ H.Test("runtime diagnostics report redacts observed identities and error details
     H.True(report:find("ui_refresh", 1, true) ~= nil)
 end)
 
+H.Test("the copied diagnostics include sanitized context coverage and global alert blockers", function()
+    local private = {
+        "FixturePrivateZone", "FixturePrivateProfile", "FixturePrivateRule",
+        "FixturePrivatePlayer", "Player-FixturePrivateGUID", "FixturePrivateNote", "FixturePrivateCVar",
+    }
+    local state, _, app = setup(nil, function(fixture)
+        fixture.api.GetRealZoneText = function() return private[1] end
+        fixture.api.C_CVar = { GetCVarBool = function(name) return fixture.cvars[name] end }
+        fixture.cvars.nameplateShowEnemies, fixture.cvars.nameplateShowAll = true, false
+    end)
+    assert(app.db:CreateProfile(private[2]))
+    local profile = assert(app.db:SetProfile(private[2]))
+    profile.rules = {{ name = private[3], enabled = true, event = "sighting", priority = 20,
+        action = "alert", classes = {}, sound = true, banner = true, cooldown = 30 }}
+    app:ProfileChanged()
+    assert(app.db:SetList("guid:" .. private[5], "watch", private[6], { name = private[4] }))
+    state:Unit("nameplate1", { guid = private[5], name = private[4], class = "ROGUE", hostile = true, isPlayer = true })
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    H.Equal(app.db:GetJournal()[1].zone, private[1])
+
+    local function copied()
+        app.ui:ShowDiagnostics()
+        local edit = app.ui.copyFrame.edit
+        H.True(edit:HasFocus())
+        H.True(edit.highlighted)
+        local report, fields = edit:GetText(), {}
+        for _, value in ipairs(private) do H.Nil(report:find(value, 1, true), "diagnostic leaked fixture data") end
+        for line in report:gmatch("[^\n]+") do
+            local key, value = line:match("^%s*([%a]+)=([%w_]+)%s*$")
+            if key then fields[key] = value end
+        end
+        return fields
+    end
+
+    state.instance = "arena"
+    state.cvars.nameplateShowEnemies, state.cvars.nameplateShowAll = false, H.Secret(private[7])
+    state:Fire("PLAYER_ENTERING_WORLD")
+    local arena = copied()
+    H.Equal(arena.context, "arena")
+    H.Equal(arena.detection, "limited")
+    H.Equal(arena.nameplates, "false")
+    H.Equal(arena.alwaysNameplates, "unknown")
+    H.Equal(arena.alertBlock, "context_disabled")
+
+    state.instance, state.zonePVP = nil, "sanctuary"
+    state.cvars.nameplateShowEnemies, state.cvars.nameplateShowAll = true, false
+    state:Fire("ZONE_CHANGED_NEW_AREA")
+    local sanctuary = copied()
+    H.Equal(sanctuary.context, "world")
+    H.Equal(sanctuary.detection, "active")
+    H.Equal(sanctuary.nameplates, "true")
+    H.Equal(sanctuary.alwaysNameplates, "false")
+    H.Equal(sanctuary.alertBlock, "sanctuary")
+
+    state.zonePVP = "contested"
+    state:Fire("ZONE_CHANGED_NEW_AREA")
+    profile.alerts.sound, profile.alerts.banner = false, false
+    app:ProfileChanged()
+    local quiet = copied()
+    H.Equal(quiet.context, "world")
+    H.Equal(quiet.alertBlock, "outputs_disabled")
+
+    local alerts = profile.alerts
+    alerts.sound, alerts.stealth, alerts.targeting = true, false, false
+    for event in pairs(alerts.sounds) do alerts.sounds[event] = "none" end
+    alerts.sounds.stealth, alerts.sounds.targeting = "warning", "ready"
+    app:ProfileChanged()
+    H.Equal(copied().alertBlock, "outputs_disabled")
+    alerts.targeting = true
+    app:ProfileChanged()
+    H.Equal(copied().alertBlock, "none")
+
+    alerts.targeting = false
+    alerts.sounds.sighting, alerts.sounds.returning, alerts.sounds.wave = "ping", "ping", "ready"
+    for _, setting in ipairs({ "muteOrdinary", "watchedOnly" }) do
+        alerts[setting], alerts.sounds.watch = true, "none"
+        app:ProfileChanged()
+        H.Equal(copied().alertBlock, "outputs_disabled")
+        alerts.sounds.watch = "warning"
+        app:ProfileChanged()
+        H.Equal(copied().alertBlock, "none")
+        alerts[setting] = false
+    end
+end)
+
 for _, locale in ipairs({ "enUS", "ruRU" }) do
     H.Test("Hunters and Rogues quick selection applies to live alerts in " .. locale, function()
         local state, RG, app = setup()
