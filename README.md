@@ -68,6 +68,8 @@ matching advanced rules can override the alert class filter.
 Enable enemy nameplates in WoW to provide the broadest available coverage.
 **Always Show Nameplates** can help when automatic mode hides enemy plates.
 Your current target can still provide information when plates are unavailable.
+Class icons use the current nameplate reading. Watch and Avoid markers require
+the current plate to match the saved player's identity.
 Range estimates depend on what the client can measure for observed units and
 may be a bracket or unavailable.
 You can control whether uncertain distances qualify for alerts.

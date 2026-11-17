@@ -2696,6 +2696,101 @@ local function locatorVisible(ui, token)
     return badge ~= nil and badge.locator ~= nil and badge.locator:IsVisible()
 end
 
+local function badgeEvidenceFixture()
+    local mode, watch = nil, "guid:Player-BadgeEvidence"
+    local state, _, app = setup({ schemaVersion = 1, onboardingSeen = true, lists = {
+        [watch] = { kind = "watch", name = "Known-FixtureRealm", class = "ROGUE" },
+    } }, function(mock)
+        local api, secret = mock.api, H.Secret("unreadable nameplate evidence")
+        local guid, name, class = api.UnitGUID, api.UnitName, api.UnitClass
+        local hostile, player, same = api.UnitIsEnemy, api.UnitIsPlayer, api.UnitIsUnit
+        function api.UnitGUID(token)
+            if token == "nameplate1" and mode then return secret end
+            return guid(token)
+        end
+        function api.UnitName(token)
+            if token == "nameplate1" and (mode == "all" or mode == "identity") then return secret, secret end
+            return name(token)
+        end
+        api.UnitFullName = api.UnitName
+        function api.UnitClass(token)
+            if token == "nameplate1" and mode == "all" then return secret, secret end
+            return class(token)
+        end
+        function api.UnitIsEnemy(source, token)
+            if token == "nameplate1" and mode == "all" then return secret end
+            return hostile(source, token)
+        end
+        function api.UnitIsPlayer(token)
+            if token == "nameplate1" and mode == "all" then return secret end
+            return player(token)
+        end
+        function api.UnitIsUnit(first, second)
+            if first == "nameplate1" and (second == "target" or second == "focus") and mode then return secret end
+            return same(first, second)
+        end
+    end)
+    local known = { guid = "Player-BadgeEvidence", name = "Known", realm = "FixtureRealm",
+        class = "ROGUE", hostile = true, isPlayer = true }
+    state:Unit("nameplate1", known)
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    state:Unit("target", known)
+    state:Fire("PLAYER_TARGET_CHANGED")
+    state:Unit("focus", known)
+    state:Fire("PLAYER_FOCUS_CHANGED")
+    state:Fire("UNIT_FLAGS", "nameplate1")
+    local function updateVisibility(value, unit)
+        mode = value
+        state:Unit("nameplate1", unit or known)
+        state:Fire("UNIT_FLAGS", "nameplate1")
+    end
+    return state, app, updateVisibility
+end
+
+for _, restricted in ipairs({ "all", "identity" }) do
+    local title = restricted == "all" and "a badge hides when only a different alias has readable evidence"
+        or "a badge with fresh class evidence drops markers for an unreadable owner"
+    H.Test(title, function()
+        local _, app, updateVisibility = badgeEvidenceFixture()
+        local ui = app.ui
+        local live = app.engine:Snapshot()[1]
+        local function badge() return assert(ui.badges.active.nameplate1) end
+        local original = badge()
+        H.True(original.icon:IsVisible()); H.True(original.marker:IsVisible())
+        H.True(original.target:IsVisible()); H.True(original.focus:IsVisible())
+        ui:Select(live)
+        ui.detailsFrame.locate:Click()
+        H.True(locatorVisible(ui, "nameplate1"))
+
+        local replacement = restricted == "identity" and { guid = "Player-RestrictedReplacement", name = "Replacement",
+            realm = "FixtureRealm", class = "HUNTER", hostile = true, isPlayer = true } or nil
+        updateVisibility(restricted, replacement)
+        local aggregated = assert(app.engine:SelectedContact(live.id, live.identity))
+        H.True(aggregated.sources.focus)
+        H.True(aggregated.hostile)
+        H.Equal(aggregated.listKind, "watch")
+        H.False(locatorVisible(ui, "nameplate1"))
+        if restricted == "all" then
+            H.False(original.icon:IsVisible())
+        else
+            local localBadge = badge()
+            H.True(localBadge.icon:IsVisible())
+            H.Equal(localBadge.icon.texture, "Interface\\Icons\\ClassIcon_HUNTER")
+            H.False(localBadge.marker:IsVisible())
+            H.False(localBadge.target:IsVisible()); H.False(localBadge.focus:IsVisible())
+        end
+
+        updateVisibility("guid")
+        H.True(badge().icon:IsVisible()); H.True(badge().marker:IsVisible())
+        H.Equal(badge().icon.texture, "Interface\\Icons\\ClassIcon_ROGUE")
+        H.False(badge().target:IsVisible()); H.False(badge().focus:IsVisible())
+        updateVisibility(nil)
+        H.True(badge().marker:IsVisible())
+        H.True(badge().target:IsVisible()); H.True(badge().focus:IsVisible())
+        H.False(locatorVisible(ui, "nameplate1"))
+    end)
+end
+
 local function automaticLocatorFixture(enabled, configure)
     local relations, restricted = {}, H.Secret("unreadable automatic target relation")
     local state, _, app = setup(nil, function(fixture)

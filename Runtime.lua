@@ -240,19 +240,27 @@ end
 function App:UIContactUpdated(token, observation, contact)
     if not self.ui or not self.ui.SetNameplate then return end
     if type(token) ~= "string" or not token:match("^nameplate%d+$") then return end
-    if not contact then self.ui:RemoveNameplate(token) return end
+    if not contact or not observation then self.ui:RemoveNameplate(token) return end
     local highlight = self.ui.badges.highlight
     if highlight and highlight.unit == token then
         local owner = self.engine.contacts[highlight.id]
-        if not owner or not observation or not observation.guid or observation.guid ~= owner.guid or observation.hostile ~= true
+        if not owner or not observation.guid or observation.guid ~= owner.guid or observation.hostile ~= true
             or observation.isPlayer ~= true or observation.dead ~= false or observation.behindCamera == true
             or (highlight.automatic and observation.targeting ~= true) then
             self.ui.badges:ClearHighlight()
         end
     end
     local frame = self.client:Nameplate(token)
-    if frame then self.ui:SetNameplate(token, frame, contact)
-    else self.ui:RemoveNameplate(token) end
+    if not frame then self.ui:RemoveNameplate(token) return end
+    -- A contact aggregates several tokens. A physical nameplate must use its
+    -- own readings, especially when a recycled token loses readable identity.
+    local listKind = contact.listKind and self.engine:ObservationOwnsContact(token, contact.id) and contact.listKind
+    self.ui:SetNameplate(token, frame, {
+        id = contact.id, class = observation.class, hostile = observation.hostile, isPlayer = observation.isPlayer,
+        dead = observation.dead, behindCamera = observation.behindCamera, listKind = listKind,
+        watched = listKind == "watch" or listKind == "avoid",
+        currentTarget = observation.currentTarget, currentFocus = observation.currentFocus,
+    })
 end
 
 function App:OnTokenRemoved(token)

@@ -171,6 +171,13 @@ function E:View(contact, now)
     }
 end
 
+function E:ObservationOwnsContact(token, id)
+    local binding = self.bindings[token]
+    local observation = binding and binding.observation
+    if not observation or binding.id ~= id then return false end
+    return ownerMatches(self.contacts[id], observation.guid, nameIdentity(observation))
+end
+
 function E:Changed()
     self.revision = self.revision + 1
     if self.onChange then self.onChange() end
