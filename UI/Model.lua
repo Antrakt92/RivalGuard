@@ -32,9 +32,9 @@ function M.SearchText(value)
     end))
 end
 
-function M.Matches(query, name, note)
+function M.Matches(query, name, note, searchName)
     if query == "" then return true end
-    return M.SearchText(name):find(query, 1, true) ~= nil or M.SearchText(note):find(query, 1, true) ~= nil
+    return (searchName or M.SearchText(name)):find(query, 1, true) ~= nil or M.SearchText(note):find(query, 1, true) ~= nil
 end
 
 function M.EditableIdentity(contact)

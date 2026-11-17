@@ -980,21 +980,26 @@ function UI.New(app)
         local profile = self:Profile()
         local entries, list = {}, app.db:GetList()
         local personal = self.journalMode == "personal"
-        local journalEntries = app.db.GetJournal and app.db:GetJournal() or {}
+        local hasJournalEntries = false
         local query = profile.display.streamer and "" or self.journalQuery
         if self.journalSearch.SetEnabled then self.journalSearch:SetEnabled(not profile.display.streamer) end
         if personal then
             for identity, item in pairs(list) do
-                if (self.journalFilter == "all" or self.journalFilter == item.kind) and M.Matches(query, item.name, item.note) then
-                    entries[#entries + 1] = { identity = identity, name = item.name, class = item.class, note = item.note, listKind = item.kind, savedOnly = true }
+                if self.journalFilter == "all" or self.journalFilter == item.kind then
+                    local searchName = M.SearchText(item.name)
+                    if M.Matches(query, item.name, item.note, searchName) then
+                        entries[#entries + 1] = { identity = identity, name = item.name, class = item.class, note = item.note,
+                            listKind = item.kind, savedOnly = true, searchName = searchName }
+                    end
                 end
             end
             table.sort(entries, function(a, b)
-                local x, y = M.SearchText(a.name), M.SearchText(b.name)
-                if x ~= y then return x < y end
+                if a.searchName ~= b.searchName then return a.searchName < b.searchName end
                 return a.identity < b.identity
             end)
         else
+            local journalEntries = app.db.GetJournal and app.db:GetJournal() or {}
+            hasJournalEntries = #journalEntries > 0
             for _, item in ipairs(journalEntries) do
                 local record = list[item.identity]
                 if M.Matches(query, item.name, record and record.note) then entries[#entries + 1] = item end
@@ -1004,12 +1009,12 @@ function UI.New(app)
         self.journalPersonal.bg:SetColorTexture(unpack(personal and { 0.10, 0.22, 0.28, 1 } or C.panel))
         self.journalFilterButton:SetShown(personal)
         self.journalClear:SetShown(not personal)
-        self.journalClear:SetEnabled(#journalEntries > 0)
+        self.journalClear:SetEnabled(hasJournalEntries)
         local confirming = self.clearJournalUntil and self.clearJournalUntil >= self:Now()
         self.journalClear.label:SetText(self:T(confirming and "clearJournalNow" or "clearJournal"))
         self.journalFilterButton.label:SetText(self:T(LIST_KIND_KEYS[self.journalFilter] or "allLists") .. "  ›")
-        self.journalCount:SetText(self:F("filteredCount", #entries))
-        self.journalEmpty:SetShown(#entries == 0)
+        paintText(self.journalCount, self:F("filteredCount", #entries))
+        paintShown(self.journalEmpty, #entries == 0)
         self.journalEmpty:SetText(self:T(query ~= "" and "noMatches" or personal and "listEmpty" or "emptyJournal"))
         self.journalOffset = math.max(0, math.min(self.journalOffset, math.max(0, math.floor((#entries - 1) / 12) * 12)))
         self.journalPrev:SetEnabled(self.journalOffset > 0)
@@ -1019,6 +1024,7 @@ function UI.New(app)
         for i, row in ipairs(self.journalRows) do
             local entry = entries[self.journalOffset + i]
             if entry then
+                entry.searchName = nil
                 entry.id = entry.identity
                 entry.visible = false
                 entry.sources = { journal = true }
@@ -1030,12 +1036,12 @@ function UI.New(app)
                 end
             end
             row.contact = entry
-            row:SetShown(entry ~= nil)
+            paintShown(row, entry ~= nil)
             if entry then
                 local name = M.Text(entry.name, self:T("nameUnavailable"))
                 if profile.display.streamer then name = self:T("unknownPlayer") .. " " .. (self.journalOffset + i) end
                 local tag = personal and self:T(LIST_KIND_KEYS[entry.listKind] or "unlisted") or M.State(entry, now, profile.locale)
-                row.label:SetText(name .. "  ·  " .. tag)
+                paintText(row.label, name .. "  ·  " .. tag)
             end
         end
     end

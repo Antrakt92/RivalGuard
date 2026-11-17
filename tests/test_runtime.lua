@@ -1385,6 +1385,71 @@ H.Test("watch ignore and note actions preserve notes through repeated toggles", 
     H.Nil(app.db:GetList()[contact.identity].note)
 end)
 
+H.Test("Personal lists avoid copying history and still apply exact name note and kind filters", function()
+    local state, RG, app = setup()
+    local db, ui = app.db, app.ui
+    local alphaA, alphaB = "guid:Player-Order-A", "guid:Player-Order-B"
+    local cyrillic, noteOnly = "guid:Player-Cyrillic", "guid:Player-NoteMatch"
+    assert(db:SetList(alphaB, "watch", nil, { name = "Alpha", class = "ROGUE" }))
+    assert(db:SetList(alphaA, "watch", nil, { name = "alpha", class = "ROGUE" }))
+    assert(db:SetList(cyrillic, "watch", nil, { name = "Ёж Север", class = "HUNTER" }))
+    assert(db:SetList(noteOnly, "watch", "Local Evac Marker", { name = "Zeta", class = "MAGE" }))
+    for index = 5, 1000 do
+        assert(db:SetList("guid:Player-List-" .. index, "watch", nil, { name = string.format("Crowd %04d", index) }))
+    end
+    local epoch = state.api.time()
+    for index = 1, 500 do
+        assert(db:Record({ identity = "guid:Player-History-" .. index, name = "Encounter " .. index }, epoch - index))
+    end
+    H.Equal(#db:GetJournal(), 500)
+    ui:OpenSettings("journal")
+    ui.journalPersonal:Click()
+    H.Equal(ui.journalCount:GetText(), ui:F("filteredCount", 1000))
+    H.Equal(ui.journalRows[1].contact.identity, alphaA)
+    H.Equal(ui.journalRows[2].contact.identity, alphaB)
+    H.False(ui.journalClear:IsShown())
+
+    local reads, folds = 0, 0
+    local getJournal, searchText = db.GetJournal, RG.UIModel.SearchText
+    db.GetJournal = function(database)
+        reads = reads + 1
+        return getJournal(database)
+    end
+    RG.UIModel.SearchText = function(value)
+        folds = folds + 1
+        return searchText(value)
+    end
+    state.clock.Advance(1.1)
+    ui:Refresh()
+    local unchangedReads, unchangedFolds = reads, folds
+    local function query(text, expected)
+        ui.journalSearch:SetText(text)
+        H.Equal(ui.journalCount:GetText(), ui:F("filteredCount", #expected))
+        for index, identity in ipairs(expected) do H.Equal(ui.journalRows[index].contact.identity, identity) end
+        H.Nil(ui.journalRows[#expected + 1].contact)
+    end
+    query("  ALPHA  ", { alphaA, alphaB })
+    query("ЁЖ СЕВЕР", { cyrillic })
+    query("eVaC mArKeR", { noteOnly })
+    ui.journalRows[1]:Click()
+    ui.detailsFrame.note:SetText("New route")
+    ui.detailsFrame.saveNote:Click()
+    H.True(ui.journalEmpty:IsShown())
+    H.Nil(ui.journalRows[1].contact)
+    query("new ROUTE", { noteOnly })
+    ui.journalFilterButton:Click()
+    ui.journalRows[1]:Click()
+    ui.detailsFrame.listActions.avoid:Click()
+    H.True(ui.journalEmpty:IsShown())
+    H.Nil(ui.journalRows[1].contact)
+    ui.journalFilterButton:Click()
+    H.Equal(ui.journalRows[1].contact.identity, noteOnly)
+    H.Equal(ui.journalRows[1].contact.note, "New route")
+
+    H.Equal(unchangedReads, 0, string.format("Personal refresh copied journal %d time(s) and folded %d names", unchangedReads, unchangedFolds))
+    H.True(unchangedFolds <= 1000, string.format("Personal refresh folded %d names for 1000 entries", unchangedFolds))
+end)
+
 H.Test("a promoted GUID keeps editing the same existing name-based watch record", function()
     local identity = "name:Enemy-FixtureRealm"
     local state, _, app = setup({ schemaVersion = 1, onboardingSeen = true, lists = {
