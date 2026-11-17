@@ -516,6 +516,17 @@ function E:Tick()
     if resumed or #expired > 0 then self:Changed() end
 end
 
+function E:CountVisible()
+    local count = 0
+    for _, contact in pairs(self.contacts) do
+        if next(contact.tokens) ~= nil and contact.behindCamera ~= true
+            and Rules.Display(self.profile, contact, self:ListEntry(contact)) then
+            count = count + 1
+        end
+    end
+    return count
+end
+
 function E:Snapshot()
     local result = {}
     for _, contact in pairs(self.contacts) do

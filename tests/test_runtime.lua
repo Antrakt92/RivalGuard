@@ -1,14 +1,100 @@
 local H = RGTest
 local W = assert(loadfile(H.root .. "/tests/support/wow.lua"))()
 
-local function setup(raw)
+local function setup(raw, configure)
     local state = W.New()
+    if configure then configure(state) end
     state.api.RivalGuardDB = raw
     local RG = state:LoadTOC()
     state:Fire("ADDON_LOADED", "RivalGuard")
     H.True(RG.instance.initialized == true, "addon did not initialize from actual TOC")
     return state, RG, RG.instance
 end
+
+H.Test("hidden Nearby skips row production while minimap census and alerts stay live", function()
+    local state, RG, app = setup(nil, function(fixture)
+        local map = fixture.api.CreateFrame("Frame", "Minimap", fixture.api.UIParent)
+        map:SetSize(160, 160)
+        fixture.api.C_NamePlateManager = {
+            IsNamePlateUnitBehindCamera = function(token) return token == "nameplate3" end,
+        }
+    end)
+    local profile, ui = app.db:GetProfile(), app.ui
+    profile.display.classes = { HUNTER = true }
+    profile.display.showUnknown = false
+    profile.alerts.waveThreshold = 20
+    app:ProfileChanged()
+    assert(app.db:SetList("guid:Player-Count-4", "ignore", nil, { name = "Ignored Hunter" }))
+    local snapshotCalls, rowCalls = 0, 0
+    local snapshot, rows = app.engine.Snapshot, RG.UIModel.Rows
+    app.engine.Snapshot = function(engine)
+        snapshotCalls = snapshotCalls + 1
+        return snapshot(engine)
+    end
+    RG.UIModel.Rows = function(...)
+        rowCalls = rowCalls + 1
+        return rows(...)
+    end
+
+    local launcher = assert(ui.launcher).frame
+    launcher:Click()
+    H.False(ui.frame:IsShown())
+    for index, class in ipairs({ "HUNTER", "MAGE", "HUNTER", "HUNTER", "UNKNOWN_FIXTURE" }) do
+        local token = "nameplate" .. index
+        state:Unit(token, { guid = "Player-Count-" .. index, name = "Rival " .. index, class = class, hostile = true, isPlayer = true })
+        state:Fire("NAME_PLATE_UNIT_ADDED", token)
+    end
+    state:Unit("target", state.units.nameplate1)
+    state:Fire("PLAYER_TARGET_CHANGED")
+    state:Advance(1.5)
+    H.Equal(ui.visibleCount, 1)
+    launcher.scripts.OnEnter(launcher)
+    H.True(state.api.GameTooltip.lines[1]:find(ui:F("inViewCount", 1), 1, true) ~= nil)
+    H.True(#state.sounds > 0)
+    H.Equal(snapshotCalls, 0)
+    H.Equal(rowCalls, 0)
+
+    app:Demo()
+    H.True(ui.frame:IsShown())
+    H.False(profile.display.showList)
+    H.True(rowCalls > 0)
+    H.Equal(snapshotCalls, 0)
+    local previewRowCalls = rowCalls
+    state:Advance(16)
+    H.False(ui.frame:IsShown())
+    H.Equal(ui.visibleCount, 1)
+    H.Equal(snapshotCalls, 0)
+    launcher:Click()
+    H.True(ui.frame:IsShown())
+    H.True(snapshotCalls > 0)
+    H.True(rowCalls > previewRowCalls)
+    H.Equal(ui.rows[1].contact.identity, "guid:Player-Count-1")
+end)
+
+H.Test("an open contact card refreshes while Nearby is hidden without building rows", function()
+    local state, RG, app = setup()
+    local unit = { guid = "Player-HiddenDetails", name = "First name", realm = "FixtureRealm", class = "ROGUE", hostile = true, isPlayer = true }
+    state:Unit("nameplate1", unit)
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    state:Advance(0.5)
+    local ui = app.ui
+    ui.rows[1]:Click()
+    H.Equal(ui.detailsFrame.title:GetText(), "First name-FixtureRealm")
+    local rowCalls, rows = 0, RG.UIModel.Rows
+    RG.UIModel.Rows = function(...)
+        rowCalls = rowCalls + 1
+        return rows(...)
+    end
+    ui:Toggle()
+    H.False(ui.frame:IsShown())
+    unit.name = "Updated name"
+    state:Fire("UNIT_NAME_UPDATE", "nameplate1")
+    state:Advance(0.5)
+    H.True(ui.detailsFrame:IsShown())
+    H.Equal(ui.detailsFrame.title:GetText(), "Updated name-FixtureRealm")
+    H.False(ui.selectedOutside)
+    H.Equal(rowCalls, 0)
+end)
 
 H.Test("contact snooze removes only its live alerts and resumes without persisting a setting", function()
     local state, RG, app = setup()

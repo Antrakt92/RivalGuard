@@ -31,8 +31,8 @@ function R.ContextMatches(config, context)
     return true
 end
 
-function R.Display(profile, contact)
-    if contact.listKind == "ignore" then return false end
+function R.Display(profile, contact, entry)
+    if (entry and entry.kind or contact.listKind) == "ignore" then return false end
     return R.ClassMatches(profile.display.classes, contact.class, profile.display.showUnknown)
 end
 

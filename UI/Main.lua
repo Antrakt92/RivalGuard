@@ -971,16 +971,11 @@ function UI.New(app)
         local now = self:Now()
         local preview = self.previewUntil and self.previewUntil > now
         if not preview then self.previewContacts, self.previewUntil = nil, nil end
-        local snapshot = preview and self.previewContacts or app.engine:Snapshot()
-        local rows = M.Rows(snapshot, profile, now, preview and self.previewAliases or self.aliases)
-        self.renderedCount = #rows
-        local maxRows = math.floor(RG.Util.Clamp(profile.display.maxRows, 3, 20, 8))
-        local rowHeight = profile.display.textSize + UI.layout.rowPadding
-        local mainHeight = UI.layout.header + math.max(3, math.min(maxRows, #rows)) * rowHeight + UI.layout.footer
-        main:SetHeight(mainHeight)
-        self:FitWindow(main, UI.layout.width, mainHeight, profile.display.scale)
-        main:SetShown(profile.display.showList or preview)
-        self.offset = math.max(0, math.min(self.offset, math.max(0, #rows - maxRows)))
+        local nearbyShown = profile.display.showList or preview == true
+        local detailsShown = self.detailsFrame and self.detailsFrame:IsShown() and self.selected
+        local snapshot
+        if preview then snapshot = self.previewContacts
+        elseif nearbyShown or detailsShown then snapshot = app.engine:Snapshot() end
         local untilTime = M.Number(app.engine.pausedUntil)
         local paused = untilTime ~= nil and untilTime > now
         local needsStatus = self.statusAt == nil or now - self.statusAt >= 1
@@ -994,46 +989,66 @@ function UI.New(app)
         self.statusPage = settings:IsShown() and self.currentPage or nil
         local appStatus = self.statusCache or {}
         if type(appStatus) ~= "table" then appStatus = { detail = appStatus } end
-        local visibleCount = 0
-        for _, row in ipairs(rows) do if row.visible and row.contact.behindCamera ~= true then visibleCount = visibleCount + 1 end end
-        self.visibleCount = preview and 0 or visibleCount
-        local status = preview and self:T("demoLabel") or not profile.enabled and self:T("disabled") or paused and self:T("paused") or self:T(appStatus.state == "limited" and "limited" or "active")
-        statusText:SetText(status .. " · " .. self:F("inViewCount", visibleCount))
-        self.pauseButton.label:SetText(self:T(paused and "resume" or "pause"))
-        self.muteButton.label:SetText(self:T(profile.alerts.sound and "mute" or "unmute"))
-        empty:SetShown(#rows == 0); emptyHelp:SetShown(#rows == 0)
-        for i, row in ipairs(self.rows) do
-            local data = i <= maxRows and rows[self.offset + i] or nil
-            row:SetShown(data ~= nil)
-            row.contact = data and data.contact or nil
-            if data then
-                row:ClearAllPoints(); row:SetPoint("TOPLEFT", 8, -UI.layout.header - (i - 1) * rowHeight)
-                row:SetHeight(rowHeight)
-                row.nameText:SetFont(STANDARD_TEXT_FONT or "Fonts\\ARIALN.TTF", profile.display.textSize, "")
-                row.detailText:SetFont(STANDARD_TEXT_FONT or "Fonts\\ARIALN.TTF", math.max(10, profile.display.textSize - 2), "")
-                row.detailText:ClearAllPoints(); row.detailText:SetPoint("TOPLEFT", 36, -profile.display.textSize - 5)
-                row.nameText:SetText(data.name)
-                if data.class and not profile.display.highContrast then row.nameText:SetTextColor(classColor(data.class)) else row.nameText:SetTextColor(unpack(C.text)) end
-                local level = M.Number(data.contact.level)
-                row.detailText:SetText(level and (self:F("levelShort", level) .. " · " .. data.detail) or data.detail)
-                row.detailText:SetTextColor(unpack(profile.display.highContrast and C.text or C.muted))
-                row.icon:SetTexture(data.class and ("Interface\\Icons\\ClassIcon_" .. data.class) or "Interface\\Icons\\INV_Misc_QuestionMark")
-                row:SetAlpha(data.visible and 1 or profile.display.highContrast and 0.9 or 0.65)
-                local currentTarget = data.visible and data.contact.currentTarget == true
-                local currentFocus = data.visible and data.contact.currentFocus == true
-                row.mark:SetText(currentTarget and "▼" or currentFocus and "◆" or "!")
-                row.mark:SetShown(data.contact.watched == true or data.contact.listKind == "avoid" or currentTarget or currentFocus)
+        if nearbyShown then
+            local rows = M.Rows(snapshot, profile, now, preview and self.previewAliases or self.aliases)
+            self.renderedCount = #rows
+            local maxRows = math.floor(RG.Util.Clamp(profile.display.maxRows, 3, 20, 8))
+            local rowHeight = profile.display.textSize + UI.layout.rowPadding
+            local mainHeight = UI.layout.header + math.max(3, math.min(maxRows, #rows)) * rowHeight + UI.layout.footer
+            main:SetHeight(mainHeight)
+            self:FitWindow(main, UI.layout.width, mainHeight, profile.display.scale)
+            self.offset = math.max(0, math.min(self.offset, math.max(0, #rows - maxRows)))
+            local visibleCount = 0
+            for _, row in ipairs(rows) do if row.visible and row.contact.behindCamera ~= true then visibleCount = visibleCount + 1 end end
+            self.visibleCount = preview and 0 or visibleCount
+            local status = preview and self:T("demoLabel") or not profile.enabled and self:T("disabled") or paused and self:T("paused") or self:T(appStatus.state == "limited" and "limited" or "active")
+            statusText:SetText(status .. " · " .. self:F("inViewCount", visibleCount))
+            self.pauseButton.label:SetText(self:T(paused and "resume" or "pause"))
+            self.muteButton.label:SetText(self:T(profile.alerts.sound and "mute" or "unmute"))
+            empty:SetShown(#rows == 0); emptyHelp:SetShown(#rows == 0)
+            for i, row in ipairs(self.rows) do
+                local data = i <= maxRows and rows[self.offset + i] or nil
+                row:SetShown(data ~= nil)
+                row.contact = data and data.contact or nil
+                if data then
+                    row:ClearAllPoints(); row:SetPoint("TOPLEFT", 8, -UI.layout.header - (i - 1) * rowHeight)
+                    row:SetHeight(rowHeight)
+                    row.nameText:SetFont(STANDARD_TEXT_FONT or "Fonts\\ARIALN.TTF", profile.display.textSize, "")
+                    row.detailText:SetFont(STANDARD_TEXT_FONT or "Fonts\\ARIALN.TTF", math.max(10, profile.display.textSize - 2), "")
+                    row.detailText:ClearAllPoints(); row.detailText:SetPoint("TOPLEFT", 36, -profile.display.textSize - 5)
+                    row.nameText:SetText(data.name)
+                    if data.class and not profile.display.highContrast then row.nameText:SetTextColor(classColor(data.class)) else row.nameText:SetTextColor(unpack(C.text)) end
+                    local level = M.Number(data.contact.level)
+                    row.detailText:SetText(level and (self:F("levelShort", level) .. " · " .. data.detail) or data.detail)
+                    row.detailText:SetTextColor(unpack(profile.display.highContrast and C.text or C.muted))
+                    row.icon:SetTexture(data.class and ("Interface\\Icons\\ClassIcon_" .. data.class) or "Interface\\Icons\\INV_Misc_QuestionMark")
+                    row:SetAlpha(data.visible and 1 or profile.display.highContrast and 0.9 or 0.65)
+                    local currentTarget = data.visible and data.contact.currentTarget == true
+                    local currentFocus = data.visible and data.contact.currentFocus == true
+                    row.mark:SetText(currentTarget and "▼" or currentFocus and "◆" or "!")
+                    row.mark:SetShown(data.contact.watched == true or data.contact.listKind == "avoid" or currentTarget or currentFocus)
+                end
+            end
+            more:SetText(#rows > maxRows and self:F("moreContacts", #rows - maxRows) or self:T("noTarget"))
+            if #rows == 0 then
+                local titleKey, helpKey = "noEnemies", "noEnemiesHelp"
+                if not profile.enabled and not preview then titleKey, helpKey = "noDisabled", "noDisabledHelp"
+                elseif #snapshot > 0 or M.Number(appStatus.contacts, 0) > 0 then titleKey, helpKey = "noFiltered", "noFilteredHelp"
+                elseif appStatus.nameplates == false and not preview then titleKey, helpKey = "noNameplates", "noNameplatesHelp" end
+                empty:SetText(self:T(titleKey)); emptyHelp:SetText(self:T(helpKey))
+            end
+        else
+            self.visibleCount = app.engine:CountVisible()
+            self.renderedCount = 0
+            if main:IsShown() then
+                for _, row in ipairs(self.rows) do
+                    row.contact = nil
+                    row:Hide()
+                end
             end
         end
-        more:SetText(#rows > maxRows and self:F("moreContacts", #rows - maxRows) or self:T("noTarget"))
+        if main:IsShown() ~= nearbyShown then main:SetShown(nearbyShown) end
         if self.controlsDirty then self:RefreshControls(); self.controlsDirty = false end
-        if #rows == 0 then
-            local titleKey, helpKey = "noEnemies", "noEnemiesHelp"
-            if not profile.enabled and not preview then titleKey, helpKey = "noDisabled", "noDisabledHelp"
-            elseif #snapshot > 0 or M.Number(appStatus.contacts, 0) > 0 then titleKey, helpKey = "noFiltered", "noFilteredHelp"
-            elseif appStatus.nameplates == false and not preview then titleKey, helpKey = "noNameplates", "noNameplatesHelp" end
-            empty:SetText(self:T(titleKey)); emptyHelp:SetText(self:T(helpKey))
-        end
         self.badges:Refresh()
         if self.launcher then self.launcher:Refresh() end
         if settings:IsShown() then
@@ -1053,7 +1068,7 @@ function UI.New(app)
             self.dataPage = nil
         end
         if self.dialogs then self.dialogs:Refresh() end
-        if self.detailsFrame and self.detailsFrame:IsShown() and self.selected then
+        if detailsShown then
             local current
             for _, contact in ipairs(snapshot) do
                 if contact.id == self.selected.id or self.selected.identity and contact.identity == self.selected.identity then current = contact break end
