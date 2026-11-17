@@ -1255,8 +1255,14 @@ function UI.New(app)
         local nearbyShown = profile.display.showList or preview == true
         local detailsShown = self.detailsFrame and self.detailsFrame:IsShown() and self.selected
         local liveDetailsShown = detailsShown and not self.selected.preview
-        local liveSnapshot
-        if nearbyShown and not preview then liveSnapshot = app.engine:Snapshot() end
+        local maxRows = math.floor(RG.Util.Clamp(profile.display.maxRows, 3, 20, 8))
+        local liveSnapshot, nearbyCount, nearbyVisible
+        local paged = nearbyShown and not preview and not profile.display.streamer
+        if paged then
+            liveSnapshot, nearbyCount, nearbyVisible, self.offset = app.engine:NearbyPage(self.offset, maxRows)
+        elseif nearbyShown and not preview then
+            liveSnapshot = app.engine:Snapshot()
+        end
         local untilTime = M.Number(app.engine.pausedUntil)
         local paused = untilTime ~= nil and untilTime > now
         local needsStatus = self.statusAt == nil or now - self.statusAt >= 1
@@ -1276,31 +1282,35 @@ function UI.New(app)
         if nearbyShown then
             local snapshot = preview and self.previewContacts or liveSnapshot
             local rows = M.Rows(snapshot, profile, now, preview and self.previewAliases or self.aliases)
-            self.renderedCount = #rows
-            local maxRows = math.floor(RG.Util.Clamp(profile.display.maxRows, 3, 20, 8))
+            local rowCount = nearbyCount or #rows
+            self.renderedCount = rowCount
             local rowHeight = profile.display.textSize + UI.layout.rowPadding
-            local mainHeight = UI.layout.header + math.max(3, math.min(maxRows, #rows)) * rowHeight + UI.layout.footer
+            local mainHeight = UI.layout.header + math.max(3, math.min(maxRows, rowCount)) * rowHeight + UI.layout.footer
             if self.nearbyHeight ~= mainHeight then
                 main:SetHeight(mainHeight)
                 self.nearbyHeight = mainHeight
             end
             fitNearby(mainHeight, profile)
-            self.offset = math.max(0, math.min(self.offset, math.max(0, #rows - maxRows)))
-            local visibleCount = 0
-            for _, row in ipairs(rows) do if row.visible and row.contact.behindCamera ~= true then visibleCount = visibleCount + 1 end end
+            local visibleCount = nearbyVisible
+            if not paged then
+                self.offset = math.max(0, math.min(self.offset, math.max(0, rowCount - maxRows)))
+                visibleCount = 0
+                for _, row in ipairs(rows) do if row.visible and row.contact.behindCamera ~= true then visibleCount = visibleCount + 1 end end
+            end
             self.visibleCount = preview and app.engine:CountVisible() or visibleCount
             local status = self:T(preview and "demoLabel" or detection) .. " · " .. self:F("inViewCount", visibleCount)
             if not preview and detection ~= "disabled" and alertBlock then status = status .. " · " .. self:T("alertsQuiet") end
             paintText(statusText, status)
             paintText(self.pauseButton.label, self:T(paused and "resume" or "pause"))
             paintText(self.muteButton.label, self:T(profile.alerts.sound and "mute" or "unmute"))
-            paintShown(empty, #rows == 0); paintShown(emptyHelp, #rows == 0)
+            paintShown(empty, rowCount == 0); paintShown(emptyHelp, rowCount == 0)
+            local rowOffset = paged and 0 or self.offset
             for i, row in ipairs(self.rows) do
-                local data = i <= maxRows and rows[self.offset + i] or nil
+                local data = i <= maxRows and rows[rowOffset + i] or nil
                 paintNearbyRow(row, data, i, profile)
             end
-            paintText(more, #rows > maxRows and self:F("moreContacts", #rows - maxRows) or self:T("noTarget"))
-            if #rows == 0 then
+            paintText(more, rowCount > maxRows and self:F("moreContacts", rowCount - maxRows) or self:T("noTarget"))
+            if rowCount == 0 then
                 local titleKey, helpKey = "noEnemies", "noEnemiesHelp"
                 if not profile.enabled and not preview then titleKey, helpKey = "noDisabled", "noDisabledHelp"
                 elseif #snapshot > 0 or M.Number(appStatus.contacts, 0) > 0 then titleKey, helpKey = "noFiltered", "noFilteredHelp"
@@ -1357,7 +1367,7 @@ function UI.New(app)
         if self.dialogs then self.dialogs:Refresh() end
         if liveDetailsShown then
             local current
-            if liveSnapshot then
+            if liveSnapshot and not paged then
                 for _, contact in ipairs(liveSnapshot) do
                     if contact.id == self.selected.id or self.selected.identity and contact.identity == self.selected.identity then current = contact break end
                 end

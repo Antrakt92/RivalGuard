@@ -947,11 +947,15 @@ function E:CountVisible()
     return count
 end
 
+local function recentContactBefore(a, b)
+    if a.lastSeen ~= b.lastSeen then return a.lastSeen > b.lastSeen end
+    return a.id < b.id
+end
+
 local function contactBefore(a, b)
     if a.watched ~= b.watched then return a.watched end
     if a.visible ~= b.visible then return a.visible end
-    if a.lastSeen ~= b.lastSeen then return a.lastSeen > b.lastSeen end
-    return a.id < b.id
+    return recentContactBefore(a, b)
 end
 
 local function displayedView(engine, contact, now)
@@ -983,6 +987,31 @@ function E:Snapshot()
     end
     table.sort(result, contactBefore)
     return result
+end
+
+function E:NearbyPage(offset, limit)
+    local candidates, ranks, visibleCount = {}, {}, 0
+    for _, contact in pairs(self.contacts) do
+        local entry = self:ListEntry(contact)
+        if Rules.Display(self.profile, contact, entry) then
+            local visible = next(contact.tokens) ~= nil
+            local watched = entry and (entry.kind == "watch" or entry.kind == "avoid")
+            candidates[#candidates + 1] = contact
+            ranks[contact] = (watched and 2 or 0) + (visible and 1 or 0)
+            if visible and contact.behindCamera ~= true then visibleCount = visibleCount + 1 end
+        end
+    end
+    table.sort(candidates, function(a, b)
+        if ranks[a] ~= ranks[b] then return ranks[a] > ranks[b] end
+        return recentContactBefore(a, b)
+    end)
+    local count, now, page = #candidates, self:Now(), {}
+    limit = math.floor(U.Clamp(limit, 1, 20, 8))
+    offset = math.floor(U.Clamp(offset, 0, math.max(0, count - limit), 0))
+    for index = offset + 1, math.min(count, offset + limit) do
+        page[#page + 1] = self:View(candidates[index], now)
+    end
+    return page, count, visibleCount, offset
 end
 
 function E:RevalidatePending()

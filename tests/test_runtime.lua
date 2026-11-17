@@ -1159,9 +1159,107 @@ H.Test("hidden Nearby skips row production while minimap census and alerts stay 
     H.Equal(snapshotCalls, 0)
     launcher:Click()
     H.True(ui.frame:IsShown())
-    H.True(snapshotCalls > 0)
+    H.Equal(snapshotCalls, 0)
     H.True(rowCalls > previewRowCalls)
     H.Equal(ui.rows[1].contact.identity, "guid:Player-Count-1")
+end)
+
+H.Test("a live Nearby refresh builds only the visible page in a mixed crowd", function()
+    local state, RG, app = setup(nil, function(mock)
+        mock.api.C_NamePlateManager = { IsNamePlateUnitBehindCamera = function(token)
+            return tonumber(token:match("%d+")) % 6 == 0
+        end }
+    end)
+    local profile, engine, ui = app.db:GetProfile(), app.engine, app.ui
+    profile.display.maxRows = 8
+    app:OnSettingsChanged()
+    local function identity(index) return "guid:Player-NearbyPage-" .. index end
+    for index, kind in pairs({ [1] = "watch", [3] = "watch", [5] = "avoid", [7] = "ignore" }) do
+        assert(app.db:SetList(identity(index), kind, nil, { name = "Listed rival " .. index }))
+    end
+    for index = 1, 96 do
+        local token = "nameplate" .. index
+        local class = index >= 94 and "PRIEST" or ({ "ROGUE", "HUNTER", "MAGE", "UNKNOWN_FIXTURE" })[(index - 1) % 4 + 1]
+        state:Unit(token, { guid = "Player-NearbyPage-" .. index, name = "Crowd rival " .. index,
+            class = class, hostile = true, isPlayer = true })
+        state:Fire("NAME_PLATE_UNIT_ADDED", token)
+        if index % 8 == 0 then state.clock.Advance(0.03) end
+    end
+    for index = 9, 90, 9 do
+        local token = "nameplate" .. index
+        state.units[token], state.plates[token] = nil, nil
+        state:Fire("NAME_PLATE_UNIT_REMOVED", token)
+    end
+    state:Advance(1.5)
+    local alerts, sounds = engine.counters.alerts, #state.sounds
+    local rawSnapshot, rawView, rawRows = engine.Snapshot, engine.View, RG.UIModel.Rows
+    local stats
+    engine.Snapshot = function(self, ...)
+        if stats then stats.snapshots = stats.snapshots + 1 end
+        return rawSnapshot(self, ...)
+    end
+    engine.View = function(self, ...)
+        if stats then stats.views = stats.views + 1 end
+        return rawView(self, ...)
+    end
+    RG.UIModel.Rows = function(snapshot, ...)
+        if stats then stats.input = math.max(stats.input, #snapshot) end
+        return rawRows(snapshot, ...)
+    end
+    local function measure(action)
+        stats = { snapshots = 0, views = 0, input = 0 }
+        action()
+        local observed = stats
+        stats = nil
+        return observed
+    end
+    local function checkPage(refresh, offset)
+        local expected = rawSnapshot(engine)
+        local visible = 0
+        for _, contact in ipairs(expected) do
+            if contact.visible and contact.behindCamera ~= true then visible = visible + 1 end
+        end
+        local measured = measure(refresh)
+        H.Equal(ui.offset, offset)
+        H.Equal(ui.renderedCount, #expected)
+        H.Equal(ui.visibleCount, visible)
+        H.True(ui.statusText:GetText():find(ui:F("inViewCount", visible), 1, true) ~= nil)
+        for index = 1, profile.display.maxRows do
+            local wanted, row = expected[offset + index], ui.rows[index]
+            H.Equal(row:IsShown(), wanted ~= nil)
+            H.Equal(row.contact and row.contact.identity, wanted and wanted.identity)
+        end
+        H.Equal(measured.snapshots, 0)
+        H.True(measured.views <= profile.display.maxRows + 2)
+        H.True(measured.input <= profile.display.maxRows)
+        H.Equal(engine.counters.alerts, alerts); H.Equal(#state.sounds, sounds)
+    end
+
+    local offsetEnd = #rawSnapshot(engine) - profile.display.maxRows
+    checkPage(function() ui:Refresh() end, 0)
+    ui.rows[1]:Click()
+    local selectedIdentity = ui.selected.identity
+    checkPage(function() ui.frame.scripts.OnMouseWheel(ui.frame, -500) end, offsetEnd)
+    H.Equal(ui.selected.identity, selectedIdentity)
+    H.True(ui.detailsFrame:IsShown()); H.False(ui.selectedOutside)
+    H.True(ui.rows[1].contact.identity ~= selectedIdentity)
+    checkPage(function() ui.frame.scripts.OnMouseWheel(ui.frame, 1) end, offsetEnd - 1)
+
+    profile.display.classes, profile.display.showUnknown = { PRIEST = true }, false
+    checkPage(function() app:OnSettingsChanged() end, 0)
+    H.Equal(ui.renderedCount, 3)
+    H.Equal(ui.visibleCount, 2)
+
+    profile.display.classes, profile.display.showUnknown, profile.display.streamer = {}, true, true
+    app:OnSettingsChanged()
+    local private = measure(function() ui:Refresh() end)
+    H.True(private.snapshots > 0)
+    H.True(private.input > profile.display.maxRows)
+    local preview = measure(function() app:Demo() end)
+    H.Equal(preview.snapshots, 0)
+    H.Equal(preview.input, 3)
+    H.True(ui.rows[1].contact.preview)
+    H.Equal(engine.counters.alerts, alerts); H.Equal(#state.sounds, sounds)
 end)
 
 H.Test("an open contact card refreshes in a crowd without building a hidden Nearby list", function()
