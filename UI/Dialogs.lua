@@ -869,6 +869,7 @@ function D.Attach(ui, app, H)
             if frame:IsShown() then ui:FitWindow(frame, frame:GetWidth(), frame:GetHeight(), 1) end
         end
         if self.rulesFrame and self.rulesFrame:IsShown() then self:RefreshRules() else self:RefreshRuleCheck() end
+        if self.guideFrame and self.guideFrame:IsShown() then self:RefreshGuideClassChoices() end
     end
 
     local GUIDE_STEPS = {
@@ -877,6 +878,18 @@ function D.Attach(ui, app, H)
         { "guideTrust", "guideTrustText" },
     }
 
+    function self:RefreshGuideClassChoices()
+        local f = self.guideFrame
+        local choicesCurrent = self.guideStep == 2 and self.guideProfile == ui:Profile()
+        local selected = choicesCurrent and ui:AlertClassPreset()
+        for _, choice in ipairs(f.classChoices) do
+            choice:SetShown(choicesCurrent)
+            local isSelected = selected == choice.preset
+            choice:SetEnabled(choicesCurrent and not isSelected)
+            choice.bg:SetColorTexture(unpack(isSelected and { 0.10, 0.22, 0.28, 1 } or H.C.panel))
+        end
+    end
+
     function self:RenderGuide()
         local f = self.guideFrame
         local step = GUIDE_STEPS[self.guideStep]
@@ -884,6 +897,8 @@ function D.Attach(ui, app, H)
         f.heading:SetText(t(step[1])); f.body:SetText(t(step[2]))
         f.back:SetEnabled(self.guideStep > 1)
         f.openAlerts:SetShown(step[1] == "guideRules")
+        f.preview:SetShown(step[1] ~= "guideRules")
+        self:RefreshGuideClassChoices()
         f.next.label:SetText(t(self.guideStep == #GUIDE_STEPS and "guideDone" or "next"))
     end
 
@@ -905,11 +920,28 @@ function D.Attach(ui, app, H)
             app:Demo()
         end)
         f.preview:SetPoint("BOTTOMLEFT", 20, 72)
-        f.openAlerts = H.localButton(f, "guideOpenAlerts", 252, function()
+        local function chooseClasses(preset)
+            if f:IsShown() and self.guideStep == 2 and self.guideProfile == ui:Profile() then
+                ui:ApplyAlertClassPreset(preset)
+                self:RefreshGuideClassChoices()
+            end
+        end
+        f.allClasses = H.localButton(f, "all", 126, function() chooseClasses("all") end)
+        f.allClasses.preset = "all"
+        f.allClasses:SetPoint("BOTTOMLEFT", 20, 72)
+        f.allClasses:SetScript("OnEnter", function() H.tooltip(f.allClasses, t("all"), t("guideAllClassesTip")) end)
+        f.allClasses:SetScript("OnLeave", H.hideTooltip)
+        f.hunterRogue = H.localButton(f, "hunterRogueClasses", 196, function() chooseClasses("hunterRogue") end)
+        f.hunterRogue.preset = "hunterRogue"
+        f.hunterRogue:SetPoint("LEFT", f.allClasses, "RIGHT", 12, 0)
+        f.hunterRogue:SetScript("OnEnter", function() H.tooltip(f.hunterRogue, t("hunterRogueClasses"), t("hunterRogueClassesTip")) end)
+        f.hunterRogue:SetScript("OnLeave", H.hideTooltip)
+        f.classChoices = { f.allClasses, f.hunterRogue }
+        f.openAlerts = H.localButton(f, "guideOpenAlerts", 176, function()
             self:FinishGuide()
             ui:OpenSettings("alerts")
         end)
-        f.openAlerts:SetPoint("LEFT", f.preview, "RIGHT", 12, 0)
+        f.openAlerts:SetPoint("LEFT", f.hunterRogue, "RIGHT", 12, 0)
         f.skip = H.localButton(f, "guideSkip", 150, function() self:FinishGuide() end)
         f.skip:SetPoint("BOTTOMLEFT", 20, 22)
         f.next = H.button(f, t("next"), 150, function()
@@ -923,7 +955,8 @@ function D.Attach(ui, app, H)
         f.back:SetPoint("RIGHT", f.next, "LEFT", -12, 0)
         f:SetScript("OnHide", function()
             if not self.guidePresented then return end
-            self.guidePresented = false
+            self.guidePresented, self.guideProfile = false, nil
+            H.hideTooltip()
             if not ui.destroyed and app.db.MarkGuideSeen then app.db:MarkGuideSeen() end
         end)
         return f
@@ -935,7 +968,7 @@ function D.Attach(ui, app, H)
             if app.db.HasSeenGuide and app.db:HasSeenGuide() then return false end
         end
         if not self.guideFrame then self:BuildGuide() end
-        self.guideStep, self.guidePresented = 1, true
+        self.guideStep, self.guidePresented, self.guideProfile = 1, true, ui:Profile()
         self:RenderGuide()
         showDialog(self.guideFrame)
         return true

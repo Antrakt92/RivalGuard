@@ -93,7 +93,8 @@ if view == "settings" then
     end
 elseif view == "guide" then
     app.ui:ShowGuide(true)
-    if page == "rules" then app.ui.guideDialog.next:Click() end
+    if page == "rules" or page == "focused" then app.ui.guideDialog.next:Click() end
+    if page == "focused" then app.ui.guideDialog.hunterRogue:Click() end
 elseif view == "journal" then
     if page == "last-page" then
         for i = 11, 13 do

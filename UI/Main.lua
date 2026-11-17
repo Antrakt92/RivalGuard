@@ -730,6 +730,24 @@ function UI.New(app)
         return y - 65
     end
 
+    function self:AlertClassPreset()
+        local alerts = self:Profile().alerts
+        if next(alerts.classes) == nil and alerts.unknownClass == RG.Defaults.profile.alerts.unknownClass then return "all" end
+        if alerts.classes.HUNTER == true and alerts.classes.ROGUE == true and RG.Util.Count(alerts.classes) == 2
+            and alerts.unknownClass == false then return "hunterRogue" end
+    end
+
+    function self:ApplyAlertClassPreset(preset)
+        if self:AlertClassPreset() == preset then return end
+        local alerts = self:Profile().alerts
+        if preset == "hunterRogue" then
+            alerts.classes, alerts.unknownClass = { HUNTER = true, ROGUE = true }, false
+        elseif preset == "all" then
+            alerts.classes, alerts.unknownClass = {}, RG.Defaults.profile.alerts.unknownClass
+        else return end
+        changed()
+    end
+
     local function classSelector(page, group, y)
         local titleText = label(page, group == "display" and "displayClasses" or "alertClasses", 13)
         titleText:SetPoint("TOPLEFT", 0, y); titleText:SetWidth(group == "alerts" and 290 or 550)
@@ -750,10 +768,7 @@ function UI.New(app)
             soloHint:SetPoint("TOPRIGHT", -20, y); soloHint:SetWidth(250); soloHint:SetJustifyH("RIGHT")
             self.alertAllClassesButton = allButton
             local presetButton = localButton(page, "hunterRogueClasses", 220, function()
-                local alerts = self:Profile().alerts
-                alerts.classes = { HUNTER = true, ROGUE = true }
-                alerts.unknownClass = false
-                changed()
+                self:ApplyAlertClassPreset("hunterRogue")
             end)
             presetButton:SetPoint("LEFT", clearButton, "RIGHT", 12, 0)
             presetButton:SetScript("OnEnter", function()

@@ -72,7 +72,8 @@ settings, or drag it around the minimap to move it.
 Open **Options → Keybindings → RivalGuard** to assign shortcuts for Nearby,
 pausing or resuming alerts, and muting or restoring alert sound.
 
-For a quick setup, click **Alerts → Hunters and Rogues**. This keeps the Nearby
+For a quick setup, choose **Hunters and Rogues** during the first-run tour or
+under **Alerts**. This keeps the Nearby
 list unchanged, selects those two classes for ordinary alerts and turns off
 banners for unknown classes. Right-click a class icon on the Alerts page to
 select just that class and turn off unknown-class banners. Personal lists and
