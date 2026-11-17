@@ -13,6 +13,7 @@ local SOUND_EVENT_KEYS = { sighting = "eventSighting", returning = "eventReturni
     stealth = "eventStealth", watch = "eventWatch", wave = "eventWave" }
 local SOUND_STATUS_KEYS = { not_requested = "lastSoundNotRequested", sound_gap = "lastSoundGap",
     playback_requested = "lastSoundRequested", playback_unconfirmed = "lastSoundUnconfirmed" }
+local SOUND_CHANNEL_KEYS = { Master = "master", SFX = "sfx", Music = "music", Ambience = "ambience", Dialog = "dialog" }
 local WINDOW_MARGIN = 12
 local NEARBY_DEFAULT_X, NEARBY_DEFAULT_Y = -70, 20
 local nativeSettings = {}
@@ -285,6 +286,18 @@ function UI.New(app)
     function self:F(key, ...) return RG.Locale.Format(key, self:Profile().locale, ...) end
     function self:Now() return app.engine:Now() end
     function self:AlertBlock() return app.AlertBlock and app:AlertBlock() end
+
+    function self:PreviewSoundFeedback(kind, soundCue)
+        if not app.PreviewSound then return self:T("lastSoundUnconfirmed") end
+        local accepted, cue, channel = app:PreviewSound(kind, soundCue)
+        if cue == "none" then return self:T("soundPreviewNone") end
+        local status = self:T(accepted == true and "lastSoundRequested" or "lastSoundUnconfirmed")
+        local cueKey, channelKey = RG.Defaults.soundLabels[cue], SOUND_CHANNEL_KEYS[channel]
+        if cueKey and channelKey then
+            return status .. "\n" .. self:F("soundPreviewSelection", self:T(cueKey), self:T(channelKey))
+        end
+        return status
+    end
 
     function self:DetectionKey(status)
         local state = type(status) == "table" and (status.detectionState or status.state)
@@ -802,7 +815,11 @@ function UI.New(app)
         local kind = entry[1]
         local rowY = y
         y = choice(alerts, entry[2], "alerts.sounds." .. kind, soundOptions, y, 380, true)
-        local listen = localButton(alerts, "previewSound", 150, function() if app.PreviewSound then app:PreviewSound(kind) end end)
+        local listen
+        listen = localButton(alerts, "previewSound", 150, function()
+            tooltip(listen, self:T("previewSound"), self:PreviewSoundFeedback(kind))
+        end)
+        listen:SetScript("OnLeave", hideTooltip)
         listen:SetPoint("TOPLEFT", 395, rowY - 25)
     end
     local previewAlert = localButton(alerts, "previewBanner", 200, function() self:PreviewAlert() end)

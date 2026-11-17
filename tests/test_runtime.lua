@@ -569,9 +569,14 @@ H.Test("the event sound picker exposes all cues and separates listening from cho
     local ui = app.ui
     profile.alerts.sound = false
     app:OnSettingsChanged()
+    seeSoundRuleRival(state, 1)
+    local pending = state.RG.Codec.Encode(app.engine.pending)
+    local saved = app.db:ExportProfile()
+    H.Equal(#app.engine.pending, 1)
     ui:OpenSettings("alerts")
     local control = settingButton(ui, "alerts.sounds.stealth")
     local picker = openSoundPicker(ui, control)
+    H.Equal(picker.feedback:GetText(), "")
     H.Equal(#picker.rows, 6)
     for _, value in ipairs({ "none", "ping", "warning", "ready", "whisper", "quest" }) do
         local row = soundPickerRow(picker, value)
@@ -585,6 +590,23 @@ H.Test("the event sound picker exposes all cues and separates listening from cho
     H.Equal(#state.sounds, 1)
     H.Equal(state.sounds[1].id, RULE_SOUND_KITS.IG_QUEST_LIST_COMPLETE)
     H.Equal(state.sounds[1].channel, "Dialog")
+    local function feedback(status, cue)
+        H.Equal(picker.feedback:GetText(), ui:T(status) .. "\n" .. ui:F("soundPreviewSelection", ui:T(cue), ui:T("dialog")))
+    end
+    feedback("lastSoundRequested", "soundQuest")
+    local play = state.api.PlaySound
+    state.api.PlaySound = function(...)
+        play(...)
+        return false
+    end
+    soundPickerRow(picker, "ready").listen:Click()
+    H.Equal(#state.sounds, 2)
+    H.Equal(state.sounds[2].id, RULE_SOUND_KITS.READY_CHECK)
+    feedback("lastSoundUnconfirmed", "soundReady")
+    H.Equal(app.db:ExportProfile(), saved)
+    H.Equal(state.RG.Codec.Encode(app.engine.pending), pending)
+    H.Equal(#app.engine.history, 0)
+    H.Nil(app.engine:LastSoundOutcome(app.engine:Snapshot()[1].id))
     H.Equal(profile.alerts.sounds.stealth, "none")
     H.False(profile.alerts.sound)
     H.True(picker:IsShown())
@@ -592,14 +614,49 @@ H.Test("the event sound picker exposes all cues and separates listening from cho
     quest.choice:Click()
     quest.listen:Click()
     H.False(picker:IsShown())
+    H.Equal(picker.feedback:GetText(), "")
     H.Equal(profile.alerts.sounds.stealth, "none")
-    H.Equal(#state.sounds, 1)
+    H.Equal(#state.sounds, 2)
 
-    pickSound(ui, control, "quest")
+    openSoundPicker(ui, control)
+    H.Equal(picker.feedback:GetText(), "")
+    soundPickerRow(picker, "quest").choice:Click()
+    H.False(picker:IsShown())
     H.Equal(profile.alerts.sounds.stealth, "quest")
     H.Equal(profile.alerts.sounds.sighting, "none")
-    H.Equal(#state.sounds, 1)
+    H.Equal(#state.sounds, 2)
     H.Equal(app.engine.counters.alerts, 0)
+end)
+
+H.Test("direct Listen identifies no cue and confirms explicitly tested event playback", function()
+    local state, app, profile = ruleSoundFixture()
+    local ui = app.ui
+    profile.alerts.sound = false
+    app:OnSettingsChanged()
+    ui:OpenSettings("alerts")
+    local control = settingButton(ui, "alerts.sounds.sighting")
+    local _, _, _, _, rowY = control:GetPoint(1)
+    local listen
+    for _, child in ipairs(ui.pages.alerts.children) do
+        local _, _, _, _, y = child:GetPoint(1)
+        if y == rowY and child.label and child.label:GetText() == ui:T("previewSound") then listen = child; break end
+    end
+    assert(listen):Click()
+    local tooltip = state.api.GameTooltip
+    H.Equal(tooltip.owner, listen)
+    H.Equal(tooltip.lines[#tooltip.lines], ui:T("soundPreviewNone"))
+    H.Equal(#state.sounds, 0)
+    pickSound(ui, control, "warning")
+    local saved = app.db:ExportProfile()
+    listen:Click()
+    local feedback = tooltip.lines[#tooltip.lines]
+    H.True(feedback:find(ui:F("soundPreviewSelection", ui:T("soundWarning"), ui:T("dialog")), 1, true) ~= nil)
+    H.True(feedback:find(ui:T("lastSoundRequested"), 1, true) ~= nil)
+    H.Equal(#state.sounds, 1)
+    H.Equal(state.sounds[1].id, RULE_SOUND_KITS.RAID_WARNING)
+    H.Equal(state.sounds[1].channel, "Dialog")
+    H.Equal(app.db:ExportProfile(), saved)
+    H.Equal(#app.engine.history, 0); H.Equal(#app.engine.pending, 0)
 end)
 
 H.Test("a picker opened for a previous profile cannot overwrite either profile", function()
@@ -634,6 +691,10 @@ H.Test("advanced rule cue preview is detached and saving makes the cue survive r
     H.Equal(#state.sounds, 1)
     H.Equal(state.sounds[1].id, RULE_SOUND_KITS.RAID_WARNING)
     H.Equal(state.sounds[1].channel, "Dialog")
+    local tooltip = state.api.GameTooltip
+    H.Equal(tooltip.owner, dialog.previewCue)
+    H.True(tooltip.lines[#tooltip.lines]:find(ui:F("soundPreviewSelection", ui:T("soundWarning"), ui:T("dialog")), 1, true) ~= nil)
+    H.True(tooltip.lines[#tooltip.lines]:find(ui:T("lastSoundRequested"), 1, true) ~= nil)
     H.Equal(#profile.rules, 0)
     H.Equal(app.engine.counters.alerts, 0)
     H.Equal(#app.engine.history, 0)

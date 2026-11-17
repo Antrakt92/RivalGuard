@@ -101,7 +101,13 @@ elseif view == "personal" then
     if page == "filters" then app.ui.journalFilterChoices.avoid:Click() end
 elseif view == "rules" then
     app.ui:OpenRules()
-    if page == "sound-picker" then app.ui.rulesDialog.soundCue:Click() end
+    if page == "sound-picker" or page == "sound-feedback" then
+        app.ui.rulesDialog.soundCue:Click()
+        if page == "sound-feedback" then
+            state.api.PlaySound = function() return false end
+            app.ui.soundPicker.rows[3].listen:Click()
+        end
+    end
     if page == "check-draft" or page == "check-draft-range" then
         local dialog = app.ui.rulesDialog
         for _, chip in ipairs(dialog.classes) do

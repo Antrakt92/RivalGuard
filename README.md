@@ -34,7 +34,8 @@ current profile would handle that new sighting in the open world.
   particular classes, situations, lists or estimated distances.
   A rule can use a distinct sound, such as different cues for Hunters and
   Rogues. Open **Advanced rules** at the top of Alerts and right-click a class
-  icon in a new rule. Open the sound list to hear each choice before saving.
+  icon in a new rule. Open the sound list to try each choice and see whether
+  WoW accepted the request on the configured channel.
   New rules require a known class by default. Turn off **Require known class**
   to use the general unknown-class setting, as existing rules do by default.
   **Check draft** shows which rule would win for sample opponents before you save.

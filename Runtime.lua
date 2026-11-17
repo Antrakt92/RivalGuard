@@ -77,7 +77,7 @@ function App:ToggleMute()
 end
 
 function App:PreviewSound(kind, soundCue)
-    return self.audio and self.audio:Play(kind or "sighting", true, soundCue)
+    if self.audio then return self.audio:Play(kind or "sighting", true, soundCue) end
 end
 
 local function ruleCanPlay(profile, context, ordinaryEvent)

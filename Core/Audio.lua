@@ -19,15 +19,15 @@ function Audio:Play(kind, preview, soundCue)
     local profile = self.getProfile()
     if not preview and (not profile.enabled or not profile.alerts.enabled or not profile.alerts.sound) then return false end
     local choice = soundCue or profile.alerts.sounds[kind] or "ping"
-    if choice == "none" then return false end
+    local channel = CHANNELS[profile.alerts.channel] and profile.alerts.channel or "Master"
+    if choice == "none" then return false, choice, channel end
     local spec = SOUNDS[choice]
     if not spec then
         if self.diagnostics then self.diagnostics:Count("invalid_sound") end
-        return false
+        return false, choice, channel
     end
     local kit = self.api.SOUNDKIT and self.api.SOUNDKIT[spec.kit] or spec.fallback
-    if type(kit) ~= "number" or not RG.Util.IsFinite(kit) or kit <= 0 or type(self.api.PlaySound) ~= "function" then return false end
-    local channel = CHANNELS[profile.alerts.channel] and profile.alerts.channel or "Master"
+    if type(kit) ~= "number" or not RG.Util.IsFinite(kit) or kit <= 0 or type(self.api.PlaySound) ~= "function" then return false, choice, channel end
     local ok, played = pcall(self.api.PlaySound, kit, channel)
     local restricted = false
     if ok and type(self.api.issecretvalue) == "function" then
@@ -36,7 +36,7 @@ function Audio:Play(kind, preview, soundCue)
     end
     if not ok or restricted or played ~= true then
         if self.diagnostics then self.diagnostics:Count("sound_unavailable") end
-        return false
+        return false, choice, channel
     end
-    return true
+    return true, choice, channel
 end
