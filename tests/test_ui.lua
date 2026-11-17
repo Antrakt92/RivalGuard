@@ -238,12 +238,32 @@ H.Test("settings clear known classes independently and let any two classes alert
 end)
 
 H.Test("UI row recycling clears absent contacts and keeps Unicode names", function()
-    local _, _, app, ui = setup()
+    local _, _, app, ui = setup(nil, function(mock)
+        mock.api.STANDARD_TEXT_FONT = "Fonts\\FRIZQT__.TTF"
+    end)
     app.engine:Observe({ token = "nameplate1", guid = "A", name = "Разбойник", class = "ROGUE", hostile = true, isPlayer = true, source = "nameplate" })
     ui:Refresh()
     H.True(ui.rows[1]:IsShown()); H.Equal(ui.rows[1].nameText:GetText(), "Разбойник")
+    H.Equal(ui.rows[1].nameText.font[1], "Fonts\\ARIALN.TTF")
+    ui.rows[1]:Click("RightButton")
+    H.Equal(ui.detailsFrame.title:GetText(), "Разбойник")
+    H.Equal(ui.detailsFrame.title.font[1], "Fonts\\ARIALN.TTF")
+    ui:Alert({ kind = "targeting", contact = { name = "Разбойник", class = "ROGUE" } })
+    H.Equal(ui.banner.body:GetText(), "Разбойник")
+    H.Equal(ui.banner.body.font[1], "Fonts\\ARIALN.TTF")
     app.engine:Clear(); ui:Refresh()
     H.False(ui.rows[1]:IsShown()); H.Nil(ui.rows[1].contact)
+end)
+
+H.Test("East Asian clients keep their native UI face", function()
+    local _, _, app, ui = setup(nil, function(mock)
+        mock.locale = "koKR"
+        mock.api.STANDARD_TEXT_FONT = "Fonts\\2002.TTF"
+    end)
+    app.engine:Observe({ token = "nameplate1", guid = "A", name = "도적", class = "ROGUE", hostile = true, isPlayer = true })
+    ui:Refresh()
+    H.Equal(ui.rows[1].nameText:GetText(), "도적")
+    H.Equal(ui.rows[1].nameText.font[1], "Fonts\\2002.TTF")
 end)
 
 H.Test("Nearby layout cache follows viewport and font changes across hidden rows", function()

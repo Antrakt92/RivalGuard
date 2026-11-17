@@ -25,9 +25,19 @@ local C = {
     gold = { 1, 0.79, 0.30 }, danger = { 1, 0.42, 0.38 }, border = { 0.22, 0.30, 0.39, 1 },
 }
 
+local CYRILLIC_UI_FONT = "Fonts\\ARIALN.TTF"
+local clientLocale = GetLocale and GetLocale()
+local usesEastAsianFont = clientLocale == "koKR" or clientLocale == "zhCN" or clientLocale == "zhTW"
+
+local function uiFont()
+    -- The stock chat face covers both Latin and Cyrillic on English clients.
+    if usesEastAsianFont then return STANDARD_TEXT_FONT or CYRILLIC_UI_FONT end
+    return CYRILLIC_UI_FONT
+end
+
 local function font(parent, size, color, align)
     local text = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    text:SetFont(STANDARD_TEXT_FONT or "Fonts\\ARIALN.TTF", size or 13, "")
+    text:SetFont(uiFont(), size or 13, "")
     text:SetTextColor(unpack(color or C.text))
     text:SetJustifyH(align or "LEFT")
     text:SetJustifyV("TOP")
@@ -125,7 +135,7 @@ local function paintNearbyRow(row, data, index, profile, inset)
 
     local display = profile.display
     local textSize = display.textSize
-    local face = STANDARD_TEXT_FONT or "Fonts\\ARIALN.TTF"
+    local face = uiFont()
     local height = textSize + UI.layout.rowPadding
     local y = -UI.layout.header - (index - 1) * height - (inset or 0)
     if row.paintedY ~= y then
