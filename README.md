@@ -35,6 +35,11 @@ your journal and lists untouched.
 Click the minimap button to show or hide Nearby. Right-click it to open
 settings, or drag it around the minimap to move it.
 
+For a quick setup, click **Alerts → Hunters and Rogues**. This keeps the Nearby
+list unchanged, selects those two classes for ordinary alerts and turns off
+banners for unknown classes. Personal lists and matching advanced rules can
+override the alert class filter.
+
 Enable enemy nameplates in WoW to provide the broadest available coverage.
 RivalGuard does not change game settings. Range estimates depend on what the
 client can measure for observed units and may be a bracket or unavailable.

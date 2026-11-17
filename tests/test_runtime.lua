@@ -192,6 +192,42 @@ H.Test("runtime diagnostics report redacts observed identities and error details
 end)
 
 for _, locale in ipairs({ "enUS", "ruRU" }) do
+    H.Test("Hunters and Rogues quick selection applies to live alerts in " .. locale, function()
+        local state, RG, app = setup()
+        local profile, ui = app.db:GetProfile(), app.ui
+        profile.locale = locale
+        app:ProfileChanged()
+        ui:OpenSettings("alerts")
+        H.Equal(ui.hunterRogueButton.label:GetText(), RG.Locale.Get("hunterRogueClasses", locale))
+        ui.hunterRogueButton:Click()
+        H.Equal(RG.Util.Count(profile.alerts.classes), 2)
+        H.True(profile.alerts.classes.HUNTER)
+        H.True(profile.alerts.classes.ROGUE)
+        H.False(profile.alerts.unknownClass)
+        H.Nil(next(profile.display.classes))
+        for index, class in ipairs({ "HUNTER", "ROGUE", "MAGE", "UNKNOWN_FIXTURE" }) do
+            local token = "nameplate" .. index
+            state:Unit(token, { guid = "Player-Quick-" .. index, name = "Rival " .. index, class = class, hostile = true, isPlayer = true })
+            state:Fire("NAME_PLATE_UNIT_ADDED", token)
+        end
+        state:Advance(1.5)
+        H.Equal(#app.engine:Snapshot(), 4)
+        H.Equal(app.engine.counters.alerts, 2)
+        H.Equal(ui.activeBanner.name, "Rival 1")
+        H.Equal(#ui.bannerQueue, 1)
+        H.Equal(ui.bannerQueue[1].name, "Rival 2")
+
+        ui.alertAllClassesButton:Click()
+        H.Nil(next(profile.alerts.classes))
+        H.False(profile.alerts.unknownClass)
+        local unknown
+        for _, control in ipairs(ui.controls) do
+            if control.path == "alerts.unknownClass" then unknown = control.frame break end
+        end
+        assert(unknown):Click()
+        H.True(profile.alerts.unknownClass)
+    end)
+
     H.Test("streamer transition redacts open live and saved UI in " .. locale, function()
         local state, RG, app = setup()
         local profile, ui = app.db:GetProfile(), app.ui

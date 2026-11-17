@@ -534,6 +534,22 @@ function UI.New(app)
         makeClassChips(page, 0, y - 28, group, false)
         local allButton = localButton(page, "all", 160, function() self:Profile()[group].classes = {}; changed() end)
         allButton:SetPoint("TOPLEFT", 0, y - 69)
+        if group == "alerts" then
+            self.alertAllClassesButton = allButton
+            local presetButton = localButton(page, "hunterRogueClasses", 220, function()
+                local alerts = self:Profile().alerts
+                alerts.classes = { HUNTER = true, ROGUE = true }
+                alerts.unknownClass = false
+                changed()
+            end)
+            presetButton:SetPoint("LEFT", allButton, "RIGHT", 12, 0)
+            presetButton:SetScript("OnEnter", function()
+                tooltip(presetButton, self:T("hunterRogueClasses"), self:T("hunterRogueClassesTip"))
+            end)
+            presetButton:SetScript("OnLeave", hideTooltip)
+            self.hunterRogueButton = presetButton
+            return check(page, "alertUnknownClass", "alerts.unknownClass", y - 108, "alertUnknownClassTip")
+        end
         return y - 110
     end
 
@@ -553,11 +569,11 @@ function UI.New(app)
 
     local alerts = CreateFrame("Frame", nil, content); self.pages.alerts = alerts; alerts:SetAllPoints()
     y = section(alerts, "alerts", 0, "classesTip")
+    y = classSelector(alerts, "alerts", y)
     for _, entry in ipairs({ { "alertsEnabled", "alerts.enabled" }, { "sound", "alerts.sound" }, { "banner", "alerts.banner" }, { "alertStealth", "alerts.stealth", "alertStealthTip" }, { "alertTargeting", "alerts.targeting", "alertTargetingTip" }, { "watchedOnly", "alerts.watchedOnly", "watchedOnlyTip" }, { "muteOrdinary", "alerts.muteOrdinary", "muteOrdinaryTip" } }) do
         y = check(alerts, entry[1], entry[2], y, entry[3])
     end
-    y = classSelector(alerts, "alerts", y - 10)
-    y = slider(alerts, "cooldown", "alerts.cooldown", y, 5, 180, 5, "cooldownTip")
+    y = slider(alerts, "cooldown", "alerts.cooldown", y - 10, 5, 180, 5, "cooldownTip")
     y = slider(alerts, "returnAfter", "alerts.returnAfter", y, 5, 180, 5, "returnAfterTip")
     y = choice(alerts, "soundChannel", "alerts.channel", { { "Master", "master" }, { "SFX", "sfx" }, { "Dialog", "dialog" }, { "Music", "music" }, { "Ambience", "ambience" } }, y)
     y = section(alerts, "sounds", y - 4)
