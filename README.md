@@ -70,7 +70,9 @@ current profile would handle that new sighting in the open world.
 Click the minimap button to show or hide Nearby. Right-click it to open
 settings, or drag it around the minimap to move it.
 Open **Options → Keybindings → RivalGuard** to assign shortcuts for Nearby,
-pausing or resuming alerts, and muting or restoring alert sound.
+pausing or resuming alerts, muting sound, and highlighting the opponent in the
+current alert. The highlight works with Nearby closed when a live individual
+banner is visible and RivalGuard can verify the opponent's nameplate.
 
 For a quick setup, choose **Hunters and Rogues** during the first-run tour or
 under **Alerts**. This keeps the Nearby

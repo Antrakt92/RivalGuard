@@ -300,7 +300,7 @@ H.Test("keyboard dispatch is harmless before the addon initializes", function()
     local state = W.New()
     local RG = state:LoadTOC()
     local bind = assert(state.api.RivalGuard_Binding)
-    bind("nearby"); bind("pause"); bind("mute")
+    bind("nearby"); bind("pause"); bind("mute"); bind("highlight")
     H.False(RG.instance.initialized)
     H.Nil(RG.instance.db)
 end)
@@ -4388,6 +4388,108 @@ end
 local function changeFixtureZone(state, instance, zonePVP)
     state.instance, state.zonePVP = instance, zonePVP
     state:Fire("ZONE_CHANGED_NEW_AREA")
+end
+
+H.Test("highlight shortcut finds the live banner's rival with Nearby hidden and streamer mode enabled", function()
+    local state, _, app = setup()
+    local ui, profile = app.ui, app.db:GetProfile()
+    local targetChanges = 0
+    local function changeTarget() targetChanges = targetChanges + 1 end
+    state.api.TargetUnit, state.api.FocusUnit, state.api.ClearTarget = changeTarget, changeTarget, changeTarget
+    H.Equal(state.api.BINDING_NAME_RIVALGUARD_HIGHLIGHT_ALERT, ui:T("bindingHighlightAlert"))
+    profile.display.classes = { MAGE = true }
+    profile.display.showBadges, profile.display.streamer = false, true
+    app:OnSettingsChanged()
+    local bind = state.api.RivalGuard_Binding
+    bind("nearby")
+    H.False(ui.frame:IsShown())
+    seeSoundRuleRival(state, 1)
+    state:Advance(1.25)
+    H.Equal(ui.activeBanner.kind, "sighting")
+    H.Nil(ui.banner.body:GetText():find("Sound rival 1", 1, true))
+    H.Nil(ui.selected)
+    H.False(locatorVisible(ui, "nameplate1"))
+    bind("highlight")
+    H.True(locatorVisible(ui, "nameplate1"))
+    H.False(ui.badges.highlight.automatic)
+    H.Equal(ui.badges.highlight.id, ui.activeBanner.id)
+    H.False(ui.frame:IsShown())
+    H.Nil(ui.selected)
+    H.Equal(targetChanges, 0)
+end)
+
+for _, ineligible in ipairs({ "wave", "preview", "expired", "paused" }) do
+    H.Test("highlight shortcut declines the current banner when it is " .. ineligible, function()
+        local state, _, app = setup()
+        local ui, bind = app.ui, state.api.RivalGuard_Binding
+        if ineligible == "preview" then
+            app:Demo()
+            H.True(ui.activeBanner.preview)
+        else
+            for index = 1, (ineligible == "wave" and 3 or 1) do seeSoundRuleRival(state, index) end
+            state:Advance(1.25)
+            H.Equal(ui.activeBanner.kind, ineligible == "wave" and "wave" or "sighting")
+            if ineligible == "expired" then
+                state.clock.Advance(ui.bannerUntil - state.clock.Now() + 0.01)
+                H.True(ui.banner:IsShown())
+            elseif ineligible == "paused" then
+                bind("pause")
+                H.True(app.engine.pausedUntil > state.clock.Now())
+            end
+        end
+        local messagesBefore = #state.messages
+        bind("highlight")
+        H.Nil(ui.badges.highlight)
+        H.Equal(#state.messages, messagesBefore + 1)
+        H.True(state.messages[#state.messages]:find(ui:T("alertHighlightUnavailable"), 1, true) ~= nil)
+    end)
+end
+
+H.Test("a failed shortcut on a recycled nameplate preserves a different manual marker", function()
+    local state, app, ui = locatorFixture()
+    app.db:GetProfile().alerts.muteOrdinary = true
+    app:OnSettingsChanged()
+    ui.detailsFrame.locate:Click()
+    local prior = assert(ui.badges.highlight)
+    H.True(locatorVisible(ui, "nameplate1"))
+    seeSoundRuleRival(state, 2)
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate2", "Cast-ShortcutRival", 1856)
+    state:Advance(0.3)
+    H.Equal(ui.activeBanner.kind, "stealth")
+    state:Unit("nameplate2", { guid = "Player-ShortcutReplacement", name = "Replacement", class = "HUNTER",
+        hostile = true, isPlayer = true })
+    local messagesBefore = #state.messages
+    state.api.RivalGuard_Binding("highlight")
+    H.False(locatorVisible(ui, "nameplate2"))
+    H.True(locatorVisible(ui, "nameplate1"))
+    H.Equal(ui.badges.highlight, prior)
+    H.Equal(#state.messages, messagesBefore + 1)
+    H.True(state.messages[#state.messages]:find(ui:T("locateUnavailable"), 1, true) ~= nil)
+end)
+
+for _, changed in ipairs({ "target relation", "zone context" }) do
+    H.Test("highlight shortcut rechecks " .. changed .. " before the next update", function()
+        local state, app, add = automaticLocatorFixture(false)
+        local ui = app.ui
+        add(1, true)
+        state:Advance(0.3)
+        local active, bind = assert(ui.activeBanner), state.api.RivalGuard_Binding
+        H.Equal(active.kind, "targeting")
+        H.False(locatorVisible(ui, "nameplate1"))
+        if changed == "target relation" then
+            state.units.nameplate1target = nil
+        else
+            state.zonePVP = "sanctuary"
+        end
+        H.True(app.engine:Snapshot()[1].targeting)
+        H.Nil(app:AlertBlock())
+        local messagesBefore = #state.messages
+        bind("highlight")
+        H.False(locatorVisible(ui, "nameplate1"))
+        H.Equal(#state.messages, messagesBefore + 1)
+        local notice = changed == "target relation" and "locateUnavailable" or "alertHighlightUnavailable"
+        H.True(state.messages[#state.messages]:find(ui:T(notice), 1, true) ~= nil)
+    end)
 end
 
 local function countNameplateRecoveryReads(state, app)

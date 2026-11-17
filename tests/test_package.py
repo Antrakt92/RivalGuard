@@ -22,6 +22,9 @@ BINDINGS_XML = """<Bindings>
     <Binding name="RIVALGUARD_TOGGLE_MUTE" category="BINDING_HEADER_RIVALGUARD">
         RivalGuard_Binding("mute")
     </Binding>
+    <Binding name="RIVALGUARD_HIGHLIGHT_ALERT" category="BINDING_HEADER_RIVALGUARD">
+        RivalGuard_Binding("highlight")
+    </Binding>
 </Bindings>
 """
 

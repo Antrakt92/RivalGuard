@@ -1490,6 +1490,14 @@ function UI.New(app)
         return app:HasTargetingEvidence(item.id)
     end
 
+    function self:CurrentAlertContact(now)
+        local active = self.activeBanner
+        if active and not active.preview and active.kind ~= "wave" and active.id ~= ""
+            and self.bannerUntil and now < self.bannerUntil and banner:IsVisible() and bannerHasEvidence(active) then
+            return active
+        end
+    end
+
     local function bannerFresh(item, now)
         local maximumAge = item.priority >= BANNER_URGENT_PRIORITY and BANNER_URGENT_MAX_AGE or BANNER_ORDINARY_MAX_AGE
         return now - item.at <= maximumAge

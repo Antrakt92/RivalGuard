@@ -17,6 +17,7 @@ BINDING_ACTIONS = {
     "RIVALGUARD_TOGGLE_NEARBY": "nearby",
     "RIVALGUARD_TOGGLE_PAUSE": "pause",
     "RIVALGUARD_TOGGLE_MUTE": "mute",
+    "RIVALGUARD_HIGHLIGHT_ALERT": "highlight",
 }
 ASSET_TYPES = {".tga", ".blp", ".png", ".jpg", ".jpeg", ".ogg", ".mp3", ".wav", ".ttf", ".otf"}
 RUNTIME_ROOTS = {"Core", "Runtime", "UI", "Locale", "Locales", "Data", "Adapters"}

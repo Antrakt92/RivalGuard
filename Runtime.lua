@@ -186,7 +186,7 @@ function App:HasTargetingEvidence(id)
         and contact.isPlayer == true and contact.dead ~= true
 end
 
-function App:HighlightFrame(id, token, automatic)
+function App:HighlightFrame(id, token, automatic, requireTargeting)
     local profile = self.db:GetProfile()
     local contact = self.engine.contacts[id]
     local binding = self.engine.bindings[token]
@@ -202,15 +202,15 @@ function App:HighlightFrame(id, token, automatic)
             or (pausedUntil and pausedUntil > self.engine:Now()) then return nil end
     end
     local frame = self.client:VisibleEnemyPlate(token, contact.guid)
-    if frame and (not automatic or self.client:UnitMatch(token .. "target", "player") == true) then return frame end
+    if frame and (not (automatic or requireTargeting) or self.client:UnitMatch(token .. "target", "player") == true) then return frame end
 end
 
-function App:HighlightContact(selection, automatic)
+function App:HighlightContact(selection, automatic, fromAlert)
     local badges = self.ui.badges
     local now = self.engine:Now()
     if automatic then
         if badges.highlight and now < badges.highlight.expires then return false end
-    else
+    elseif not fromAlert then
         badges:ClearHighlight()
     end
     if not selection or selection.preview or selection.savedOnly
@@ -219,10 +219,26 @@ function App:HighlightContact(selection, automatic)
     if not contact or not contact.guid or selection.identity ~= "guid:" .. contact.guid then return false end
     for _, token in ipairs(RG.Util.SortedKeys(contact.tokens)) do
         if token:match("^nameplate%d+$") then
-            local frame = self:HighlightFrame(contact.id, token, automatic)
+            local frame = self:HighlightFrame(contact.id, token, automatic, fromAlert and selection.kind == "targeting")
             if frame and badges:Highlight(token, frame, contact.id, now, automatic) then return true end
         end
     end
+    return false
+end
+
+function App:HighlightCurrentAlert()
+    local now = self.engine:Now()
+    local profile = self.db:GetProfile()
+    local selection = self.ui:CurrentAlertContact(now)
+    local message
+    if not selection or not profile.enabled or not profile.alerts.enabled or not profile.alerts.banner
+        or (self.engine.pausedUntil and now < self.engine.pausedUntil)
+        or (self.sensors and self.sensors.loading)
+        or not RG.Rules.ContextMatches(profile.context, self.client:Context()) then
+        message = "alertHighlightUnavailable"
+    elseif self:HighlightContact(selection, false, true) then return true
+    else message = "locateUnavailable" end
+    self:Notify(RG.Locale.Get(message, profile.locale))
     return false
 end
 
@@ -491,12 +507,14 @@ if type(CreateFrame) == "function" then
     BINDING_NAME_RIVALGUARD_TOGGLE_NEARBY = RG.Locale.Get("bindingNearby")
     BINDING_NAME_RIVALGUARD_TOGGLE_PAUSE = RG.Locale.Get("bindingPause")
     BINDING_NAME_RIVALGUARD_TOGGLE_MUTE = RG.Locale.Get("bindingMute")
+    BINDING_NAME_RIVALGUARD_HIGHLIGHT_ALERT = RG.Locale.Get("bindingHighlightAlert")
 
     function RivalGuard_Binding(action)
         if not app.initialized then return end
         if action == "nearby" then app.ui:Toggle()
         elseif action == "pause" then app.ui:TogglePause()
-        elseif action == "mute" then app:ToggleMute() end
+        elseif action == "mute" then app:ToggleMute()
+        elseif action == "highlight" then return app:HighlightCurrentAlert() end
     end
 
     local frame = CreateFrame("Frame")

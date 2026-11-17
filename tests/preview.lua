@@ -226,8 +226,9 @@ elseif view == "locator" then
     local token = "nameplate80"
     local name = locale == "ruRU" and "Пример противника" or "Example opponent"
     local automatic = page == "automatic" or page == "overlap"
+    local currentAlert = page == "current-alert"
+    if automatic or currentAlert then app.engine:Clear() end
     if automatic then
-        app.engine:Clear()
         local display = app.db:GetProfile().display
         display.highlightTargeting, display.showBadges = true, false
         state:Unit("player", { guid = "Player-LocatorLocal" })
@@ -244,6 +245,10 @@ elseif view == "locator" then
     if automatic then
         state:Advance(0.45)
         assert(app.ui.badges.highlight and app.ui.badges.highlight.automatic, "automatic locator preview did not attach")
+    elseif currentAlert then
+        state:Advance(1.25)
+        state.api.RivalGuard_Binding("nearby")
+        assert(state.api.RivalGuard_Binding("highlight"), "alert locator preview did not attach")
     else
         local id = assert(app.sensors.active[token].contactID)
         for _, contact in ipairs(app.engine:Snapshot()) do
