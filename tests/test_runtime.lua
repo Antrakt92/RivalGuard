@@ -1384,6 +1384,82 @@ local function automaticLocatorFixture(enabled, configure)
     return state, app, add, target
 end
 
+local function changeFixtureZone(state, instance, zonePVP)
+    state.instance, state.zonePVP = instance, zonePVP
+    state:Fire("ZONE_CHANGED_NEW_AREA")
+end
+
+for _, boundary in ipairs({ "sanctuary", "arena" }) do
+    H.Test("a rapid " .. boundary .. " visit retires live targeting and discards a queued Vanish", function()
+        local state, app, add = automaticLocatorFixture(true)
+        local ui = app.ui
+        add(1, true)
+        state.clock.Advance(0.25)
+        app.engine:Tick()
+        H.Equal(app.engine.counters.alerts, 1)
+        H.Equal(ui.activeBanner.kind, "targeting")
+        H.True(locatorVisible(ui, "nameplate1"))
+        add(2, false)
+        state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate2", "Cast-BeforeQuietZone", 1856)
+
+        local now = state.clock.Now()
+        if boundary == "sanctuary" then changeFixtureZone(state, nil, "sanctuary")
+        else changeFixtureZone(state, "arena") end
+        H.Equal(app:AlertBlock(), boundary == "sanctuary" and "sanctuary" or "context_disabled")
+        H.Nil(ui.activeBanner)
+        H.False(ui.banner:IsShown())
+        H.False(locatorVisible(ui, "nameplate1"))
+        changeFixtureZone(state)
+        H.Equal(state.clock.Now(), now)
+        H.Nil(app:AlertBlock())
+        state.clock.Advance(0.25)
+        app.engine:Tick()
+        H.Equal(app.engine.counters.alerts, 1)
+        H.Equal(#state.sounds, 1)
+        H.Nil(ui.activeBanner)
+        H.Equal(#app.engine:Snapshot(), 2)
+    end)
+end
+
+H.Test("a true world loading boundary clears the current contacts and their pending alerts", function()
+    local state, app, add = automaticLocatorFixture(true)
+    add(1, true)
+    app.engine:Tick()
+    H.Equal(app.ui.activeBanner.kind, "targeting")
+    add(2, false)
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate2", "Cast-BeforeWorldLoad", 1856)
+    state:Fire("PLAYER_LEAVING_WORLD")
+    H.Nil(app.ui.activeBanner)
+    H.False(locatorVisible(app.ui, "nameplate1"))
+    H.Equal(#app.engine:Snapshot(), 0)
+    H.Equal(#app.engine.history, 0)
+    state.units.nameplate1, state.units.nameplate1target, state.units.nameplate2 = nil, nil, nil
+    state:Fire("PLAYER_ENTERING_WORLD")
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Nil(app.ui.activeBanner)
+end)
+
+H.Test("a quiet context preserves a sample banner and a deliberate manual locator", function()
+    local state, app, add = automaticLocatorFixture(true)
+    local ui = app.ui
+    ui:Select(assert(add(1, false)))
+    ui.detailsFrame.locate:Click()
+    H.True(locatorVisible(ui, "nameplate1"))
+    H.False(ui.badges.highlight.automatic)
+    app:Demo()
+    H.True(ui.activeBanner.preview)
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-BeforeSampleContext", 1856)
+    changeFixtureZone(state, nil, "sanctuary")
+    H.True(ui.activeBanner.preview)
+    H.True(locatorVisible(ui, "nameplate1"))
+    changeFixtureZone(state)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 0)
+    H.True(ui.activeBanner.preview)
+    H.True(locatorVisible(ui, "nameplate1"))
+end)
+
 H.Test("automatic targeting highlight is off by default and opt-in applies only to new warnings", function()
     local state, app, add, target = automaticLocatorFixture()
     local ui, profile = app.ui, app.db:GetProfile()
@@ -2452,6 +2528,76 @@ local function addQueuedRival(state, app, index)
     end
     error("queued list rival not observed")
 end
+
+local function battlegroundRule(action)
+    return { name = "Battleground sightings", enabled = true, event = "sighting", context = "battleground",
+        action = action, priority = 80, classes = {}, sound = false, banner = true, cooldown = 30 }
+end
+
+for _, becomesUrgent in ipairs({ false, true }) do
+    H.Test("switching an allowed context updates a queued rule that " .. (becomesUrgent and "becomes urgent" or "loses urgency"), function()
+        local state, _, app = setup()
+        app.db:GetProfile().rules = { battlegroundRule("alert") }
+        app:OnSettingsChanged()
+        if not becomesUrgent then changeFixtureZone(state, "pvp") end
+        local contact = addQueuedRival(state, app, 1)
+        state.clock.Advance(0.2)
+        changeFixtureZone(state, becomesUrgent and "pvp" or nil)
+        H.Nil(app:AlertBlock())
+        H.Equal(app.engine.counters.alerts, 0)
+        state.clock.Advance(0.05)
+        app.engine:Tick()
+        H.Equal(app.engine.counters.alerts, becomesUrgent and 1 or 0)
+        H.Equal(#state.sounds, 0)
+        state.clock.Advance(0.6)
+        app.engine:Tick()
+        H.Equal(app.engine.counters.alerts, 1)
+        H.Equal(app.engine.history[1].reason, becomesUrgent and "custom_rule" or "event_matched")
+        H.Equal(app.engine.history[1].id, contact.id)
+        H.Equal(#state.sounds, becomesUrgent and 0 or 1)
+    end)
+end
+
+H.Test("a context-sensitive suppressing rule discards a queued arrival even after leaving that context", function()
+    local state, _, app = setup()
+    app.db:GetProfile().rules = { battlegroundRule("suppress") }
+    app:OnSettingsChanged()
+    addQueuedRival(state, app, 1)
+    state.clock.Advance(0.2)
+    changeFixtureZone(state, "pvp")
+    H.Nil(app:AlertBlock())
+    changeFixtureZone(state)
+    state.clock.Advance(0.65)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 0)
+    H.Equal(#state.sounds, 0)
+    H.Nil(app.ui.activeBanner)
+
+    local fresh = addQueuedRival(state, app, 2)
+    state.clock.Advance(0.85)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(app.engine.history[1].id, fresh.id)
+end)
+
+H.Test("combat events in the same allowed context keep a pending sighting on its original schedule", function()
+    local state, _, app = setup()
+    local contact = addQueuedRival(state, app, 1)
+    state.clock.Advance(0.2)
+    state.combat = true
+    state:Fire("PLAYER_REGEN_DISABLED")
+    H.True(app.engine.context.combat)
+    state.clock.Advance(0.05)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 0)
+    state.combat = false
+    state:Fire("PLAYER_REGEN_ENABLED")
+    H.False(app.engine.context.combat)
+    state.clock.Advance(0.6)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(app.engine.history[1].id, contact.id)
+end)
 
 for _, membership in ipairs({ "watch", "avoid" }) do
     H.Test("adding " .. membership .. " expedites that sighting and leaves another sighting on schedule", function()

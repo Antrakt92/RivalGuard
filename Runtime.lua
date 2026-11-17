@@ -367,6 +367,7 @@ function App:Initialize()
     self.engine = RG.Engine.New({ clock = timeNow, epoch = epochNow, profile = self.db:GetProfile(), context = self.client:Context(), lists = self.db:GetList(),
         retailStealth = self.client.retailStealth,
         onChange = function() self.dirty = true end,
+        onContextBlocked = function() if self.ui then self.ui:ClearBanners() end end,
         onEncounter = function(contact, epoch)
             return self.db:Record(contact, epoch, zoneName)
         end,

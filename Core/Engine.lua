@@ -67,7 +67,7 @@ function E.New(config)
         profile = config.profile or D.NewProfile(), context = config.context or { kind = "world" },
         lists = config.lists or {}, onAlert = config.onAlert or function() end,
         retailStealth = config.retailStealth == true,
-        onEncounter = config.onEncounter, onChange = config.onChange,
+        onEncounter = config.onEncounter, onChange = config.onChange, onContextBlocked = config.onContextBlocked,
         contacts = {}, identities = {}, nameOwners = {}, bindings = {}, tokenSerial = 0, contactCount = 0,
         pending = {}, history = {}, cooldowns = {}, snoozes = {}, serial = 0, sequence = 0,
         evictedEncounters = {}, evictionSlots = {}, evictionCursor = 0,
@@ -902,29 +902,31 @@ function E:Snapshot()
     return result
 end
 
+function E:RevalidatePending()
+    -- Preserve the observed events and their age while applying current rules.
+    local now, kept = self:Now(), {}
+    for _, item in ipairs(self.pending) do
+        if refreshPendingDecision(self, item, self.contacts[item.id], now) then
+            kept[#kept + 1] = item
+        end
+    end
+    local maximum = self.profile.retention.maxContacts
+    if #kept > maximum then
+        table.sort(kept, strongerAlert)
+        for index = #kept, maximum + 1, -1 do kept[index] = nil end
+        table.sort(kept, function(a, b) return a.sequence < b.sequence end)
+    end
+    self.pending = kept
+    for _, contact in pairs(self.contacts) do contact.arrivalQueued = false end
+    for _, item in ipairs(kept) do
+        if item.event == "sighting" then self.contacts[item.id].arrivalQueued = true end
+    end
+end
+
 function E:SetProfile(profile, preservePending)
     self.profile = profile
     if not profile.enabled then self:Clear() return end
-    if not preservePending then
-        -- Preserve the observed event and its age. Only the alert decision
-        -- changes when the player edits or switches a profile.
-        local now, kept = self:Now(), {}
-        for _, item in ipairs(self.pending) do
-            if refreshPendingDecision(self, item, self.contacts[item.id], now) then
-                kept[#kept + 1] = item
-            end
-        end
-        if #kept > profile.retention.maxContacts then
-            table.sort(kept, strongerAlert)
-            for index = #kept, profile.retention.maxContacts + 1, -1 do kept[index] = nil end
-            table.sort(kept, function(a, b) return a.sequence < b.sequence end)
-        end
-        self.pending = kept
-        for _, contact in pairs(self.contacts) do contact.arrivalQueued = false end
-        for _, item in ipairs(kept) do
-            if item.event == "sighting" then self.contacts[item.id].arrivalQueued = true end
-        end
-    end
+    if not preservePending then self:RevalidatePending() end
     while self.contactCount > profile.retention.maxContacts do self:MakeRoom() end
     while #self.history > profile.retention.maxHistory do table.remove(self.history, 1) end
     self:Changed()
@@ -951,7 +953,11 @@ function E:SetContext(context)
     self.context = context
     if previous.kind == context.kind and previous.sanctuary == context.sanctuary and previous.resting == context.resting
         and previous.flight == context.flight and previous.combat == context.combat then return end
+    local wasAllowed = Rules.ContextMatches(self.profile.context, previous)
+    local allowed = Rules.ContextMatches(self.profile.context, context)
+    if previous.kind ~= context.kind or wasAllowed ~= allowed then self:RevalidatePending() end
     self:Changed()
+    if wasAllowed and not allowed and self.onContextBlocked then self.onContextBlocked() end
 end
 
 function E:Pause(seconds)
