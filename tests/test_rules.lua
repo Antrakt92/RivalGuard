@@ -61,9 +61,15 @@ end)
 H.Test("strictly beyond a range threshold is never possibly within that threshold", function()
     local RG = H.Addon({ "Core/Bootstrap.lua", "Core/Util.lua", "Core/Defaults.lua", "Core/Rules.lua" })
     local config = { enabled = true, policy = "possible", yards = 40, unknown = true }
-    H.False(RG.Rules.RangeMatches(config, { rangeMin = 40, rangeMinExclusive = true }))
+    local accepted, reason = RG.Rules.RangeMatches(config, { rangeMin = 40, rangeMinExclusive = true })
+    H.False(accepted); H.Equal(reason, "range_outside")
     H.True(RG.Rules.RangeMatches(config, { rangeMin = 40, rangeMinExclusive = false }))
     H.True(RG.Rules.RangeMatches(config, { rangeMin = 39, rangeMinExclusive = true }))
+    config.policy = "confirmed"
+    accepted, reason = RG.Rules.RangeMatches(config, { rangeMin = 41, rangeMax = 48 })
+    H.False(accepted); H.Equal(reason, "range_outside")
+    accepted, reason = RG.Rules.RangeMatches(config, { rangeMin = 30, rangeMax = 48 })
+    H.False(accepted); H.Equal(reason, "range_unconfirmed")
 end)
 
 H.Test("advanced rules apply only within selected context list and range conditions", function()

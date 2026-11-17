@@ -118,6 +118,41 @@ H.Test("UI row recycling clears absent contacts and keeps Unicode names", functi
     H.False(ui.rows[1]:IsShown()); H.Nil(ui.rows[1].contact)
 end)
 
+H.Test("Why describes a new sighting and clears configured outputs on rejection", function()
+    local _, RG, app, ui = setup()
+    ui.selected = { id = "sample" }
+    local result = { allowed = true, reason = "watch_list", sound = false, banner = true }
+    function app:Explain(contact)
+        H.Equal(contact.id, "sample")
+        return result
+    end
+    local locale = app.db:GetProfile().locale
+    ui:ShowExplanation()
+    local frame = ui.explanationFrame
+    local scopeFound = false
+    for _, child in ipairs(frame.children) do
+        if child:GetText() == ui:T("explanationSighting") then scopeFound = true end
+    end
+    H.True(scopeFound)
+    H.Equal(frame.reason:GetText(), RG.Locale.Reason("watch_list", locale))
+    H.Equal(frame.outputs:GetText(), ui:T("explanationBannerOnly"))
+    result.sound = true
+    ui:ShowExplanation()
+    H.Equal(frame.outputs:GetText(), ui:T("explanationSoundBanner"))
+    result.banner = false
+    ui:ShowExplanation()
+    H.Equal(frame.outputs:GetText(), ui:T("explanationSoundOnly"))
+
+    for _, reason in ipairs({ "not_observed", "range_outside", "range_unconfirmed", "wave_only" }) do
+        result = { allowed = false, reason = reason }
+        ui:ShowExplanation()
+        H.Equal(frame.reason:GetText(), RG.Locale.Reason(reason, locale))
+        H.True(frame.reason:GetText() ~= RG.Locale.Reason("unavailable", "enUS"))
+        H.True(RG.Locale.Reason(reason, "ruRU") ~= RG.Locale.Reason("unavailable", "ruRU"))
+        H.Equal(frame.outputs:GetText(), "")
+    end
+end)
+
 H.Test("profile counts above visible rows remain scrollable without changing actual contacts", function()
     local _, _, app, ui = setup()
     app.db:GetProfile().display.maxRows = 3

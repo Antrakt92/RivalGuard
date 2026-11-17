@@ -1400,16 +1400,29 @@ function UI.New(app)
             titleText:SetPoint("TOPLEFT", 18, -18); titleText:SetWidth(325)
             local close = localButton(frame, "close", 84, function() frame:Hide() end)
             close:SetPoint("TOPRIGHT", -12, -10)
+            local event = label(frame, "explanationSighting", 13, C.accent)
+            event:SetPoint("TOPLEFT", 18, -57); event:SetWidth(420)
             frame.reason = font(frame, 14, C.text)
-            frame.reason:SetPoint("TOPLEFT", 18, -69); frame.reason:SetWidth(420)
+            frame.reason:SetPoint("TOPLEFT", 18, -89); frame.reason:SetWidth(420)
+            frame.outputs = font(frame, 13, C.accent)
+            frame.outputs:SetPoint("TOPLEFT", 18, -151); frame.outputs:SetWidth(420)
             local help = label(frame, "explanationHelp", 12, C.muted)
             help:SetPoint("BOTTOMLEFT", 18, 24); help:SetWidth(420)
             if UISpecialFrames then UISpecialFrames[#UISpecialFrames + 1] = "RivalGuardExplanation" end
         end
         local result = app.Explain and self.selected and app:Explain(self.selected) or nil
-        self.explanationFrame.reason:SetText(RG.Locale.Reason(type(result) == "table" and result.reason or "unavailable", self:Profile().locale))
-        self:FitWindow(self.explanationFrame, 460, 265, 1)
-        self.explanationFrame:Show()
+        local frame = self.explanationFrame
+        result = type(result) == "table" and result or {}
+        frame.reason:SetText(RG.Locale.Reason(result.reason or "unavailable", self:Profile().locale))
+        local output
+        if result.allowed == true then
+            if result.sound == true and result.banner == true then output = "explanationSoundBanner"
+            elseif result.sound == true then output = "explanationSoundOnly"
+            elseif result.banner == true then output = "explanationBannerOnly" end
+        end
+        frame.outputs:SetText(output and self:T(output) or "")
+        self:FitWindow(frame, 460, 265, 1)
+        frame:Show()
     end
 
     function self:ShowDiagnostics()

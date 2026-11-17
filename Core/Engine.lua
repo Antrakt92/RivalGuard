@@ -189,9 +189,11 @@ function E:ExplainView(id, event)
     local decision, reason = self:Explain(contact, event)
     if not decision then return { allowed = false, reason = reason } end
     if self.pausedUntil and self:Now() < self.pausedUntil then return { allowed = false, reason = "paused" } end
+    if not decision.sound and not decision.banner then return { allowed = false, reason = "wave_only", kind = decision.kind } end
     local at = self.cooldowns[contact.id .. ":" .. (decision.dedupKey or decision.kind)]
     if at and self:Now() - at < decision.cooldown then return { allowed = false, reason = "cooldown", kind = decision.kind } end
-    return { allowed = true, reason = decision.reason, priority = decision.priority, kind = decision.kind, ruleName = decision.ruleName }
+    return { allowed = true, reason = decision.reason, priority = decision.priority, kind = decision.kind,
+        ruleName = decision.ruleName, sound = decision.sound, banner = decision.banner }
 end
 
 function E:RecordEncounter(contact)
@@ -498,7 +500,7 @@ function E:Tick()
         for _, decision in ipairs(ordinary) do
             local class = decision.contact.class or "UNKNOWN"
             classes[class] = (classes[class] or 0) + 1
-            sound, banner = sound or decision.sound, banner or decision.banner
+            sound, banner = sound or decision.waveSound, banner or decision.banner
         end
         self:Emit({ kind = "wave", count = #ordinary, classes = classes, priority = 35, sound = sound, banner = banner, reason = "multiple_sightings" }, now)
     else

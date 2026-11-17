@@ -143,3 +143,39 @@ H.Test("leaving without contradictory evidence preserves a recorded cast alert",
     H.Equal(#alerts, 1); H.Equal(alerts[1].kind, "stealth")
     H.Equal(alerts[1].contact.stealthEvidence, "cast"); H.False(alerts[1].contact.visible)
 end)
+
+H.Test("a stealth event with no output cannot displace an audible sighting", function()
+    local engine, observe, clock, alerts = fixture()
+    engine.profile.alerts.banner = false
+    engine.profile.alerts.sounds.stealth = "none"
+    observe("nameplate1", {
+        guid = "Player-SilentStealth", name = "Stealth", class = "ROGUE", stealth = true, stealthReadable = true,
+    })
+    clock.Advance(1)
+    engine:Tick()
+    H.Equal(#alerts, 1)
+    H.Equal(alerts[1].kind, "sighting")
+    H.True(alerts[1].sound)
+end)
+
+H.Test("sightings with no individual output can still play the configured group sound", function()
+    for _, count in ipairs({ 1, 3 }) do
+        local engine, observe, clock, alerts = fixture()
+        engine.profile.alerts.banner = false
+        engine.profile.alerts.sounds.sighting = "none"
+        engine.profile.alerts.sounds.wave = "ready"
+        local first
+        for i = 1, count do
+            local contact = observe("nameplate" .. i, { guid = "Player-Wave" .. i, name = "Wave" .. i, class = "ROGUE" })
+            first = first or contact
+        end
+        local detail = engine:ExplainView(first.id, "sighting")
+        H.False(detail.allowed)
+        H.Equal(detail.reason, "wave_only")
+        clock.Advance(1)
+        engine:Tick()
+        H.Equal(#alerts, count == 3 and 1 or 0)
+        if count == 3 then H.Equal(alerts[1].kind, "wave"); H.True(alerts[1].sound) end
+        H.Equal(engine:ExplainView(first.id, "sighting").reason, "wave_only")
+    end
+end)

@@ -12,13 +12,12 @@ function R.RangeMatches(config, contact)
     if not config.enabled then return true end
     local lower, upper = contact.rangeMin, contact.rangeMax
     if not U.IsFinite(lower) and not U.IsFinite(upper) then return config.unknown, "range_unknown" end
-    if config.policy == "confirmed" then
-        if upper then return upper <= config.yards, "range_confirmed" end
-        return false, "range_unconfirmed"
+    if U.IsFinite(lower) and (lower > config.yards or (lower == config.yards and contact.rangeMinExclusive)) then
+        return false, "range_outside"
     end
-    if lower then
-        if contact.rangeMinExclusive and lower == config.yards then return false, "range_outside" end
-        return lower <= config.yards, "range_possible"
+    if config.policy == "confirmed" then
+        if U.IsFinite(upper) and upper <= config.yards then return true, "range_confirmed" end
+        return false, "range_unconfirmed"
     end
     return true, "range_possible"
 end
@@ -70,7 +69,6 @@ function R.Evaluate(profile, contact, event, context, listEntry)
     if not matched and not watched and not R.ClassMatches(profile.alerts.classes, contact.class, profile.alerts.unknownClass) then return nil, "class_filtered" end
     local decision = {
         kind = kind, priority = matched and matched.priority or PRIORITY[kind] or 20,
-        sound = profile.alerts.sound and (not matched or matched.sound),
         banner = profile.alerts.banner and (not matched or matched.banner),
         cooldown = matched and matched.cooldown or profile.alerts.cooldown,
         reason = matched and "custom_rule" or (watched and "watch_list" or "event_matched"),
@@ -79,7 +77,10 @@ function R.Evaluate(profile, contact, event, context, listEntry)
     }
     -- An unidentified class remains useful visually, without sounding like a
     -- confirmed match for one of the selected classes.
-    if not contact.class and not watched then decision.sound = false end
-    if not decision.sound and not decision.banner then return nil, "outputs_disabled" end
+    local soundAllowed = profile.alerts.sound and (not matched or matched.sound) and (contact.class ~= nil or watched == true)
+    decision.sound = soundAllowed and profile.alerts.sounds[kind] ~= "none"
+    decision.waveSound = soundAllowed and profile.alerts.sounds.wave ~= "none"
+        and decision.priority < 70 and (kind == "sighting" or kind == "returning")
+    if not decision.sound and not decision.banner and not decision.waveSound then return nil, "outputs_disabled" end
     return decision
 end
