@@ -170,7 +170,7 @@ elseif view == "conditions" then app.ui:OpenRules(); app.ui.rulesDialog.conditio
 elseif view == "appearance" then app.ui:OpenSettings("appearance")
 elseif view == "import" then
     app.ui:OpenTransfer("import")
-    if page == "validated" or page == "restricted" then
+    if page == "validated" or page == "restricted" or page == "name-taken" or page == "profile-limit" then
         local profile = assert(RG.Defaults.NewProfile("farming"))
         profile.alerts.sound = false
         if page == "restricted" then
@@ -184,6 +184,15 @@ elseif view == "import" then
         transfer.edit:SetText(assert(RG.Codec.Encode({ format = "RivalGuardProfile", schemaVersion = RG.schemaVersion, profile = profile })))
         transfer.preview:Click()
         assert(transfer.applyAndUse.enabled, "profile preview was not accepted")
+        if page == "name-taken" then
+            transfer.nameInput:SetText("Default")
+            transfer.applyAndUse:Click()
+            assert(transfer.feedback:GetText() == app.ui:T("importNameTaken"))
+        elseif page == "profile-limit" then
+            for index = 1, 19 do assert(app.db:CreateProfile("Profile " .. index)) end
+            transfer.applyAndUse:Click()
+            assert(transfer.feedback:GetText() == app.ui:T("profileLimit") and transfer.manageProfiles:IsShown())
+        end
     end
 elseif view == "export" then app.ui:OpenTransfer("export")
 elseif view == "details" and page == "sample" then

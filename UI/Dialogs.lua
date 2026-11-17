@@ -1,6 +1,7 @@
 local _, RG = ...
 local D = RG.Register("UIDialogs", {})
 local M = RG.UIModel
+local IMPORT_NAME_ERRORS = { invalid_name = "importNameRequired", profile_exists = "importNameTaken" }
 
 function D.Attach(ui, app, H)
     local self = { ruleOffset = 0 }
@@ -748,6 +749,8 @@ function D.Attach(ui, app, H)
         local f = self.transferFrame
         self.importText, self.importPreview = nil, nil
         f.apply:SetEnabled(false); f.applyAndUse:SetEnabled(false)
+        f.feedback:SetText("")
+        f.manageProfiles:Hide()
         if message then f.summary:SetText(t(message)) end
     end
 
@@ -760,6 +763,19 @@ function D.Attach(ui, app, H)
         f.nameLabel:SetPoint("TOPLEFT", 18, -119)
         f.nameInput = textInput(f, 510, 64)
         f.nameInput:SetPoint("TOPLEFT", 25, -145)
+        f.feedback = H.font(f, 12, H.C.danger)
+        f.feedback:SetPoint("TOPLEFT", 18, -174); f.feedback:SetWidth(686)
+        f.manageProfiles = H.localButton(f, "manageProfiles", 162, function()
+            if self.transferMode ~= "import" or not f:IsShown() or not f.manageProfiles:IsShown() then return end
+            self.importDraft = { name = f.nameInput:GetText(), text = f.edit:GetText() }
+            f:Hide()
+            ui:OpenSettings("profiles")
+        end)
+        f.manageProfiles:SetPoint("LEFT", f.nameInput, "RIGHT", 14, 0)
+        f.nameInput:SetScript("OnTextChanged", function()
+            f.feedback:SetText("")
+            f.manageProfiles:Hide()
+        end)
         local scroll = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
         local edit = CreateFrame("EditBox", nil, scroll)
         edit:SetMultiLine(true); edit:SetAutoFocus(false); edit:SetWidth(665); edit:SetHeight(280)
@@ -792,17 +808,20 @@ function D.Attach(ui, app, H)
         if not self.transferFrame then self:BuildTransfer() end
         local f = self.transferFrame
         self.transferMode = mode == "export" and "export" or "import"
+        local draft = self.transferMode == "import" and self.importDraft
+        if draft then self.importDraft = nil end
         self:ResetImportPreview()
         f.help:SetText(t(self.transferMode == "export" and "exportHelp" or "importHelp"))
         f.nameLabel:SetShown(self.transferMode == "import"); f.nameInput:SetShown(self.transferMode == "import")
+        f.feedback:SetShown(self.transferMode == "import")
         f.preview:SetShown(self.transferMode == "import"); f.apply:SetShown(self.transferMode == "import")
         f.applyAndUse:SetShown(self.transferMode == "import")
         f.scroll:ClearAllPoints()
         f.scroll:SetPoint("TOPLEFT", 18, self.transferMode == "import" and -191 or -112)
         f.scroll:SetPoint("BOTTOMRIGHT", -40, self.transferMode == "import" and 239 or 24)
-        f.nameInput:SetText("")
+        f.nameInput:SetText(draft and draft.name or "")
         self.loadingTransfer = true
-        local text = ""
+        local text = draft and draft.text or ""
         if self.transferMode == "export" then
             text = (app.db.ExportProfile and app.db:ExportProfile()) or t("error")
         end
@@ -866,7 +885,13 @@ function D.Attach(ui, app, H)
         local name = RG.Util.Text(f.nameInput:GetText(), 64)
         local result, reason
         if app.db.ImportProfile then result, reason = app.db:ImportProfile(name, self.importText) end
-        if not result then notify(reason == "profile_limit" and "profileLimit" or "profileError"); return end
+        if not result then
+            local nameError = IMPORT_NAME_ERRORS[reason]
+            f.feedback:SetText(t(nameError or (reason == "profile_limit" and "profileLimit" or "profileError")))
+            f.manageProfiles:SetShown(reason == "profile_limit")
+            if nameError then f.nameInput:SetFocus(); f.nameInput:HighlightText() end
+            return
+        end
         f:Hide()
         if activate then app:UseProfile(name) else notify("importSuccess") end
         ui:RevealProfile(name)
