@@ -437,6 +437,43 @@ H.Test("sensors reserve direct token slots within the total capacity", function(
     H.Equal(sensors.count, 128); H.True(sensors.active.nameplate129 ~= nil)
 end)
 
+H.Test("capacity recovery admits queued plates inside the scheduled read budget", function()
+    local sensors, units, _, _, _, _, _, api = fixture()
+    local frame, scans, reads, mappings = {}, 0, 0, {}
+    api.C_NamePlate = {
+        GetNamePlates = function() scans = scans + 1; return {} end,
+        GetNamePlateForUnit = function(token) mappings[#mappings + 1] = token; return frame end,
+    }
+    api.UnitIsUnit = function(token, other) return token:match("target$") ~= nil and other == "player" end
+    api.UnitExists = function(token)
+        if token:match("^nameplate") then reads = reads + 1 end
+        return units[token] ~= nil
+    end
+    sensors:Start()
+    for index = 1, 126 do
+        local token = "nameplate" .. index
+        units[token] = player("Rival " .. index, "Player-Deferred-" .. index)
+        sensors:OnEvent("NAME_PLATE_UNIT_ADDED", token)
+    end
+    H.Equal(reads, 124)
+    H.Equal(#sensors.deferredPlates, 2)
+    sensors:Poll(true)
+    H.Equal(reads, 248)
+    H.Equal(#mappings, 0)
+    sensors:OnEvent("NAME_PLATE_UNIT_REMOVED", "nameplate125")
+    units.nameplate1 = nil
+    sensors:OnEvent("NAME_PLATE_UNIT_REMOVED", "nameplate1")
+    reads = 0
+    sensors:Poll(true)
+    H.Equal(reads, 124)
+    H.Equal(scans, 1)
+    H.Equal(table.concat(mappings, ","), "nameplate126")
+    H.Equal(sensors.plateCount, 124)
+    H.True(sensors.active.nameplate126 ~= nil)
+    H.Nil(sensors.active.nameplate125)
+    H.Equal(#sensors.deferredPlates, 0)
+end)
+
 H.Test("sensors spread ordinary plate reads across four ticks and keep active threat responsive", function()
     local sensors, units, observed, _, _, frames, _, api = fixture()
     local calls, targeting = 0, false

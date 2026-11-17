@@ -80,7 +80,10 @@ The quarter-second sensor tick refreshes direct tokens and plates with a confirm
 selection or targeting threat. It spreads ordinary plates across four ticks for
 a nominal one-second refresh. The 128-token limit reserves one slot each for the
 target, focus, mouseover and soft enemy. Unit events remain immediate, and selection changes
-refresh affected plates on the next tick. A completed shard transfer clears old
+refresh affected plates on the next tick. When the plate limit is full, RivalGuard
+can defer up to 124 additional tokens. It checks their current nameplate mapping
+before admitting them into free slots, within the same scheduled read budget.
+A completed shard transfer clears old
 bindings before reacquiring nameplates from the client.
 Decorations must respect forbidden frames and the client's protected-operation
 rules. Adapter checks and simulated tests do not verify in-game appearance or

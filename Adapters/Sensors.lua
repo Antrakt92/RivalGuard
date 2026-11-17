@@ -27,7 +27,7 @@ local SAMPLE_BOUNDARY = {
 }
 
 function Sensors.New(app, client, api)
-    return setmetatable({ app = app, client = client, api = api or _G, active = {}, plateRetries = {}, count = 0, plateCount = 0,
+    return setmetatable({ app = app, client = client, api = api or _G, active = {}, plateRetries = {}, deferredPlates = {}, count = 0, plateCount = 0,
         generation = 0, elapsed = 0, phase = 0, running = false, loading = false }, Sensors)
 end
 
@@ -44,11 +44,25 @@ function Sensors:Call(method, ...)
     return a, b
 end
 
+function Sensors:DeferPlate(token)
+    local deferred = self.deferredPlates
+    if #deferred >= MAX_PLATES then return end
+    for _, queued in ipairs(deferred) do if queued == token then return end end
+    deferred[#deferred + 1] = token
+end
+
+function Sensors:ForgetDeferredPlate(token)
+    for index, queued in ipairs(self.deferredPlates) do
+        if queued == token then table.remove(self.deferredPlates, index); return end
+    end
+end
+
 function Sensors:Observe(token, source, behindCamera, event)
     token = self.client:IsToken(token)
     if not token then return end
     if not DIRECT[token] and not self.active[token] and self.plateCount >= MAX_PLATES then
         self.client:Count("sensor_capacity")
+        self:DeferPlate(token)
         return
     end
     local state = self.active[token]
@@ -95,6 +109,7 @@ function Sensors:Record(obs, behindCamera, event)
         name, obs.nameComplete = nil, false
     end
     if not state then
+        if not DIRECT[token] then self:ForgetDeferredPlate(token) end
         self.generation = self.generation + 1
         state = { generation = self.generation }
         self.active[token], self.count = state, self.count + 1
@@ -121,6 +136,7 @@ function Sensors:Remove(token)
     token = self.client:IsToken(token)
     if not token then return end
     self.plateRetries[token] = nil
+    if not DIRECT[token] then self:ForgetDeferredPlate(token) end
     self.client:ForgetToken(token)
     if not self.active[token] then return end
     self.active[token], self.count = nil, self.count - 1
@@ -134,6 +150,7 @@ end
 
 function Sensors:Clear()
     self.plateRetries = {}
+    self.deferredPlates = {}
     local tokens = {}
     for token in pairs(self.active) do tokens[#tokens + 1] = token end
     for _, token in ipairs(tokens) do self:Remove(token) end
@@ -147,7 +164,8 @@ function Sensors:WorldChanged()
     end
 end
 
-function Sensors:Seed()
+function Sensors:Seed(budget)
+    if budget == 0 then return end
     local ns = self.api.C_NamePlate
     if type(ns) ~= "table" then return end
     local plates = self.client:Safe(ns.GetNamePlates)
@@ -157,7 +175,13 @@ function Sensors:Seed()
         visited = visited + 1
         if visited > MAX_ACTIVE then break end
         local token = self.client:NameplateToken(frame)
-        if token and not self.active[token] and not self.plateRetries[token] then self:Observe(token, "nameplate") end
+        if token and not self.active[token] and not self.plateRetries[token] then
+            self:Observe(token, "nameplate")
+            if budget then
+                budget = budget - 1
+                if budget == 0 then break end
+            end
+        end
     end
 end
 
@@ -175,6 +199,18 @@ function Sensors:RecoverPlates(budget)
         end
         if retry.pollsLeft == 0 then self.plateRetries[token] = nil end
     end
+    return budget
+end
+
+function Sensors:RecoverDeferredPlates(budget)
+    while budget > 0 and self.plateCount < MAX_PLATES and #self.deferredPlates > 0 do
+        local token = table.remove(self.deferredPlates, 1)
+        budget = budget - 1
+        if not self.active[token] and not self.plateRetries[token] and self.client:Nameplate(token) then
+            self:Observe(token, "nameplate")
+        end
+    end
+    return budget
 end
 
 function Sensors:Poll(scheduled)
@@ -203,13 +239,15 @@ function Sensors:Poll(scheduled)
             end
         end
         -- Retry last poll's unavailable plates using the same read budget.
-        if scheduled and next(self.plateRetries) then self:RecoverPlates(MAX_PLATES - #tokens) end
+        local budget = MAX_PLATES - #tokens
+        if scheduled and next(self.plateRetries) then budget = self:RecoverPlates(budget) end
+        if scheduled and #self.deferredPlates > 0 then budget = self:RecoverDeferredPlates(budget) end
         for _, token in ipairs(tokens) do self:Observe(token, "poll") end
         for token in pairs(DIRECT) do self:Observe(token, self.active[token] and "poll" or token) end
         -- Discovery still works at a bounded cadence when an event is denied.
-        if self.reseed or (scheduled and not self.nameplateEvents and self.phase == 0) then
+        if (not scheduled or budget > 0) and (self.reseed or (scheduled and not self.nameplateEvents and self.phase == 0)) then
             self.reseed = nil
-            self:Seed()
+            self:Seed(scheduled and budget or nil)
         end
     end
     self:Call("Tick")

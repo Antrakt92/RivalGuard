@@ -4788,6 +4788,95 @@ for _, stop in ipairs({ "remove event", "different frame", "retry budget" }) do
     end)
 end
 
+local function fullNameplateFixture()
+    local state, _, app = setup(nil, function(mock)
+        mock.api.SOUNDKIT = RULE_SOUND_KITS
+    end)
+    local reads, scans = {}, 0
+    local readUnit, scan = app.client.ReadUnit, state.api.C_NamePlate.GetNamePlates
+    function app.client:ReadUnit(token, ...)
+        reads[token] = (reads[token] or 0) + 1
+        return readUnit(self, token, ...)
+    end
+    state.api.C_NamePlate.GetNamePlates = function(...)
+        scans = scans + 1
+        return scan(...)
+    end
+    state:Unit("player", { guid = "Player-OverflowSelf" })
+    H.True(app:Status().capabilities.nameplateEvents)
+    for index = 1, 124 do
+        local token = "nameplate" .. index
+        state:Unit(token, { guid = "Creature-Capacity" .. index, name = "Fixture NPC",
+            class = "WARRIOR", hostile = true, isPlayer = false })
+        state:Fire("NAME_PLATE_UNIT_ADDED", token)
+    end
+    H.Equal(app.sensors.plateCount, 124)
+    H.Equal(#app.engine:Snapshot(), 0)
+    local function appear(index)
+        local token = "nameplate" .. index
+        state:Unit(token, { guid = "Player-Overflow" .. index, name = "Overflow rogue " .. index,
+            class = "ROGUE", hostile = true, isPlayer = true })
+        state:Unit(token .. "target", state.units.player)
+        state:Fire("NAME_PLATE_UNIT_ADDED", token)
+        H.Nil(app.sensors.active[token])
+        H.Nil(reads[token])
+        return token
+    end
+    local function disappear(token)
+        state.units[token] = nil
+        state:Fire("NAME_PLATE_UNIT_REMOVED", token)
+    end
+    return state, app, appear, disappear, reads, function() return scans end
+end
+
+H.Test("healthy nameplate overflow queues a rival until a slot opens without retaining an unobserved cast", function()
+    local state, app, appear, disappear, reads, scans = fullNameplateFixture()
+    local first, second = appear(125), appear(126)
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", first, "Cast-BeforeOverflowAdmission", 1856)
+    state:Advance(0.3)
+    H.Nil(reads[first]); H.Nil(reads[second])
+    H.Equal(#app.engine.history, 0)
+    H.Equal(app.sensors.plateCount, 124)
+    disappear("nameplate1")
+    H.Equal(app.sensors.plateCount, 123)
+    state:Advance(0.3)
+    H.Equal(reads[first], 1)
+    H.Nil(reads[second])
+    H.Equal(app.sensors.plateCount, 124)
+    H.Equal(scans(), 0)
+    local contact = assert(app.engine:Snapshot()[1])
+    H.Equal(contact.identity, "guid:Player-Overflow125")
+    H.True(contact.visible); H.True(contact.targeting)
+    H.Nil(contact.stealth)
+    H.Equal(#app.engine.history, 1)
+    H.Equal(app.engine.history[1].id, contact.id)
+    H.Equal(app.engine.history[1].kind, "targeting")
+    H.Equal(#state.sounds, 1)
+    H.Equal(state.sounds[1].id, RULE_SOUND_KITS.READY_CHECK)
+    H.Equal(app.db:GetJournal()[1].identity, contact.identity)
+end)
+
+H.Test("removing an overflow token cancels waiting admission and releases its place in line", function()
+    local state, app, appear, disappear, reads, scans = fullNameplateFixture()
+    local gone, nextToken = appear(125), appear(126)
+    local pooledUnit = state.units[gone]
+    disappear(gone)
+    -- The number is reusable even when the frame object is still pooled.
+    -- Without another ADD, the removed registration cannot admit this unit.
+    state:Unit(gone, pooledUnit)
+    disappear("nameplate1")
+    state:Advance(0.3)
+    H.Nil(app.sensors.active[gone])
+    H.Nil(reads[gone])
+    H.Equal(reads[nextToken], 1)
+    H.Equal(app.sensors.plateCount, 124)
+    H.Equal(scans(), 0)
+    local current = assert(app.engine:Snapshot()[1])
+    H.Equal(current.identity, "guid:Player-Overflow126")
+    H.Equal(#app.db:GetJournal(), 1)
+    H.Equal(app.db:GetJournal()[1].identity, current.identity)
+end)
+
 H.Test("nameplate discovery uses current sanctuary state before the zone event", function()
     local state, _, app = setup()
     state.zonePVP = "sanctuary"
