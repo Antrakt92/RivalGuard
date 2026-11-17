@@ -313,14 +313,22 @@ end
 function E:Observe(raw)
     local obs = safeObservation(raw)
     if not obs then return nil, "invalid_observation" end
-    if obs.isPlayer == false or obs.hostile == false then self:Remove(obs.token) return nil, "not_enemy_player" end
-    local now = self:Now()
-    self.counters.observations = self.counters.observations + 1
-    if not self.profile.enabled then return nil, "disabled" end
-    local identity = obs.guid and ("guid:" .. obs.guid) or nameIdentity(obs)
     local named = nameIdentity(obs)
     local binding = self.bindings[obs.token]
     local contact = binding and self.contacts[binding.id]
+    if obs.isPlayer == false or obs.hostile == false then
+        local sameOwner = false
+        if contact then
+            if contact.guid and obs.guid then sameOwner = contact.guid == obs.guid
+            else sameOwner = named ~= nil and named == contact.nameIdentity and not contact.ambiguousIdentity end
+        end
+        self:Remove(obs.token, sameOwner and obs or nil)
+        return nil, "not_enemy_player"
+    end
+    local now = self:Now()
+    self.counters.observations = self.counters.observations + 1
+    if not self.profile.enabled then return nil, "disabled" end
+    local identity = obs.guid and ("guid:" .. obs.guid) or named
     -- A token can be recycled. A new clean GUID never inherits its old owner.
     if contact and obs.guid and contact.guid and contact.guid ~= obs.guid then
         self:Remove(obs.token)
@@ -392,17 +400,26 @@ function E:Observe(raw)
     return self:View(contact)
 end
 
-function E:Remove(token)
+function E:Remove(token, contradiction)
     local binding = self.bindings[token]
     if not binding then return end
     local contact = self.contacts[binding.id]
     self.bindings[token] = nil
     if contact then
         contact.tokens[token] = nil
-        if next(contact.tokens) == nil then
+        local visible = next(contact.tokens) ~= nil
+        if not visible then
             contact.lastSeen = self:Now()
             contact.targeting, contact.currentTarget, contact.currentFocus = nil, nil, nil
         else self:Reconcile(contact) end
+        if contradiction and (not visible or contact.hostile ~= true or contact.isPlayer ~= true) then
+            if contradiction.hostile == false then contact.hostile = false end
+            if contradiction.isPlayer == false then contact.isPlayer = false end
+            contact.targeting, contact.arrivalQueued = nil, false
+            for index = #self.pending, 1, -1 do
+                if self.pending[index].id == contact.id then table.remove(self.pending, index) end
+            end
+        end
     end
     self:Changed()
 end

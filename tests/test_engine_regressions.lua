@@ -95,3 +95,51 @@ H.Test("stealth is the strongest single warning for a watched targeting arrival"
     engine:Tick(); clock.Advance(1); engine:Tick()
     H.Equal(#alerts, 1); H.Equal(alerts[1].kind, "stealth")
 end)
+
+H.Test("a clean same-owner non-enemy observation cancels the queued threat", function()
+    for _, field in ipairs({ "hostile", "isPlayer" }) do
+        local engine, observe, clock, alerts = fixture()
+        observe("nameplate1", { guid = "Player-A", name = "Alpha", class = "ROGUE" })
+        clock.Advance(0.05)
+        local contact, reason = observe("nameplate1", { guid = "Player-A", name = "Alpha", [field] = false })
+        H.Nil(contact); H.Equal(reason, "not_enemy_player")
+        H.Equal(#engine.pending, 0)
+        H.False(engine:Snapshot()[1][field])
+        clock.Advance(1); engine:Tick()
+        H.Equal(#alerts, 0)
+        observe("nameplate1", { guid = "Player-A", name = "Alpha", class = "ROGUE" })
+        clock.Advance(1); engine:Tick()
+        H.Equal(#alerts, 1); H.Equal(alerts[1].kind, "sighting")
+    end
+end)
+
+H.Test("a complete unambiguous name can confirm the nonhostile owner without a GUID", function()
+    local engine, observe, clock, alerts = fixture()
+    observe("target", { name = "Alpha-Realm", nameComplete = true, class = "ROGUE" })
+    observe("target", { name = "Alpha-Realm", nameComplete = true, hostile = false })
+    H.Equal(#engine.pending, 0)
+    clock.Advance(1); engine:Tick()
+    H.Equal(#alerts, 0)
+end)
+
+H.Test("a non-enemy replacement or an independent hostile alias preserves historical threat evidence", function()
+    for _, otherAlias in ipairs({ false, true }) do
+        local engine, observe, clock, alerts = fixture()
+        observe("nameplate1", { guid = "Player-A", name = "Alpha", class = "ROGUE" })
+        if otherAlias then observe("target", { guid = "Player-A", name = "Alpha", class = "ROGUE" }) end
+        observe("nameplate1", { guid = otherAlias and "Player-A" or "Player-B", name = "Alpha", hostile = false })
+        clock.Advance(1); engine:Tick()
+        H.Equal(#alerts, 1); H.Equal(alerts[1].contact.identity, "guid:Player-A")
+        H.Equal(alerts[1].contact.visible, otherAlias)
+    end
+end)
+
+H.Test("leaving without contradictory evidence preserves a recorded cast alert", function()
+    local engine, observe, _, alerts = fixture()
+    observe("nameplate1", { guid = "Player-A", name = "Alpha", class = "ROGUE" })
+    H.True(engine:Cast("nameplate1", 1856))
+    engine:Remove("nameplate1")
+    engine:Tick()
+    H.Equal(#alerts, 1); H.Equal(alerts[1].kind, "stealth")
+    H.Equal(alerts[1].contact.stealthEvidence, "cast"); H.False(alerts[1].contact.visible)
+end)
