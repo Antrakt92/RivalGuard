@@ -443,6 +443,7 @@ function UI.New(app)
     main:EnableMouseWheel(true)
     local mainBackground = fill(main); local mainBorder = outline(main)
     local nearbyMoveProfile, nearbyDefaultX, nearbyDefaultY
+    local nearbyDraggingCompact, compactDragGesture
     local nearbyOpened = false
     local function savedNearby(profile)
         local saved = profile.positions.nearby
@@ -452,7 +453,10 @@ function UI.New(app)
         return saved
     end
     local function restoreNearby()
-        if nearbyMoveProfile then main:StopMovingOrSizing(); nearbyMoveProfile = nil end
+        if nearbyMoveProfile then
+            main:StopMovingOrSizing()
+            nearbyMoveProfile, nearbyDraggingCompact = nil, nil
+        end
         if savedNearby(self:Profile()) then restorePosition(main, "nearby", "BOTTOMLEFT", 0, 0) end
         nearbyDefaultX, nearbyDefaultY = nil, nil
     end
@@ -492,21 +496,25 @@ function UI.New(app)
         end
         self:Refresh()
     end
-    header:SetScript("OnDragStart", function()
+    local function startNearbyDrag(compact)
         local profile = self:Profile()
-        if profile.display.locked and self.nearbyMoveMode ~= profile then return end
+        if profile.display.locked and self.nearbyMoveMode ~= profile
+            and not (IsShiftKeyDown and IsShiftKeyDown()) then return end
         nearbyMoveProfile = profile
+        nearbyDraggingCompact = compact
         main:StartMoving()
-    end)
-    header:SetScript("OnDragStop", function()
+    end
+    local function stopNearbyDrag()
         if not nearbyMoveProfile then return end
         main:StopMovingOrSizing()
         local moveProfile = nearbyMoveProfile
-        nearbyMoveProfile = nil
+        nearbyMoveProfile, nearbyDraggingCompact = nil, nil
         if moveProfile == self:Profile() and not savePosition(main, "nearby") then restoreNearby() end
         if self.nearbyMoveMode == moveProfile then self.nearbyMoveMode = nil end
         self:Refresh()
-    end)
+    end
+    header:SetScript("OnDragStart", function() startNearbyDrag(false) end)
+    header:SetScript("OnDragStop", stopNearbyDrag)
     local title = label(header, "addon", 15, C.accent)
     title:SetPoint("LEFT", 12, 0); title:SetJustifyV("MIDDLE")
     local settingsButton = button(main, "…", 30)
@@ -532,14 +540,26 @@ function UI.New(app)
     collapseButton:SetPoint("RIGHT", settingsButton, "LEFT", -4, 0); collapseButton:SetHeight(25)
     self.nearbyCollapseButton = collapseButton
     local expandButton = button(main, "RivalGuard   +", 112, function()
+        if compactDragGesture then return end
         self:Profile().display.nearbyCollapsed = false
         nearbyOpened = true
         self:Refresh()
     end)
     expandButton:SetAllPoints(main)
     self.nearbyExpandButton = expandButton
-    for widget, key in pairs({ [collapseButton] = "collapseNearby", [expandButton] = "expandNearby" }) do
-        widget:SetScript("OnEnter", function(frame) tooltip(frame, self:T(key)) end)
+    expandButton:RegisterForDrag("LeftButton")
+    -- A release from this gesture must never expand the tab.
+    expandButton:SetScript("OnMouseDown", function() compactDragGesture = false end)
+    expandButton:SetScript("OnDragStart", function()
+        compactDragGesture = true
+        startNearbyDrag(true)
+    end)
+    expandButton:SetScript("OnDragStop", stopNearbyDrag)
+    expandButton:SetScript("OnEnter", function(frame)
+        tooltip(frame, self:T("expandNearby"), self:T(self:Profile().display.locked and "nearbyMoveHelp" or "nearbyDragHelp"))
+    end)
+    collapseButton:SetScript("OnEnter", function(frame) tooltip(frame, self:T("collapseNearby")) end)
+    for _, widget in ipairs({ collapseButton, expandButton }) do
         widget:SetScript("OnLeave", hideOwnedTooltip)
         widget:SetScript("OnHide", hideOwnedTooltip)
     end
@@ -1383,8 +1403,9 @@ function UI.New(app)
             self.previewContacts, self.previewUntil = nil, nil
             self:ClosePreviewDetails()
         end
-        local moving = self.nearbyMoveMode == profile or nearbyMoveProfile == profile
-        local compact = profile.display.showList and profile.display.nearbyCollapsed and not preview and not moving
+        local moving = self.nearbyMoveMode == profile or nearbyMoveProfile == profile and not nearbyDraggingCompact
+        local compact = profile.display.showList and profile.display.nearbyCollapsed and not moving
+            and (not preview or nearbyDraggingCompact)
         local detailsShown = self.detailsFrame and self.detailsFrame:IsShown() and self.selected
         local liveDetailsShown = detailsShown and not self.selected.preview and not self.selected.recentDraft
         local maxRows = math.floor(RG.Util.Clamp(profile.display.maxRows, 3, 20, 8))
@@ -1393,8 +1414,8 @@ function UI.New(app)
         if paged then
             livePage, nearbyCount, nearbyVisible, self.offset, nearbyIds = app.engine:NearbyPage(self.offset, maxRows, profile.display.streamer)
         end
-        local expanded = preview == true or moving or (profile.display.showList and not compact
-            and (nearbyOpened or profile.display.showEmpty or (nearbyVisible or 0) > 0))
+        local expanded = not compact and (preview == true or moving or (profile.display.showList
+            and (nearbyOpened or profile.display.showEmpty or (nearbyVisible or 0) > 0)))
         local untilTime = M.Number(app.engine.pausedUntil)
         local paused = untilTime ~= nil and untilTime > now
         local supportShown = settings:IsShown() and self.currentPage == "support"

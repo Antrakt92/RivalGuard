@@ -81,8 +81,9 @@ see how your current profile would handle that new sighting in the open world.
   `/rg diagnostics` opens the report with its text selected. Player identities,
   rule names and notes stay private. You can also replay the first-run guide.
 
-Nearby opens on the left when a tracked opponent is in view. Use `/rg move`
-or **Appearance → Move Nearby**, then drag the RivalGuard title to place it.
+Nearby opens on the left when a tracked opponent is in view. Hold **Shift** and
+drag the RivalGuard title or the collapsed tab to move it. Turn off
+**Appearance → Lock nearby position** to drag without Shift.
 **Overview → Keep Nearby open without opponents** leaves it visible between encounters.
 Click **−** to collapse Nearby to a small **RivalGuard +** tab. Click the tab to
 reopen the list. The collapsed state survives a reload and alerts keep running.
