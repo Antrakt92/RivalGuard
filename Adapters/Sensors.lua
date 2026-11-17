@@ -108,6 +108,7 @@ function Sensors:Record(obs, behindCamera, event)
         -- Keep the readable label without rejoining the unverified previous GUID.
         name, obs.nameComplete = nil, false
     end
+    local awaitingEligibility = not state or state.awaitingEligibility
     if not state then
         if not DIRECT[token] then self:ForgetDeferredPlate(token) end
         self.generation = self.generation + 1
@@ -120,7 +121,7 @@ function Sensors:Record(obs, behindCamera, event)
     state.guid, state.name = obs.guid or state.guid, name or state.name
     state.unverifiedName = unverifiedName
     state.awaitingEligibility = obs.isPlayer == false or obs.hostile == false
-        or (state.awaitingEligibility and (obs.isPlayer ~= true or obs.hostile ~= true))
+        or (awaitingEligibility and (obs.isPlayer ~= true or obs.hostile ~= true))
     local contact = self:Call("Observe", obs)
     local view = type(contact) == "table" and contact or nil
     state.contactID = view and view.id

@@ -16,15 +16,26 @@ local STEALTH_SPELLS = {
     [1856] = "Vanish", [1857] = "Vanish", [11327] = "Vanish", [11329] = "Vanish",
     [20580] = "Shadowmeld", [58984] = "Shadowmeld", [66] = "Invisibility", [3680] = "Invisibility", [11392] = "Invisibility",
 }
+local CAMOUFLAGE = 199483
 
 function D.StealthSpell(spellID, retailStealth)
-    if retailStealth and spellID == 199483 then return "Camouflage" end
+    if retailStealth and spellID == CAMOUFLAGE then return "Camouflage" end
     return STEALTH_SPELLS[spellID]
 end
 
 function D.IsStealthAura(spellID, retailStealth)
     -- This legacy rank is tracked as a cast only.
     return spellID ~= 8822 and D.StealthSpell(spellID, retailStealth) ~= nil
+end
+
+function D.StealthAuraIDs(retailStealth)
+    local ids = {}
+    for id in pairs(STEALTH_SPELLS) do
+        if D.IsStealthAura(id, retailStealth) then ids[#ids + 1] = id end
+    end
+    if retailStealth then ids[#ids + 1] = CAMOUFLAGE end
+    table.sort(ids)
+    return ids
 end
 
 D.profile = {

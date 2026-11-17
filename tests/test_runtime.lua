@@ -7967,6 +7967,78 @@ H.Test("a recycled token cannot give its new owner a stale stealth addition", fu
     H.Equal(app.ui.activeBanner.identity, "guid:Player-AuraReplacement")
 end)
 
+for _, fixture in ipairs({ { interface = 120105, spell = 199483, class = "HUNTER" },
+    { interface = 16001, spell = 1784, class = "ROGUE" } }) do
+    H.Test("first plate observation recovers a readable stealth aura on interface " .. fixture.interface, function()
+        local state, app, add = camouflageFixture(fixture.interface)
+        local secret = H.Secret("restricted aura")
+        local mode, calls = "opaque", 0
+        local api = state.api.C_UnitAuras
+        api.GetAuraDataByIndex = function(_, index)
+            if mode == "opaque" and fixture.interface == 16001 then return { spellId = 1126 } end
+            if index > 1 or mode == "clear" then return nil end
+            return secret
+        end
+        api.GetUnitAuraBySpellID = function(token, id)
+            calls = calls + 1
+            if token == "nameplate2" then
+                if id == 66 then error("lookup denied") end
+                if id == 1784 then return { isHelpful = true, spellId = secret } end
+                return secret
+            end
+            if token == "nameplate3" then return { isHelpful = false, spellId = id } end
+            if token == "nameplate4" then return { isHelpful = true, spellId = 8822 } end
+            if token == "nameplate1" and id == fixture.spell then return { isHelpful = true, spellId = id } end
+        end
+        add("nameplate1", "Player-ActiveStealth", fixture.class)
+        H.Equal(app.engine:Snapshot()[1].stealthEvidence, "aura")
+        H.True(calls > 0 and calls <= 17)
+        local afterAcquire = calls
+        state:Fire("UNIT_AURA", "nameplate1")
+        app.sensors:Poll()
+        H.Equal(calls, afterAcquire)
+        H.Equal(app.engine:Snapshot()[1].stealthEvidence, "aura")
+        for index = 2, 4 do add("nameplate" .. index, "Player-Negative" .. index, "ROGUE") end
+        state:Advance(0.5)
+        H.Equal(#app.engine.history, 1)
+        H.Equal(app.engine.history[1].kind, "stealth")
+        H.Equal(app.ui.activeBanner.identity, "guid:Player-ActiveStealth")
+
+        mode = "clear"
+        local beforeClear = calls
+        state:Fire("UNIT_AURA", "nameplate1")
+        add("nameplate5", "Player-CleanScan", "ROGUE")
+        H.Equal(calls, beforeClear)
+        for _, contact in ipairs(app.engine:Snapshot()) do H.Nil(contact.stealth) end
+    end)
+end
+
+H.Test("first confirmed hostility can recover an already active stealth aura", function()
+    local state, app, add = camouflageFixture(120105)
+    local secret = H.Secret("temporarily restricted hostility")
+    local hostile, calls = secret, 0
+    state.api.UnitIsEnemy = function() return hostile end
+    state.api.UnitCanAttack = function() return hostile end
+    state.api.C_UnitAuras.GetAuraDataByIndex = function() return secret end
+    state.api.C_UnitAuras.GetUnitAuraBySpellID = function(_, id)
+        calls = calls + 1
+        if id == 1784 then return { isHelpful = true, spellId = id } end
+    end
+    add("nameplate1", "Player-FirstHostile", "ROGUE")
+    H.Equal(calls, 0)
+    hostile = true
+    state:Fire("UNIT_FLAGS", "nameplate1")
+    H.Equal(app.engine:Snapshot()[1].stealthEvidence, "aura")
+    state:Advance(0.5)
+    H.Equal(#app.engine.history, 1)
+    local afterAcquire = calls
+    hostile = secret
+    state:Fire("UNIT_FLAGS", "nameplate1")
+    hostile = true
+    state:Fire("UNIT_FLAGS", "nameplate1")
+    H.Equal(calls, afterAcquire)
+end)
+
 H.Test("Retail Camouflage rejects restricted spell IDs and casts without a proven current owner", function()
     local state, app, add, auras = camouflageFixture(120105)
     add("nameplate1", "Player-CamouflageOld", "HUNTER")

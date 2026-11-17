@@ -11,6 +11,7 @@ function Client.New(api, diagnostics)
     interface = self:Number(interface)
     self.interface = interface
     self.retailStealth = interface ~= nil and interface >= 120000 and interface < 130000
+    self.stealthAuraIDs = RG.Defaults.StealthAuraIDs(self.retailStealth)
     if RG.Range then self.range = RG.Range.New(self.api, self) end
     return self
 end
@@ -227,6 +228,12 @@ function Client:Range(token, identity)
     return lower, upper, exclusive == true, evidence, sampledAt
 end
 
+local function helpfulAuraID(client, aura)
+    if type(aura) == "table" and client:Boolean(client:Safe(rawget, aura, "isHelpful")) == true then
+        return client:Number(client:Safe(rawget, aura, "spellId"))
+    end
+end
+
 local function hasAddedStealth(client, update)
     update = client:Clean(update)
     if type(update) ~= "table" or client:Boolean(client:Safe(rawget, update, "isFullUpdate")) == true then return false end
@@ -237,20 +244,16 @@ local function hasAddedStealth(client, update)
         if not ok then return false end
         if client:Readable(aura) then
             if aura == nil then return false end
-            if type(aura) == "table" and client:Boolean(client:Safe(rawget, aura, "isHelpful")) == true then
-                local id = client:Number(client:Safe(rawget, aura, "spellId"))
-                if id and RG.Defaults.IsStealthAura(id, client.retailStealth) then return true end
-            end
+            local id = helpfulAuraID(client, aura)
+            if id and RG.Defaults.IsStealthAura(id, client.retailStealth) then return true end
         end
     end
     return false
 end
 
-function Client:Stealth(token, update)
-    -- A readable addition proves presence. Absence still requires a complete indexed read.
-    if hasAddedStealth(self, update) then return true, true end
-    local api, ns = self.api, self.api.C_UnitAuras
-    if type(ns) ~= "table" or type(ns.GetAuraDataByIndex) ~= "function" then return nil, false end
+local function indexedStealth(self, token, ns)
+    if type(ns.GetAuraDataByIndex) ~= "function" then return nil end
+    local api = self.api
     local secrecy = api.C_Secrets
     local unrestricted
     if type(secrecy) == "table" then unrestricted = self:Boolean(self:Safe(secrecy.ShouldAurasBeSecret)) == false end
@@ -258,16 +261,33 @@ function Client:Stealth(token, update)
     local allReadable = unrestricted == true
     for index = 1, MAX_AURAS do
         local ok, aura = pcall(ns.GetAuraDataByIndex, token, index, "HELPFUL")
-        if not ok then self:Count("aura_errors"); return nil, false end
-        if not self:Readable(aura) then return nil, false end
+        if not ok then self:Count("aura_errors"); return nil end
+        if not self:Readable(aura) then return nil end
         if aura == nil then
-            if allReadable then return false, true end
-            return nil, false
+            if allReadable then return false end
+            return nil
         end
-        if type(aura) ~= "table" then return nil, false end
+        if type(aura) ~= "table" then return nil end
         local id = self:Number(self:Safe(function() return aura.spellId end))
-        if id and RG.Defaults.IsStealthAura(id, self.retailStealth) then return true, true end
+        if id and RG.Defaults.IsStealthAura(id, self.retailStealth) then return true end
         if not id then allReadable = false end
+    end
+    return nil
+end
+
+function Client:Stealth(token, update, acquiring)
+    -- Event additions and exact spell lookups can prove presence. Absence
+    -- requires a complete indexed read.
+    if hasAddedStealth(self, update) then return true, true end
+    local ns = self.api.C_UnitAuras
+    if type(ns) ~= "table" then return nil, false end
+    local indexed = indexedStealth(self, token, ns)
+    if indexed ~= nil then return indexed, true end
+    if acquiring and type(ns.GetUnitAuraBySpellID) == "function" then
+        for _, id in ipairs(self.stealthAuraIDs) do
+            local aura = self:Safe(ns.GetUnitAuraBySpellID, token, id)
+            if helpfulAuraID(self, aura) == id then return true, true end
+        end
     end
     return nil, false
 end
@@ -311,7 +331,8 @@ function Client:ReadUnit(token, source, checkRequalifiedAura, auraUpdate, auraOw
         local sameOwner = auraOwner and ((auraOwner.guid and auraOwner.guid == guid)
             or (not auraOwner.guid and auraOwner.name and nameComplete and auraOwner.name == name))
         if not sameOwner then auraUpdate = nil end
-        observation.stealth, observation.stealthReadable = self:Stealth(token, auraUpdate)
+        local acquiring = player == true and hostile == true and (checkRequalifiedAura or source ~= "aura")
+        observation.stealth, observation.stealthReadable = self:Stealth(token, auraUpdate, acquiring)
     end
     if token:match("^nameplate%d+$") then
         local manager = api.C_NamePlateManager
@@ -353,12 +374,13 @@ function Client:Context()
 end
 
 function Client:Capabilities()
-    local api = self.api
+    local api, auras = self.api, self.api.C_UnitAuras
     return {
         interface = self.interface,
         nameplates = type(api.C_NamePlate) == "table" and type(api.C_NamePlate.GetNamePlates) == "function",
         secretValues = type(api.issecretvalue) == "function",
-        auras = type(api.C_UnitAuras) == "table" and type(api.C_UnitAuras.GetAuraDataByIndex) == "function",
+        auras = type(auras) == "table" and (type(auras.GetAuraDataByIndex) == "function"
+            or type(auras.GetUnitAuraBySpellID) == "function"),
         distance = type(api.UnitDistanceSquared) == "function",
         behindCamera = type(api.C_NamePlateManager) == "table" and type(api.C_NamePlateManager.IsNamePlateUnitBehindCamera) == "function",
         combatLog = false,

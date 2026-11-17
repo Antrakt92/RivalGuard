@@ -51,11 +51,15 @@ Available class controls can be populated from the client's
 enumeration returns unknown rather than guessing classes from a build number.
 
 Aura checks accept readable helpful stealth additions from `UNIT_AURA` for a token
-whose owner still matches. Otherwise they use `C_UnitAuras.GetAuraDataByIndex`. Each
-scan is capped at 40 entries. Only a complete readable indexed scan can establish
-that the aura is absent. A confirmed nonhostile or
-non-player token retains identity evidence and skips threat detail queries. Its
-first clean return to hostile player status checks auras again. Steady-state
+whose owner still matches. With no matching addition they scan up to 40 entries
+through `C_UnitAuras.GetAuraDataByIndex`. During acquisition or requalification
+of a confirmed hostile player, an inconclusive scan can fall back to bounded
+exact spell lookups through `C_UnitAuras.GetUnitAuraBySpellID`. These lookups
+require a readable helpful aura whose spell ID matches the request. Only a
+complete readable indexed scan can establish absence. A confirmed nonhostile or
+non-player token retains identity evidence and skips threat detail queries.
+The first clean confirmation of hostile player status, including after
+disqualification, checks auras. Steady-state
 polling does not walk aura lists. A disappearing nameplate does not establish
 stealth.
 
@@ -107,7 +111,9 @@ The initial API review used these immutable upstream source revisions:
 - [Spellbook range contracts](https://github.com/Gethe/wow-ui-source/blob/bebcb6bf309cf41b41bd74f8ca651e6a105b2676/Interface/AddOns/Blizzard_APIDocumentationGenerated/SpellBookDocumentation.lua)
 - [Class enumeration used by the client](https://github.com/Gethe/wow-ui-source/blob/bebcb6bf309cf41b41bd74f8ca651e6a105b2676/Interface/AddOns/Blizzard_ClassMenu/Blizzard_ClassMenu.lua)
 - [Unit comparison and target event declarations](https://github.com/Gethe/wow-ui-source/blob/bebcb6bf309cf41b41bd74f8ca651e6a105b2676/Interface/AddOns/Blizzard_APIDocumentationGenerated/UnitDocumentation.lua)
-- [`UNIT_AURA` payload in Retail](https://github.com/Gethe/wow-ui-source/blob/297d7aaaa736f346b3e036f38ee088eaf7f8c07f/Interface/AddOns/Blizzard_APIDocumentationGenerated/UnitAuraDocumentation.lua#L595-L606)
+- [`UNIT_AURA` payload in Retail](https://github.com/Gethe/wow-ui-source/blob/297d7aaaa736f346b3e036f38ee088eaf7f8c07f/Interface/AddOns/Blizzard_APIDocumentationGenerated/UnitAuraDocumentation.lua#L640-L652)
+- [Aura lookup by spell ID in Retail](https://github.com/Gethe/wow-ui-source/blob/297d7aaaa736f346b3e036f38ee088eaf7f8c07f/Interface/AddOns/Blizzard_APIDocumentationGenerated/UnitAuraDocumentation.lua#L453-L471)
+- [Aura lookup by spell ID in Forever](https://github.com/Gethe/wow-ui-source/blob/bebcb6bf309cf41b41bd74f8ca651e6a105b2676/Interface/AddOns/Blizzard_APIDocumentationGenerated/UnitAuraDocumentation.lua#L455-L475)
 - [Aura update handling in Forever](https://github.com/Gethe/wow-ui-source/blob/bebcb6bf309cf41b41bd74f8ca651e6a105b2676/Interface/AddOns/Blizzard_NamePlates/Blizzard_NamePlateAuras.lua#L340-L370)
 - [Restriction event sequencing](https://github.com/Gethe/wow-ui-source/blob/297d7aaaa736f346b3e036f38ee088eaf7f8c07f/Interface/AddOns/Blizzard_APIDocumentationGenerated/RestrictedActionsDocumentation.lua)
 - [Forever shard events](https://github.com/Gethe/wow-ui-source/blob/bebcb6bf309cf41b41bd74f8ca651e6a105b2676/Interface/AddOns/Blizzard_APIDocumentationGenerated/SystemDocumentation.lua)
