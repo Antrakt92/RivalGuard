@@ -526,6 +526,108 @@ for _, legacy in ipairs({ false, true }) do
     end)
 end
 
+local function checkRuleDraft(ui)
+    ui.rulesDialog.checkDraft:Click()
+    local result = assert(ui.ruleCheckDialog, "rule check did not open")
+    H.True(result:IsShown())
+    H.Equal(#result.rows, 3)
+    return result
+end
+
+H.Test("checking a strict Rogue draft is isolated from live observations, audio, and the sample", function()
+    local state, app, profile = ruleSoundFixture()
+    local ui, RG = app.ui, state.RG
+    profile.locale = "ruRU"
+    app:OnSettingsChanged()
+    seeSoundRuleRival(state, 1, "HUNTER")
+    app:Demo()
+    local sample = ui.rows[1].contact
+    H.True(sample.preview)
+    H.Equal(sample.class, "ROGUE")
+    local liveSampleBefore = app:Explain(sample)
+    H.True(liveSampleBefore.allowed)
+    H.Equal(liveSampleBefore.reason, "event_matched")
+
+    ui:OpenRules()
+    local dialog = ui.rulesDialog
+    for _, chip in ipairs(dialog.classes) do
+        if chip.class == "ROGUE" then chip.frame:Click("RightButton"); break end
+    end
+    H.True(dialog.knownClassOnly:GetChecked())
+    dialog.action:Click()
+    H.Equal(ui.dialogs.ruleDraft.action, "suppress")
+
+    local persistentRoot = state.api.RivalGuardDB
+    local savedBefore = assert(RG.Codec.Encode(persistentRoot))
+    local contactsBefore = assert(RG.Codec.Encode(app.engine:Snapshot()))
+    local pendingBefore = assert(RG.Codec.Encode(app.engine.pending))
+    local observationsBefore, soundsBefore = app.engine.counters.observations, #state.sounds
+    local banner, activeProfile = ui.activeBanner, app.db:GetActiveProfileName()
+    local check = checkRuleDraft(ui)
+    H.Equal(app.db:GetActiveProfileName(), activeProfile)
+    H.Equal(state.api.RivalGuardDB, persistentRoot)
+    H.Equal(app.db:GetProfile(), profile)
+    H.Equal(RG.Codec.Encode(persistentRoot), savedBefore)
+    H.Equal(RG.Codec.Encode(app.engine:Snapshot()), contactsBefore)
+    H.Equal(RG.Codec.Encode(app.engine.pending), pendingBefore)
+    H.Equal(app.engine.counters.observations, observationsBefore)
+    H.Equal(#app.engine.history, 0); H.Equal(app.engine.counters.alerts, 0)
+    H.Equal(#state.sounds, soundsBefore)
+    H.Equal(ui.activeBanner, banner)
+    local liveSampleAfter = app:Explain(sample)
+    H.Equal(liveSampleAfter.allowed, liveSampleBefore.allowed)
+    H.Equal(liveSampleAfter.reason, liveSampleBefore.reason)
+
+    local samples = { RG.Locale.Class("ROGUE", profile.locale), RG.Locale.Class("HUNTER", profile.locale), ui:T("unknownClass") }
+    for index, row in ipairs(check.rows) do
+        H.True(row.sample:IsShown())
+        H.Equal(row.sample:GetText(), samples[index])
+        H.Equal(row.result:GetText(), ui:T(index == 1 and "ruleCheckDraftWins" or "ruleCheckStandard"))
+        H.Equal(row.effect:GetText(), index == 1 and RG.Locale.Reason("custom_suppressed", profile.locale) or ui:T("explanationBannerOnly"))
+    end
+    H.Equal(check.scope:GetText(), ui:F("ruleCheckScope", ui:T("eventSighting"), ui:T("world"), ui:T("listUnlisted"), 20))
+end)
+
+H.Test("rule checking respects saved tie order and replaces an edited rule in place", function()
+    local state, app, profile = ruleSoundFixture()
+    local first, second = soundRule("Same displayed name", "ready", 90), soundRule("Same displayed name", "quest", 90)
+    profile.rules = { first, second }
+    app:OnSettingsChanged()
+    local ui = app.ui
+    ui:OpenRules()
+    local dialog = ui.rulesDialog
+    dialog.rows[2]:Click()
+    local check = checkRuleDraft(ui)
+    local otherWins = ui:F("ruleCheckOtherWins", first.name)
+    local ready = ui:T("explanationSoundBanner") .. " · " .. ui:T("soundReady")
+    local quest = ui:T("explanationSoundBanner") .. " · " .. ui:T("soundQuest")
+    H.Equal(check.rows[1].result:GetText(), otherWins)
+    H.Equal(check.rows[1].effect:GetText(), ready)
+    dialog.priority:SetValue(95)
+    ui:Refresh()
+    H.False(check:IsShown())
+    check = checkRuleDraft(ui)
+    H.Equal(check.rows[1].result:GetText(), ui:T("ruleCheckDraftWins"))
+    H.Equal(check.rows[1].effect:GetText(), quest)
+    H.Equal(profile.rules[2], second)
+    H.Equal(second.priority, 90)
+
+    dialog.rows[1]:Click()
+    dialog.priority:SetValue(70)
+    check = checkRuleDraft(ui)
+    H.Equal(check.rows[1].result:GetText(), otherWins)
+    H.Equal(check.rows[1].effect:GetText(), quest)
+    H.Equal(profile.rules[1], first)
+    H.Equal(first.priority, 90)
+    H.Equal(#state.sounds, 0)
+    H.Equal(#app.engine.history, 0)
+    assert(app.db:CreateProfile("Other profile"))
+    assert(app.db:SetProfile("Other profile"))
+    app:ProfileChanged()
+    H.False(check:IsShown())
+    H.Equal(#app.db:GetProfile().rules, 0)
+end)
+
 for _, locale in ipairs({ "enUS", "ruRU" }) do
     H.Test("a single-class sound rule can be drafted and named from Alerts in " .. locale, function()
         local state, app, profile = ruleSoundFixture()

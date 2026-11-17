@@ -165,6 +165,7 @@ function D.Attach(ui, app, H)
         slider:SetScript("OnValueChanged", function(_, value)
             if self.loadingRule or not self.ruleDraft then return end
             self.ruleDraft[field] = math.floor(value / step + 0.5) * step
+            self:RefreshRuleCheck()
             if field == "range" then self:RefreshRules()
             else valueText:SetText(tostring(self.ruleDraft[field])) end
         end)
@@ -214,6 +215,7 @@ function D.Attach(ui, app, H)
             if not self.loadingRule and self.ruleDraft then
                 self.ruleDraft.name = box:GetText()
                 self.ruleAutoName = false
+                self:RefreshRuleCheck()
             end
         end)
         f:SetScript("OnHide", function() f.nameInput:ClearFocus() end)
@@ -307,12 +309,15 @@ function D.Attach(ui, app, H)
         f.save:SetPoint("TOPLEFT", 253, -625)
         f.delete = H.localButton(f, "deleteRule", 185, function() self:DeleteRule() end)
         f.delete:SetPoint("LEFT", f.save, "RIGHT", 12, 0)
+        f.checkDraft = H.localButton(f, "checkRuleDraft", 126, function() self:CheckRuleDraft() end)
+        f.checkDraft:SetPoint("LEFT", f.delete, "RIGHT", 12, 0)
         local hint = H.label(f, "ruleDraft", 11, H.C.muted)
         hint:SetPoint("TOPLEFT", 18, -612); hint:SetWidth(205)
         return f
     end
 
     function self:RefreshRules()
+        self:RefreshRuleCheck()
         local f = self.rulesFrame
         if not f or not self.ruleDraft then return end
         local rules = ui:Profile().rules
@@ -366,25 +371,113 @@ function D.Attach(ui, app, H)
         self.loadingRule = false
     end
 
-    function self:SaveRule()
-        if not self.ruleDraft then return end
+    function self:RuleDraftIsCurrent()
         local profile = ui:Profile()
-        if profile ~= self.ruleProfile or (self.ruleIndex and profile.rules[self.ruleIndex] ~= self.ruleOriginal) then
-            notify("ruleInvalid"); self:RuleDraft(nil); return
-        end
+        return self.ruleDraft ~= nil and profile == self.ruleProfile
+            and (not self.ruleIndex or profile.rules[self.ruleIndex] == self.ruleOriginal)
+    end
+
+    function self:RuleCandidate()
+        if not self:RuleDraftIsCurrent() then return nil, nil, "ruleInvalid" end
+        local profile = ui:Profile()
         local index = self.ruleIndex or (#profile.rules + 1)
-        if index > 32 then notify("ruleLimit") return end
+        if index > 32 then return nil, nil, "ruleLimit" end
         local draft = RG.Util.Copy(self.ruleDraft)
         if draft.soundCue == "inherit" then draft.soundCue = nil end
         draft.name = RG.Util.Text(self.rulesFrame.nameInput:GetText(), 80)
-        if not draft.name then notify("ruleNeedsName") return end
+        if not draft.name then return nil, nil, "ruleNeedsName" end
         local candidate = RG.Util.Copy(profile)
         candidate.rules[index] = draft
         local clean = RG.Database.ValidateProfile(candidate, true)
-        if not clean then notify("ruleInvalid") return end
+        if not clean then return nil, nil, "ruleInvalid" end
+        return clean, index
+    end
+
+    function self:SaveRule()
+        if not self.ruleDraft then return end
+        local clean, index, err = self:RuleCandidate()
+        if not clean then
+            notify(err)
+            if not self:RuleDraftIsCurrent() then self:RuleDraft(nil) end
+            return
+        end
+        local profile = ui:Profile()
         profile.rules = clean.rules
         profile.preset = "custom"
         H.changed(); notify("ruleSaved"); self:RuleDraft(index)
+    end
+
+    local function exampleClass(classes, except, matches)
+        local function suitable(class)
+            return class ~= except and (not ui.classAvailability or ui.classAvailability[class])
+                and (matches == nil or M.ClassEnabled(classes, class) == matches)
+        end
+        for _, class in ipairs({ "ROGUE", "HUNTER" }) do if suitable(class) then return class end end
+        for _, class in ipairs(RG.Defaults.classes) do if suitable(class) then return class end end
+    end
+
+    function self:CheckRuleDraft()
+        local profile, index, err = self:RuleCandidate()
+        if not profile then notify(err); return end
+        self.rulesFrame.nameInput:ClearFocus()
+        local rule = profile.rules[index]
+        local frame = ui.ruleCheckDialog
+        if not frame then
+            frame = dialog("RivalGuardRuleCheck", "ruleCheckTitle", 600, 420)
+            ui.ruleCheckDialog = frame
+            frame:SetFrameStrata("FULLSCREEN_DIALOG")
+            frame:SetScript("OnHide", function() self.checkedDraft, self.checkedDraftText, self.checkedAlertConfig = nil, nil, nil end)
+            frame.scope = H.font(frame, 13, H.C.muted)
+            frame.scope:SetPoint("TOPLEFT", 18, -55); frame.scope:SetWidth(564)
+            local help = H.label(frame, "ruleCheckHelp", 12, H.C.muted)
+            help:SetPoint("BOTTOMLEFT", 18, 23); help:SetWidth(564)
+            frame.rows = {}
+            for i = 1, 3 do
+                local row, y = {}, -112 - (i - 1) * 86
+                row.sample = H.font(frame, 14, H.C.accent)
+                row.sample:SetPoint("TOPLEFT", 18, y); row.sample:SetWidth(564)
+                row.result = H.font(frame, 13, H.C.text)
+                row.result:SetPoint("TOPLEFT", 18, y - 22); row.result:SetWidth(564)
+                row.effect = H.font(frame, 12, H.C.muted)
+                row.effect:SetPoint("TOPLEFT", 18, y - 54); row.effect:SetWidth(564)
+                frame.rows[i] = row
+            end
+        end
+        if ui.soundPicker then ui.soundPicker:Hide() end
+        local event = rule.event == "any" and "sighting" or rule.event
+        local eventLabel = ({ sighting = "eventSighting", returning = "eventReturning", stealth = "eventStealth", targeting = "eventTargeting" })[event]
+        local context = rule.context == "any" and "world" or rule.context
+        local entry = rule.list == "listed" and { kind = "watch" } or nil
+        local yards = math.min(20, rule.range > 0 and rule.range or 20, profile.range.enabled and profile.range.yards or 20)
+        frame.scope:SetText(ui:F("ruleCheckScope", t(eventLabel), t(context), t(entry and "listListed" or "listUnlisted"), yards))
+        local first = exampleClass(rule.classes, nil, true) or exampleClass(rule.classes)
+        local other = exampleClass(rule.classes, first, false) or exampleClass(rule.classes, first)
+        local examples = { first, other }
+        for i, row in ipairs(frame.rows) do
+            local class = examples[i]
+            local show = class ~= nil or i == 3
+            row.sample:SetShown(show); row.result:SetShown(show); row.effect:SetShown(show)
+            if show then
+                local decision, reason, winner = RG.Rules.Evaluate(profile, { hostile = true, isPlayer = true, class = class,
+                    rangeMin = yards, rangeMax = yards, rangeEvidence = "exact" }, event, { kind = context }, entry)
+                row.sample:SetText(class and RG.Locale.Class(class, profile.locale) or t("unknownClass"))
+                row.result:SetText(winner == index and t("ruleCheckDraftWins") or winner and ui:F("ruleCheckOtherWins", profile.rules[winner].name)
+                    or t(decision and "ruleCheckStandard" or "ruleCheckNoMatch"))
+                local effect
+                if not decision then effect = RG.Locale.Reason(reason, profile.locale)
+                elseif not decision.sound and not decision.banner then effect = RG.Locale.Reason("wave_only", profile.locale)
+                elseif decision.sound then
+                    effect = t(decision.banner and "explanationSoundBanner" or "explanationSoundOnly")
+                    local label = RG.Defaults.soundLabels[decision.soundCue]
+                    if label then effect = effect .. " · " .. t(label) end
+                else effect = t("explanationBannerOnly") end
+                row.effect:SetText(effect)
+            end
+        end
+        self.checkedDraft = self.ruleDraft
+        self.checkedDraftText = RG.Codec.Encode(self.ruleDraft)
+        self.checkedAlertConfig = app.alertConfig
+        showDialog(frame)
     end
 
     function self:DeleteRule()
@@ -486,12 +579,19 @@ function D.Attach(ui, app, H)
         H.changed(); notify("importSuccess")
     end
 
+    function self:RefreshRuleCheck()
+        if ui.ruleCheckDialog and ui.ruleCheckDialog:IsShown() and (not self.rulesFrame:IsShown()
+            or self.checkedDraft ~= self.ruleDraft or not self:RuleDraftIsCurrent()
+            or self.checkedAlertConfig ~= app.alertConfig
+            or self.checkedDraftText ~= RG.Codec.Encode(self.ruleDraft)) then ui.ruleCheckDialog:Hide() end
+    end
+
     function self:Refresh()
         self:CurrentSoundPicker()
         for _, frame in ipairs(dialogs) do
             if frame:IsShown() then ui:FitWindow(frame, frame:GetWidth(), frame:GetHeight(), 1) end
         end
-        if self.rulesFrame and self.rulesFrame:IsShown() then self:RefreshRules() end
+        if self.rulesFrame and self.rulesFrame:IsShown() then self:RefreshRules() else self:RefreshRuleCheck() end
     end
 
     local GUIDE_STEPS = {

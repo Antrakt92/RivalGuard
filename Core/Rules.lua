@@ -57,18 +57,18 @@ function R.Evaluate(profile, contact, event, context, listEntry, rangeFresh)
     if event == "targeting" and not profile.alerts.targeting then return nil, "event_disabled" end
     if profile.alerts.watchedOnly and not watched then return nil, "watch_only" end
     if profile.alerts.muteOrdinary and (kind == "sighting" or kind == "returning") then return nil, "ordinary_muted" end
-    local matched
-    for _, rule in ipairs(profile.rules) do
+    local matched, matchedIndex
+    for index, rule in ipairs(profile.rules) do
         if rule.enabled and (rule.event == event or rule.event == "any")
             and (not rule.context or rule.context == "any" or rule.context == ((context and context.kind) or "world"))
             and (not rule.list or rule.list == "any" or (rule.list == "listed" and watched) or (rule.list == "unlisted" and not watched))
             and R.ClassMatches(rule.classes, contact.class, profile.alerts.unknownClass and not rule.knownClassOnly) then
             local rangeMatches = not rule.range or rule.range == 0
                 or R.RangeMatches({ enabled = true, yards = rule.range, policy = rule.rangePolicy, unknown = rule.rangeUnknown }, contact, rangeFresh)
-            if rangeMatches and (not matched or rule.priority > matched.priority) then matched = rule end
+            if rangeMatches and (not matched or rule.priority > matched.priority) then matched, matchedIndex = rule, index end
         end
     end
-    if matched and matched.action == "suppress" then return nil, "custom_suppressed" end
+    if matched and matched.action == "suppress" then return nil, "custom_suppressed", matchedIndex end
     if not matched and not watched and not R.ClassMatches(profile.alerts.classes, contact.class, profile.alerts.unknownClass) then return nil, "class_filtered" end
     local decision = {
         kind = kind, priority = matched and matched.priority or PRIORITY[kind] or 20,
@@ -86,6 +86,6 @@ function R.Evaluate(profile, contact, event, context, listEntry, rangeFresh)
     decision.soundCue = decision.sound and cue or nil
     decision.waveSound = soundAllowed and profile.alerts.sounds.wave ~= "none"
         and decision.priority < 70 and (kind == "sighting" or kind == "returning")
-    if not decision.sound and not decision.banner and not decision.waveSound then return nil, "outputs_disabled" end
-    return decision
+    if not decision.sound and not decision.banner and not decision.waveSound then return nil, "outputs_disabled", matchedIndex end
+    return decision, nil, matchedIndex
 end
