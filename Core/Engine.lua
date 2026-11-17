@@ -56,7 +56,7 @@ function E.New(config)
         onEncounter = config.onEncounter, onChange = config.onChange,
         contacts = {}, identities = {}, nameOwners = {}, bindings = {}, tokenSerial = 0, contactCount = 0,
         pending = {}, history = {}, cooldowns = {}, snoozes = {}, serial = 0, sequence = 0,
-        counters = { observations = 0, alerts = 0, suppressed = 0, evicted = 0 },
+        counters = { observations = 0, alerts = 0, suppressed = 0, evicted = 0, queueOverflow = 0 },
         pausedUntil = nil, lastSound = -math.huge, revision = 0,
     }, E)
 end
@@ -257,9 +257,21 @@ function E:Queue(contact, event)
     end
     self.pending[#self.pending + 1] = item
     if #self.pending > self.profile.retention.maxContacts then
-        local dropped = table.remove(self.pending, 1)
+        -- Prefer discarding expired entries, then the weakest, newest alert.
+        local weakest = #self.pending
+        for index = 1, #self.pending - 1 do
+            local queued = self.pending[index]
+            if now - queued.at > MAX_PENDING_AGE then
+                weakest = index
+                break
+            end
+            if strongerAlert(self.pending[weakest], queued) then weakest = index end
+        end
+        local dropped = table.remove(self.pending, weakest)
+        self.counters.queueOverflow = self.counters.queueOverflow + 1
         local owner = self.contacts[dropped.id]
         if owner and dropped.event == "sighting" then owner.arrivalQueued = false end
+        return dropped ~= item
     end
     return true
 end
@@ -277,10 +289,28 @@ end
 
 function E:MakeRoom()
     if self.contactCount < self.profile.retention.maxContacts then return end
-    local candidate
+    local urgent, now = {}, self:Now()
+    for _, item in ipairs(self.pending) do
+        local contact = self.contacts[item.id]
+        local priority = item.decision.priority
+        if contact and priority >= 70 and now - item.at <= MAX_PENDING_AGE
+            and (item.event ~= "targeting" or contact.targeting == true) then
+            urgent[item.id] = math.max(urgent[item.id] or 0, priority)
+        end
+    end
+    local candidate, candidatePriority, candidateVisible
     for _, contact in pairs(self.contacts) do
-        if not candidate or (next(candidate.tokens) ~= nil and next(contact.tokens) == nil)
-            or ((next(candidate.tokens) ~= nil) == (next(contact.tokens) ~= nil) and contact.lastSeen < candidate.lastSeen) then candidate = contact end
+        local priority = urgent[contact.id] or 0
+        local visible = next(contact.tokens) ~= nil
+        local discard
+        if not candidate then discard = true
+        elseif priority ~= candidatePriority then discard = priority < candidatePriority
+        elseif visible ~= candidateVisible then discard = not visible
+        elseif contact.lastSeen ~= candidate.lastSeen then discard = contact.lastSeen < candidate.lastSeen
+        else discard = contact.id < candidate.id end
+        if discard then
+            candidate, candidatePriority, candidateVisible = contact, priority, visible
+        end
     end
     if candidate then self:Drop(candidate.id) self.counters.evicted = self.counters.evicted + 1 end
 end

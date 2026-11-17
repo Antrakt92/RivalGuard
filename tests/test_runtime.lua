@@ -860,6 +860,63 @@ H.Test("a queued Vanish banner preserves its spell when the aura is seen and the
     H.Equal(app.ui.banner.title:GetText(), app.ui:F("stealthCast", app.ui:T("spellVanish")))
 end)
 
+local function fullCapacityWithQueuedVanish()
+    local state, _, app = setup()
+    local profile = app.db:GetProfile()
+    profile.retention.maxContacts = 32
+    profile.alerts.classes = { ROGUE = true }
+    app:ProfileChanged()
+    for index = 1, 32 do
+        local token = "nameplate" .. index
+        state:Unit(token, { guid = "Player-Cap-" .. index, name = "Enemy" .. index,
+            class = index == 1 and "ROGUE" or "HUNTER", hostile = true, isPlayer = true })
+        state:Fire("NAME_PLATE_UNIT_ADDED", token)
+    end
+    state:Advance(3)
+    H.Equal(app.engine.contactCount, 32); H.Equal(#app.engine.pending, 0)
+    local rogueID = app.engine.bindings.nameplate1.id
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-AtCapacity", 1856)
+    state.units.nameplate1 = nil
+    state:Fire("NAME_PLATE_UNIT_REMOVED", "nameplate1")
+    state:Unit("nameplate1", { guid = "Creature-Cap", name = "Neutral NPC", hostile = false, isPlayer = false })
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    H.Equal(app.engine.contactCount, 32); H.Equal(#app.engine.pending, 1)
+    H.Equal(app.engine.pending[1].id, rogueID); H.Equal(app.engine.pending[1].stealthSpell, "Vanish")
+    return state, app, rogueID
+end
+
+local function addFilteredHunterAtCapacity(state)
+    state:Unit("nameplate33", { guid = "Player-Cap-New", name = "New Hunter", class = "HUNTER", hostile = true, isPlayer = true })
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate33")
+end
+
+H.Test("contact capacity preserves a fresh Vanish from the departing owner of a recycled nameplate", function()
+    local state, app, rogueID = fullCapacityWithQueuedVanish()
+    local sounds = #state.sounds
+    addFilteredHunterAtCapacity(state)
+    H.Equal(app.engine.contactCount, 32)
+    H.True(app.engine.contacts[rogueID] ~= nil)
+    H.True(app.engine.bindings.nameplate33 ~= nil)
+    H.Equal(#app.engine.pending, 1); H.Equal(app.engine.pending[1].id, rogueID)
+    state:Advance(0.3)
+    H.Equal(#state.sounds, sounds + 1)
+    local alert = app.engine.history[#app.engine.history]
+    H.Equal(alert.kind, "stealth"); H.Equal(alert.id, rogueID)
+end)
+
+H.Test("an expired retained Vanish can be evicted ahead of live contacts", function()
+    local state, app, rogueID = fullCapacityWithQueuedVanish()
+    local liveID = app.engine.bindings.nameplate2.id
+    local sounds = #state.sounds
+    state.clock.Advance(6)
+    addFilteredHunterAtCapacity(state)
+    H.Equal(app.engine.contactCount, 32); H.Nil(app.engine.contacts[rogueID])
+    H.Equal(app.engine.bindings.nameplate2.id, liveID); H.True(app.engine.bindings.nameplate33 ~= nil)
+    H.Equal(#app.engine.pending, 0)
+    state:Advance(0.3)
+    H.Equal(#state.sounds, sounds)
+end)
+
 H.Test("journal entries expire online and refresh the open journal without new sightings", function()
     local state, _, app = setup()
     local now = state.api.time()

@@ -328,3 +328,72 @@ H.Test("an expired crowd cannot turn a recent isolated sighting into a wave", fu
     H.Equal(alerts[1].contact.id, fresh.id)
     H.True(alerts[1].sound)
 end)
+
+local function queuePressureFixture()
+    local engine, observe, clock, alerts = fixture()
+    engine.profile.retention.maxContacts = 32
+    local function arrival(index, event)
+        local fields = { guid = "Player-Queue-" .. index, name = "Rival " .. index, class = "ROGUE" }
+        if event == "stealth" then fields.stealth, fields.stealthReadable = true, true end
+        if event == "targeting" then fields.targeting = true end
+        return observe("nameplate" .. index, fields)
+    end
+    return engine, arrival, clock, alerts
+end
+
+H.Test("ordinary overflow retains pending stealth and keeps older equal-priority arrivals", function()
+    local engine, arrival, clock, alerts = queuePressureFixture()
+    local stealth = arrival(1, "stealth")
+    for index = 2, 31 do arrival(index) end
+    clock.Advance(0.9)
+    arrival(2, "targeting")
+    H.Equal(#engine.pending, 32)
+    local newest = arrival(32)
+    H.Equal(#engine.pending, 32)
+    H.Equal(#engine:Snapshot(), 32)
+    H.Equal(engine.counters.evicted, 0)
+    H.Equal(engine.counters.queueOverflow, 1)
+
+    engine:Tick()
+    H.Equal(#alerts, 3)
+    H.Equal(alerts[1].kind, "stealth")
+    H.Equal(alerts[1].contact.id, stealth.id)
+    H.True(alerts[1].sound)
+    H.Equal(alerts[2].kind, "targeting")
+    H.Equal(alerts[3].kind, "wave")
+    H.Equal(alerts[3].count, 30)
+    clock.Advance(1)
+    engine:Tick()
+    H.Equal(#alerts, 3)
+    H.Equal(arrival(32).id, newest.id)
+    clock.Advance(1)
+    engine:Tick()
+    H.Equal(#alerts, 4)
+    H.Equal(alerts[4].kind, "sighting")
+    H.Equal(alerts[4].contact.id, newest.id)
+end)
+
+H.Test("stronger overflow replaces the newest weakest arrival and lets it retry", function()
+    local engine, arrival, clock, alerts = queuePressureFixture()
+    local newest
+    for index = 1, 32 do newest = arrival(index) end
+    H.Equal(#engine.pending, 32)
+    clock.Advance(0.9)
+    local targeting = arrival(2, "targeting")
+    H.Equal(#engine.pending, 32)
+    H.Equal(engine.counters.evicted, 0)
+    H.Equal(engine.counters.queueOverflow, 1)
+
+    engine:Tick()
+    H.Equal(#alerts, 2)
+    H.Equal(alerts[1].kind, "targeting")
+    H.Equal(alerts[1].contact.id, targeting.id)
+    H.Equal(alerts[2].kind, "wave")
+    H.Equal(alerts[2].count, 31)
+    H.Equal(arrival(32).id, newest.id)
+    clock.Advance(1)
+    engine:Tick()
+    H.Equal(#alerts, 3)
+    H.Equal(alerts[3].kind, "sighting")
+    H.Equal(alerts[3].contact.id, newest.id)
+end)
