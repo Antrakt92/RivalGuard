@@ -22,6 +22,7 @@ local function safeObservation(obs)
         level = U.IsFinite(obs.level) and math.floor(U.Clamp(obs.level, 1, 999, 1)) or nil,
         hostile = boolean(obs.hostile), isPlayer = boolean(obs.isPlayer),
         targeting = boolean(obs.targeting), stealth = boolean(obs.stealth),
+        targetEvent = obs.targetEvent == true or nil,
         currentTarget = boolean(obs.currentTarget), currentFocus = boolean(obs.currentFocus),
         dead = boolean(obs.dead),
         stealthReadable = obs.stealthReadable == true,
@@ -49,6 +50,12 @@ local function nameIdentity(obs)
     local suffix = obs.realm and ("-" .. obs.realm)
     if suffix and obs.name:sub(-#suffix) ~= suffix then return "name:" .. obs.name .. suffix end
     return "name:" .. obs.name
+end
+
+local function ownerMatches(contact, guid, name)
+    if not contact then return false end
+    if contact.guid and guid then return contact.guid == guid end
+    return name ~= nil and name == contact.nameIdentity and not contact.ambiguousIdentity
 end
 
 function E.New(config)
@@ -164,7 +171,7 @@ function E:Changed()
     if self.onChange then self.onChange() end
 end
 
-function E:Reconcile(contact, now)
+function E:Reconcile(contact, now, clearOlderTargeting)
     local hostile, player, targeting, dead, behind, currentTarget, currentFocus
     local rangeAt, rangeMin, rangeMax, rangeExclusive, rangeEvidence, conflict
     for token in pairs(contact.tokens) do
@@ -173,6 +180,7 @@ function E:Reconcile(contact, now)
         if obs then
             if obs.hostile == true then hostile = true end
             if obs.isPlayer == true then player = true end
+            if clearOlderTargeting and obs.targeting == true then obs.targeting = nil end
             if obs.targeting == true then targeting = true
             elseif obs.targeting == false and targeting == nil then targeting = false end
             if obs.dead == true then dead = true
@@ -522,12 +530,7 @@ function E:Observe(raw)
     local binding = self.bindings[obs.token]
     local contact = binding and self.contacts[binding.id]
     if obs.isPlayer == false or obs.hostile == false then
-        local sameOwner = false
-        if contact then
-            if contact.guid and obs.guid then sameOwner = contact.guid == obs.guid
-            else sameOwner = named ~= nil and named == contact.nameIdentity and not contact.ambiguousIdentity end
-        end
-        self:Remove(obs.token, sameOwner and obs or nil)
+        self:Remove(obs.token, ownerMatches(contact, obs.guid, named) and obs or nil)
         return nil, "not_enemy_player"
     end
     local now = self:Now()
@@ -568,6 +571,7 @@ function E:Observe(raw)
         self.contactCount = self.contactCount + 1
     end
     returning = returning or self:ResetReturningEncounter(contact, now)
+    local clearOlderTargeting = obs.targetEvent and obs.targeting == false and ownerMatches(contact, obs.guid, named)
     if not binding or binding.id ~= contact.id then
         self.tokenSerial = self.tokenSerial + 1
         self.bindings[obs.token] = { id = contact.id, generation = self.tokenSerial, source = obs.source }
@@ -586,8 +590,8 @@ function E:Observe(raw)
     if obs.class then contact.class = obs.class end
     if obs.level then contact.level = obs.level end
     -- A restricted alias cannot erase another available source's clean evidence.
-    -- Conversely, evidence vanishes when every active source becomes unreadable.
-    self:Reconcile(contact, now)
+    -- A verified owner's target-change event can supersede older positives.
+    self:Reconcile(contact, now, clearOlderTargeting)
     local oldStealth = contact.stealth or (previous and previous.stealth)
     if obs.stealthReadable then
         if obs.stealth == true then

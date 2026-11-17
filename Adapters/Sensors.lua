@@ -42,7 +42,7 @@ function Sensors:Call(method, ...)
     return a, b
 end
 
-function Sensors:Observe(token, source, behindCamera)
+function Sensors:Observe(token, source, behindCamera, targetEvent)
     token = self.client:IsToken(token)
     if not token then return end
     if not DIRECT[token] and not self.active[token] and self.plateCount >= MAX_PLATES then
@@ -52,6 +52,7 @@ function Sensors:Observe(token, source, behindCamera)
     local state = self.active[token]
     local obs = self.client:ReadUnit(token, source, state and state.awaitingEligibility)
     if not obs then self:Remove(token); return end
+    if targetEvent then obs.targetEvent = true end
     self:Record(obs, behindCamera)
 end
 
@@ -219,7 +220,7 @@ function Sensors:OnEvent(event, token, castGUID, spellID)
         if token and (self.active[token] or DIRECT[token]) then
             local behind
             if event == "NAME_PLATE_UNIT_BEHIND_CAMERA_CHANGED" then behind = self.client:Boolean(castGUID) end
-            self:Observe(token, event == "UNIT_AURA" and "aura" or "unit", behind)
+            self:Observe(token, event == "UNIT_AURA" and "aura" or "unit", behind, event == "UNIT_TARGET")
         end
     else self:Call("SetContext", self.client:Context()) end
 end

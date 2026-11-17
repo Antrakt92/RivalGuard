@@ -555,6 +555,80 @@ H.Test("a queued targeting warning canceled by range can recover without emittin
     H.False(app.ui.banner:IsShown())
 end)
 
+local function aliasedTargetingFixture()
+    local state, app, _, nameplateTarget = targetingFixture(21)
+    state:Unit("target", state.units.nameplate1)
+    state:Unit("targettarget", state.units.player)
+    local range = state.api.UnitDistanceSquared
+    state.api.UnitDistanceSquared = function(token)
+        if token == "target" then return 441, true end
+        return range(token)
+    end
+    state:Fire("PLAYER_TARGET_CHANGED")
+    state:Advance(0.5)
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(app.ui.activeBanner.kind, "targeting")
+    local contact = app.engine:Snapshot()[1]
+    H.True(contact.sources.nameplate)
+    H.True(contact.sources.target)
+    H.True(contact.targeting)
+    return state, app, nameplateTarget, contact
+end
+
+for _, restricted in ipairs({ false, true }) do
+    H.Test("rapid targeting changes supersede " .. (restricted and "restricted" or "unchanged") .. " alias evidence", function()
+        local state, app, nameplateTarget, original = aliasedTargetingFixture()
+        if restricted then
+            local raw, secret = state.api.UnitIsUnit, H.Secret("restricted secondary target relation")
+            state.api.UnitIsUnit = function(first, second)
+                if first == "targettarget" and second == "player" then return secret end
+                return raw(first, second)
+            end
+        end
+        local now = state.clock.Now()
+        nameplateTarget(false)
+        H.False(app.engine:Snapshot()[1].targeting)
+        app.ui:AdvanceBanner(now)
+        H.Nil(app.ui.activeBanner)
+
+        nameplateTarget(true)
+        H.Equal(state.clock.Now(), now)
+        app.engine:Tick()
+        H.Equal(app.engine.counters.alerts, 2)
+        H.Equal(app.engine.history[2].kind, "targeting")
+        H.Equal(app.ui.activeBanner.id, original.id)
+        H.True(app.ui.banner:IsShown())
+    end)
+end
+
+H.Test("restricted UNIT_TARGET preserves independent positive alias evidence without rearming", function()
+    local state, app, nameplateTarget, original = aliasedTargetingFixture()
+    local now = state.clock.Now()
+    nameplateTarget(nil)
+    H.True(app.engine:Snapshot()[1].targeting)
+    app.ui:AdvanceBanner(now)
+    H.Equal(app.ui.activeBanner.id, original.id)
+    nameplateTarget(true)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(app.ui.activeBanner.id, original.id)
+end)
+
+H.Test("a recycled nameplate with a negative target relation cannot reset the prior owner", function()
+    local state, app, nameplateTarget, original = aliasedTargetingFixture()
+    state:Unit("nameplate1", { guid = "Player-AliasReplacement", name = "Replacement", class = "MAGE", hostile = true, isPlayer = true })
+    nameplateTarget(false)
+    local preserved = app.engine:SelectedContact(original.id, original.identity)
+    H.True(preserved.targeting)
+    H.True(preserved.sources.target)
+    H.Nil(preserved.sources.nameplate)
+    app.ui:AdvanceBanner(state.clock.Now())
+    H.Equal(app.ui.activeBanner.id, original.id)
+    state:Fire("UNIT_TARGET", "target")
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 1)
+end)
+
 for _, scenario in ipairs({ { kind = "sighting", count = 1 }, { kind = "wave", count = 3 } }) do
     H.Test("a silent " .. scenario.kind .. " banner leaves sound budget for the next warning", function()
         local state, _, app = setup()
