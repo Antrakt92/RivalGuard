@@ -273,14 +273,24 @@ function App:SetNote(contact, note)
     return self:SetList(contact, entry and entry.kind or "note", note)
 end
 
+local function alertListKind(entry)
+    local kind = entry and entry.kind
+    if kind ~= "note" then return kind end
+end
+
 function App:SetList(contact, kind, note)
     local entry, identity = self:ResolveList(contact)
     if not identity then return nil, "unknown_identity" end
     if note == nil then note = entry and entry.note end
+    local id = self.engine.identities[identity]
+    local current = id and self.engine.contacts[id]
+    local previousKind = current and alertListKind(self.engine:ListEntry(current))
     local ok, err = self.db:SetList(identity, kind, note, contact)
     if ok then
-        if kind == "ignore" and self.ui and self.ui.SuppressContactBanners then
-            self.ui:SuppressContactBanners(contact.id, contact.identity)
+        local currentKind = current and alertListKind(self.engine:ListEntry(current))
+        if current and currentKind ~= previousKind then self.engine:RevalidateContactPending(current) end
+        if kind == "ignore" and (not current or currentKind == "ignore") and self.ui and self.ui.SuppressContactBanners then
+            self.ui:SuppressContactBanners(current and current.id or contact.id, contact.identity)
         end
         self:ProfileChanged()
     end

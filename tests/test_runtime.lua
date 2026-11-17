@@ -2140,9 +2140,9 @@ H.Test("a collision invalidates a draft for a name alias without hiding explicit
     H.Equal(app.db:GetList()[selected.identity].note, "First GUID only")
 end)
 
-local function recentListAliasFixture(exactEntry)
+local function recentListAliasFixture(exactEntry, aliasKind)
     local nameKey, guidKey = "name:Enemy-FixtureRealm", "guid:Player-RecentAlias"
-    local lists = { [nameKey] = { kind = "watch", name = "Enemy-FixtureRealm", note = "Legacy lookout note", class = "ROGUE" } }
+    local lists = { [nameKey] = { kind = aliasKind or "watch", name = "Enemy-FixtureRealm", note = "Legacy lookout note", class = "ROGUE" } }
     if exactEntry then lists[guidKey] = { kind = "watch", name = "Enemy-FixtureRealm", note = "Exact entry note", class = "ROGUE" } end
     local state, _, app = setup({ schemaVersion = 1, onboardingSeen = true, lists = lists })
     state:Unit("nameplate1", { guid = "Player-RecentAlias", name = "Enemy", realm = "FixtureRealm",
@@ -2243,6 +2243,45 @@ H.Test("ambiguous active GUIDs never borrow their shared name note in Recent", f
     H.Nil(journalRowFor(ui, guidKey)); H.Nil(journalRowFor(ui, secondKey))
     H.Equal(app.db:GetList()[nameKey].note, "Legacy lookout note")
 end)
+
+H.Test("Recent reclassification uses the effective alias to expedite its queued warning", function()
+    local state, app, nameKey, guidKey = recentListAliasFixture(false, "note")
+    local ui = app.ui
+    H.Equal(app.engine.counters.alerts, 0)
+    state.clock.Advance(0.2)
+    assert(journalRowFor(ui, guidKey)):Click()
+    ui.detailsFrame.listActions.avoid:Click()
+    H.Equal(app.db:GetList()[nameKey].kind, "avoid")
+    H.Nil(app.db:GetList()[guidKey])
+    H.Equal(app.engine.counters.alerts, 0)
+    state.clock.Advance(0.05)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(app.engine.history[1].kind, "watch")
+end)
+
+for _, exactEntry in ipairs({ false, true }) do
+    H.Test("saved name-key Ignore respects " .. (exactEntry and "an exact GUID override" or "its effective GUID alias"), function()
+        local _, app, nameKey, guidKey = recentListAliasFixture(exactEntry)
+        local ui = app.ui
+        app.engine:Tick()
+        H.Equal(ui.activeBanner.kind, "watch")
+        H.Equal(ui.activeBanner.identity, guidKey)
+        ui.journalPersonal:Click()
+        assert(journalRowFor(ui, nameKey)):Click()
+        ui.detailsFrame.listActions.ignore:Click()
+        H.Equal(app.db:GetList()[nameKey].kind, "ignore")
+        if exactEntry then
+            H.Equal(app.db:GetList()[guidKey].kind, "watch")
+            H.Equal(ui.activeBanner.identity, guidKey)
+            H.True(ui.banner:IsShown())
+        else
+            H.Nil(app.db:GetList()[guidKey])
+            H.Nil(ui.activeBanner)
+            H.False(ui.banner:IsShown())
+        end
+    end)
+end
 
 H.Test("threat journal records a confirmed threat that develops after the first sighting exactly once", function()
     local state, _, app = setup()
@@ -2402,6 +2441,115 @@ local function queuedSettingsVanish()
     H.False(app.ui.banner:IsShown())
     return state, app
 end
+
+local function addQueuedRival(state, app, index)
+    local token, guid = "nameplate" .. index, "Player-QueuedList" .. index
+    state:Unit(token, { guid = guid, name = "List rival " .. index, realm = "FixtureRealm",
+        class = "ROGUE", hostile = true, isPlayer = true })
+    state:Fire("NAME_PLATE_UNIT_ADDED", token)
+    for _, contact in ipairs(app.engine:Snapshot()) do
+        if contact.identity == "guid:" .. guid then return contact end
+    end
+    error("queued list rival not observed")
+end
+
+for _, membership in ipairs({ "watch", "avoid" }) do
+    H.Test("adding " .. membership .. " expedites that sighting and leaves another sighting on schedule", function()
+        local state, _, app = setup()
+        local first = addQueuedRival(state, app, 1)
+        local second = addQueuedRival(state, app, 2)
+        state.clock.Advance(0.2)
+        assert(app:SetList(first, membership))
+        H.Equal(app.engine.counters.alerts, 0)
+        state.clock.Advance(0.05)
+        app.engine:Tick()
+        H.Equal(app.engine.counters.alerts, 1)
+        H.Equal(app.engine.history[1].kind, "watch")
+        H.Equal(app.engine.history[1].id, first.id)
+
+        state.clock.Advance(0.6)
+        app.engine:Tick()
+        H.Equal(app.engine.counters.alerts, 2)
+        H.Equal(app.engine.history[2].kind, "sighting")
+        H.Equal(app.engine.history[2].id, second.id)
+    end)
+end
+
+H.Test("removing Watch defers its queued sighting to the original wave deadline", function()
+    local state, _, app = setup()
+    assert(app.db:SetList("guid:Player-QueuedList1", "watch", "Keep note"))
+    local contact = addQueuedRival(state, app, 1)
+    state.clock.Advance(0.2)
+    app.ui:Select(contact)
+    app.ui.detailsFrame.removeMembership:Click()
+    local entry = app.db:GetList()[contact.identity]
+    H.Equal(entry.kind, "note"); H.Equal(entry.note, "Keep note")
+    H.Equal(app.engine.counters.alerts, 0)
+    state.clock.Advance(0.05)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 0)
+    H.Equal(#state.sounds, 0)
+
+    state.clock.Advance(0.6)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(app.engine.history[1].kind, "sighting")
+    H.Equal(app.engine.history[1].id, contact.id)
+end)
+
+H.Test("Ignore immediately discards queued Vanish even if removed before the tick", function()
+    local state, app = queuedSettingsVanish()
+    local contact = app.engine:Snapshot()[1]
+    assert(app:Ignore(contact))
+    H.Equal(app.db:GetList()[contact.identity].kind, "ignore")
+    assert(app:Ignore(contact))
+    H.Nil(app.db:GetList()[contact.identity])
+    state.clock.Advance(0.25)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 0)
+    H.Equal(#state.sounds, 0)
+    H.False(app.ui.banner:IsShown())
+
+    state.clock.Advance(1)
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-AfterUnignore", 1856)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(app.engine.history[1].kind, "stealth")
+end)
+
+H.Test("note edits and edits for an unrelated saved contact keep a queued sighting's deadline", function()
+    local state, _, app = setup()
+    local contact = addQueuedRival(state, app, 1)
+    state.clock.Advance(0.2)
+    assert(app:SetNote(contact, "Keep note"))
+    assert(app:SetList({ savedOnly = true, identity = "guid:Player-UnrelatedSaved", name = "Unrelated-FixtureRealm", class = "ROGUE" }, "watch"))
+    H.Equal(app.db:GetList()[contact.identity].note, "Keep note")
+    state.clock.Advance(0.05)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 0)
+    state.clock.Advance(0.6)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(app.engine.history[1].kind, "sighting")
+    H.Equal(app.engine.history[1].id, contact.id)
+end)
+
+H.Test("a membership edit does not create an event when no sighting was queued", function()
+    local state, _, app = setup()
+    app.db:GetProfile().alerts.muteOrdinary = true
+    app:OnSettingsChanged()
+    local contact = addQueuedRival(state, app, 1)
+    assert(app:SetList(contact, "watch"))
+    state.clock.Advance(0.85)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 0)
+    H.Equal(#state.sounds, 0)
+    H.False(app.ui.banner:IsShown())
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-AfterList", 1856)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(app.engine.history[1].kind, "stealth")
+end)
 
 for _, setting in ipairs({ "sound choice", "mute" }) do
     H.Test("queued Vanish survives a " .. setting .. " change and uses the new output", function()

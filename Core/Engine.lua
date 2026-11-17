@@ -293,6 +293,14 @@ local function pendingDecision(engine, item, contact, now)
     if not cooldown or now - cooldown >= decision.cooldown then return decision, key end
 end
 
+local function refreshPendingDecision(engine, item, contact, now)
+    if now - item.at > MAX_PENDING_AGE then return false end
+    local decision = pendingDecision(engine, item, contact, now)
+    if not decision then return false end
+    item.decision = decision
+    return true
+end
+
 function E:CancelTargeting(contact)
     for index = #self.pending, 1, -1 do
         local item = self.pending[index]
@@ -902,9 +910,7 @@ function E:SetProfile(profile, preservePending)
         -- changes when the player edits or switches a profile.
         local now, kept = self:Now(), {}
         for _, item in ipairs(self.pending) do
-            local decision = now - item.at <= MAX_PENDING_AGE and pendingDecision(self, item, self.contacts[item.id], now)
-            if decision then
-                item.decision = decision
+            if refreshPendingDecision(self, item, self.contacts[item.id], now) then
                 kept[#kept + 1] = item
             end
         end
@@ -922,6 +928,21 @@ function E:SetProfile(profile, preservePending)
     while self.contactCount > profile.retention.maxContacts do self:MakeRoom() end
     while #self.history > profile.retention.maxHistory do table.remove(self.history, 1) end
     self:Changed()
+end
+
+function E:RevalidateContactPending(contact)
+    contact.arrivalQueued = false
+    local now = self:Now()
+    for index = #self.pending, 1, -1 do
+        local item = self.pending[index]
+        if item.id == contact.id then
+            if not refreshPendingDecision(self, item, contact, now) then
+                table.remove(self.pending, index)
+            elseif item.event == "sighting" then
+                contact.arrivalQueued = true
+            end
+        end
+    end
 end
 
 function E:SetContext(context)
