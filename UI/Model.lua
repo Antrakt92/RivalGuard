@@ -187,9 +187,36 @@ local function claimAlias(aliases, state, id)
     return aliases[id]
 end
 
-local function prepareAliases(aliases, snapshot, orderedIds)
+local function getAliasState(aliases)
     local state = aliasState[aliases]
-    if not state then state = { serial = 0 }; aliasState[aliases] = state end
+    if not state then state = { serial = 0, count = RG.Util.Count(aliases) }; aliasState[aliases] = state end
+    return state
+end
+
+local function pruneAliases(aliases, state, current)
+    for id in pairs(aliases) do if not current[id] then aliases[id] = nil end end
+    state.count = RG.Util.Count(aliases)
+end
+
+local function aliasLabel(class, locale, alias)
+    local className = RG.Defaults.classSet[class] and RG.Locale.Class(class, locale) or RG.Locale.Get("unknownClass", locale)
+    return className .. " " .. alias
+end
+
+function M.StreamerName(contact, locale, aliases, liveContacts)
+    local id = M.Text(contact.id, "")
+    local alias = aliases[id]
+    if not alias and liveContacts[id] then
+        local state = getAliasState(aliases)
+        if state.count >= 512 then pruneAliases(aliases, state, liveContacts) end
+        alias = claimAlias(aliases, state, id)
+    end
+    if alias then return aliasLabel(M.Text(contact.class, ""), locale, alias) end
+    return RG.Locale.Get("unknownPlayer", locale)
+end
+
+local function prepareAliases(aliases, snapshot, orderedIds)
+    local state = getAliasState(aliases)
     state.count = RG.Util.Count(aliases)
     if state.count >= 512 then
         local current = {}
@@ -198,8 +225,7 @@ local function prepareAliases(aliases, snapshot, orderedIds)
         else
             for _, contact in ipairs(snapshot or {}) do current[M.Text(contact.id, "anonymous")] = true end
         end
-        for id in pairs(aliases) do if not current[id] then aliases[id] = nil end end
-        state.count = RG.Util.Count(aliases)
+        pruneAliases(aliases, state, current)
     end
     if orderedIds then
         -- Reserve aliases in list order, including opponents on other pages.
@@ -219,8 +245,7 @@ function M.Rows(snapshot, profile, now, aliases, orderedIds, offset)
             local name
             if aliasesState then
                 local alias = claimAlias(aliases, aliasesState, M.Text(contact.id, "anonymous"))
-                local className = known and RG.Locale.Class(class, profile.locale) or RG.Locale.Get("unknownClass", profile.locale)
-                name = className .. " " .. (alias or ((offset or 0) + #rows + 1))
+                name = aliasLabel(class, profile.locale, alias or ((offset or 0) + #rows + 1))
             else
                 name = M.Text(contact.name, RG.Locale.Get("unknownPlayer", profile.locale))
             end

@@ -434,6 +434,7 @@ for _, wave in ipairs({ "disabled", "banner", "sound" }) do
     H.Test("a full wave uses available outputs when the group output is " .. wave, function()
         local state, app, profile = ruleSoundFixture()
         profile.alerts.banner = wave == "banner"
+        profile.display.streamer = wave == "banner"
         profile.alerts.sounds.sighting = "ping"
         profile.alerts.sounds.wave = wave == "sound" and "ready" or "none"
         local hunter = soundRule("Hunter cue", "quest", 60)
@@ -460,6 +461,8 @@ for _, wave in ipairs({ "disabled", "banner", "sound" }) do
             H.Equal(state.sounds[1].id, RULE_SOUND_KITS.READY_CHECK)
         else
             H.Equal(app.ui.activeBanner.count, 3)
+            H.True(app.ui.banner.body:GetText():find(app.ui:F("waveBody", 3), 1, true) ~= nil)
+            H.Nil(app.ui.banner.body:GetText():find("Sound rival", 1, true))
         end
     end)
 end
@@ -2570,7 +2573,43 @@ H.Test("cosmetic streamer setting keeps a queued encounter and applies redaction
     state:Advance(1.5)
     H.Equal(app.engine.counters.alerts, 1)
     H.True(app.ui.banner:IsShown())
-    H.Equal(app.ui.banner.body:GetText(), app.ui:T("unknownPlayer"))
+    local name = app.ui.rows[1].nameText:GetText()
+    H.True(name:match(" %d+$") ~= nil)
+    H.Equal(app.ui.banner.body:GetText(), name)
+end)
+
+H.Test("a streamer banner delivered while Nearby is hidden shares its alias when the list reopens", function()
+    local state, _, app = setup()
+    local db, ui = app.db, app.ui
+    local profile = db:GetProfile()
+    profile.display.streamer, profile.display.showList = true, false
+    profile.alerts.muteOrdinary = true
+    app:OnSettingsChanged()
+    local identity = "guid:Player-RuleCue1"
+    assert(db:SetList(identity, "watch", "Keep this private", { name = "Private rival", class = "ROGUE" }))
+    for index = 1, 13 do seeSoundRuleRival(state, index, index == 1 and "ROGUE" or "HUNTER") end
+    state:Advance(0.5)
+    H.False(ui.frame:IsShown())
+    H.True(ui.banner:IsShown())
+    local alias = ui.banner.body:GetText()
+    H.True(alias:match(" %d+$") ~= nil)
+    H.Nil(alias:find("Sound rival", 1, true))
+    H.Equal(app.engine.counters.alerts, 1)
+    ui:Toggle()
+    H.True(ui.frame:IsShown())
+    H.Equal(ui.rows[1].contact.identity, identity)
+    H.Equal(ui.rows[1].nameText:GetText(), alias)
+    ui.rows[1]:Click()
+    H.Equal(ui.detailsFrame.title:GetText(), alias)
+    H.False(ui.detailsFrame.note:IsShown())
+    H.Equal(ui.detailsFrame.note:GetText(), "")
+    ui.frame.scripts.OnMouseWheel(ui.frame, -100)
+    H.True(ui.rows[1].contact.identity ~= identity)
+    H.Equal(ui.detailsFrame.title:GetText(), alias)
+    ui.frame.scripts.OnMouseWheel(ui.frame, 100)
+    H.Equal(ui.rows[1].nameText:GetText(), alias)
+    H.Equal(ui.banner.body:GetText(), alias)
+    H.Equal(db:GetList()[identity].note, "Keep this private")
 end)
 
 H.Test("slash pause resume mute and settings operate without hidden side effects", function()
@@ -3402,7 +3441,7 @@ for _, locale in ipairs({ "enUS", "ruRU" }) do
         app:ProfileChanged()
         H.Nil(ui.rows[1].nameText:GetText():find(name, 1, true))
         H.True(ui.banner:IsShown())
-        H.Equal(ui.banner.body:GetText(), RG.Locale.Get("unknownPlayer", locale))
+        H.Equal(ui.banner.body:GetText(), ui.rows[1].nameText:GetText())
         H.Nil(ui.journalRows[1].label:GetText():find(name, 1, true))
         H.Equal(ui.journalSearch:GetText(), "")
         H.False(ui.journalSearch:HasFocus())
@@ -4095,7 +4134,7 @@ H.Test("stationary Nearby and Details avoid repeat painting while changed contac
     app.db:GetProfile().display.streamer = true
     app:OnSettingsChanged()
     H.Nil(rowFor(2).nameText:GetText():find("Fixture Rival 2", 1, true))
-    H.Equal(detail.title:GetText(), ui:T("unknownPlayer"))
+    H.Equal(detail.title:GetText(), rowFor(2).nameText:GetText())
     H.Equal(detail.snooze.label:GetText(), ui:T("snoozeContact"))
     detail.snooze:Click()
     H.Equal(detail.snooze.label:GetText(), ui:T("resumeContact"))

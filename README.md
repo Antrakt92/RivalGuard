@@ -28,6 +28,7 @@ current profile would handle that new sighting in the open world.
   latest individual or group sound result when available.
   **Highlight** briefly marks the player's nameplate when the client can verify
   who it belongs to and RivalGuard can safely attach a marker.
+  Streamer mode uses the same session alias in Nearby, live details and alerts.
 - **Alerts:** choose audible classes independently from display classes. Set
   a sound for each event, control repeat timing and add optional rules for
   particular classes, situations, lists or estimated distances.

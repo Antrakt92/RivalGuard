@@ -174,7 +174,16 @@ elseif view == "explanation" then
     app.ui:Select(app.engine:Snapshot()[1])
     app.ui:ShowExplanation()
 elseif view == "banner" then
-    if page == "camouflage" then
+    if page == "streamer-alias" then
+        app.engine:Clear()
+        app.db:GetProfile().display.streamer = true
+        app:OnSettingsChanged()
+        local token = "nameplate80"
+        state:Unit(token, { guid = "Player-StreamerAliasPreview", name = "Private preview name", class = "HUNTER", hostile = true, isPlayer = true })
+        state:Fire("NAME_PLATE_UNIT_ADDED", token)
+        state:Advance(1.2)
+        assert(app.ui.banner.body:GetText() == app.ui.rows[1].nameText:GetText(), "streamer preview alias diverged")
+    elseif page == "camouflage" then
         app.engine:Clear()
         local token = "nameplate80"
         local name = locale == "ruRU" and "Пример охотника" or "Example hunter"

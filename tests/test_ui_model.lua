@@ -92,6 +92,12 @@ H.Test("streamer pages reserve aliases in list order and preserve off-page alias
     H.Nil(aliases[removed])
     H.Equal(aliases[newcomer.id], 513)
     H.Equal(RG.Util.Count(aliases), 512)
+    local concealed = { id = "new_alert", class = "HUNTER", name = "Private alert name" }
+    local live = { [same.id] = same, [concealed.id] = concealed }
+    H.Equal(model.StreamerName(concealed, "enUS", aliases, live), "Hunter 514")
+    H.Equal(model.StreamerName(same, "enUS", aliases, live), initial)
+    H.Equal(RG.Util.Count(aliases), 2)
+    H.Equal(model.StreamerName({ id = "old_alert" }, "enUS", aliases, live), "Unknown player")
 end)
 
 H.Test("unknown stealth string does not become confirmed stealth label", function()

@@ -1399,11 +1399,14 @@ function UI.New(app)
         local title = kind == "stealth" and M.Stealth(item, self:Profile().locale) or self:T(BANNER_CATEGORIES[kind] or "alertTitle")
         if item.preview then title = self:T("demoLabel") .. " · " .. title end
         banner.title:SetText(title)
-        local name = self:Profile().display.streamer and self:T("unknownPlayer") or item.name
         if item.count and item.count > 1 then
             local summary = M.Wave(item.classes, self:Profile().locale)
             banner.body:SetText(self:F("waveBody", item.count) .. (summary ~= "" and ("\n" .. summary) or ""))
         else
+            local name = item.name
+            if self:Profile().display.streamer then
+                name = not item.preview and M.StreamerName(item, self:Profile().locale, self.aliases, app.engine.contacts) or self:T("unknownPlayer")
+            end
             banner.body:SetText(name)
         end
         banner.icon:SetTexture(RG.Defaults.classSet[class] and ("Interface\\Icons\\ClassIcon_" .. class) or "Interface\\Icons\\Ability_Warrior_BattleShout")
@@ -1707,8 +1710,13 @@ function UI.New(app)
             self.noteDraft = nil
             detail.note:ClearFocus()
         end
-        local name = M.Text(contact.name, self:T(contact.savedOnly and "nameUnavailable" or "unknownPlayer"))
-        if profile.display.streamer then name = self:T("unknownPlayer") end
+        local name
+        if profile.display.streamer then
+            name = not preview and not contact.savedOnly and not self.selectedFromJournal
+                and M.StreamerName(contact, profile.locale, self.aliases, app.engine.contacts) or self:T("unknownPlayer")
+        else
+            name = M.Text(contact.name, self:T(contact.savedOnly and "nameUnavailable" or "unknownPlayer"))
+        end
         paintText(detail.title, name)
         local class = M.Text(contact.class, "")
         local lines = { RG.Defaults.classSet[class] and RG.Locale.Class(class, self:Profile().locale) or self:T("unknownClass") }
