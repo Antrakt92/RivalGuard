@@ -57,6 +57,13 @@ first clean return to hostile player status checks auras again. Steady-state
 polling does not walk aura lists. A disappearing nameplate does not establish
 stealth.
 
+For Retail 12.x, the cast and aura allowlists include Hunter Camouflage
+(`199483`). The data extracted from the supported build identifies it as a
+[Hunter talent](https://github.com/simulationcraft/simc/blob/261a2115904af6e8484bf4eb8ab545ebe88c2054/engine/dbc/generated/trait_data.inc#L194)
+with a [direct stealth aura effect](https://github.com/simulationcraft/simc/blob/261a2115904af6e8484bf4eb8ab545ebe88c2054/engine/dbc/generated/sc_spell_data.inc#L43238).
+Alerts still require a readable event on an observed player. This mapping is
+scoped to Retail until Forever spell data establishes an equivalent.
+
 Nameplates behind the camera have a separate state when the client exposes it.
 Target and focus preference comes from readable `UnitIsUnit` comparisons. The
 quarter-second sensor tick refreshes direct tokens and plates with a confirmed

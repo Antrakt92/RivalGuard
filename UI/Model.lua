@@ -5,6 +5,8 @@ local rangeEvidenceKeys = {
     exact = "rangeEvidenceExact", spell = "rangeEvidenceSpell", interaction = "rangeEvidenceInteraction",
     combined = "rangeEvidenceCombined", conflict = "rangeEvidenceConflict", unknown = "rangeEvidenceUnknown",
 }
+local stealthCastKeys = { Stealth = "spellStealth", Vanish = "spellVanish", Prowl = "spellProwl", Shadowmeld = "spellShadowmeld",
+    Invisibility = "spellInvisibility", Camouflage = "spellCamouflage" }
 
 local function clean(value)
     if issecretvalue then
@@ -142,7 +144,7 @@ function M.Stealth(contact, locale)
     if evidence == "aura" then return RG.Locale.Get("stealthAura", locale) end
     if evidence == "cast" then
         local spell = clean(contact.stealthSpell)
-        local key = ({ Stealth = "spellStealth", Vanish = "spellVanish", Prowl = "spellProwl", Shadowmeld = "spellShadowmeld", Invisibility = "spellInvisibility" })[spell]
+        local key = stealthCastKeys[spell]
         if key then return RG.Locale.Format("stealthCast", locale, RG.Locale.Get(key, locale)) end
     end
     return RG.Locale.Get("stealth", locale)

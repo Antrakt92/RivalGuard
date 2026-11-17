@@ -8,13 +8,6 @@ local MAX_RANGE_AGE = 2
 local URGENT_PRIORITY, SOUND_ESCALATION_GAP = 70, 0.25
 local RANGE_EVIDENCE = { exact = true, spell = true, interaction = true, combined = true, conflict = true, unknown = true }
 
-local SPELLS = {
-    [1784] = "Stealth", [1785] = "Stealth", [1786] = "Stealth", [1787] = "Stealth", [8822] = "Stealth",
-    [5215] = "Prowl", [6783] = "Prowl", [9913] = "Prowl",
-    [1856] = "Vanish", [1857] = "Vanish", [11327] = "Vanish", [11329] = "Vanish",
-    [20580] = "Shadowmeld", [58984] = "Shadowmeld", [66] = "Invisibility", [3680] = "Invisibility", [11392] = "Invisibility",
-}
-
 local function boolean(value) if type(value) == "boolean" then return value end end
 local function safeObservation(obs)
     if type(obs) ~= "table" then return nil end
@@ -64,6 +57,7 @@ function E.New(config)
         epoch = config.epoch or function() return 0 end,
         profile = config.profile or D.NewProfile(), context = config.context or { kind = "world" },
         lists = config.lists or {}, onAlert = config.onAlert or function() end,
+        retailStealth = config.retailStealth == true,
         onEncounter = config.onEncounter, onChange = config.onChange,
         contacts = {}, identities = {}, nameOwners = {}, bindings = {}, tokenSerial = 0, contactCount = 0,
         pending = {}, history = {}, cooldowns = {}, snoozes = {}, serial = 0, sequence = 0,
@@ -639,18 +633,19 @@ function E:Remove(token, contradiction)
 end
 
 function E:TracksCast(spellID)
-    return U.IsFinite(spellID) and SPELLS[spellID] ~= nil
+    return U.IsFinite(spellID) and D.StealthSpell(spellID, self.retailStealth) ~= nil
 end
 
 function E:Cast(token, spellID)
-    if not self:TracksCast(spellID) then return false end
+    local spell = U.IsFinite(spellID) and D.StealthSpell(spellID, self.retailStealth)
+    if not spell then return false end
     local binding = self.bindings[token]
     local contact = binding and self.contacts[binding.id]
     if not contact then return false end
     local now = self:Now()
     if contact.lastStealthCast and now - contact.lastStealthCast < 1 then return false end
     contact.lastStealthCast, contact.stealth, contact.stealthAt = now, "confirmed", now
-    contact.stealthEvidence, contact.stealthSpell = "cast", SPELLS[spellID]
+    contact.stealthEvidence, contact.stealthSpell = "cast", spell
     self:RecordEncounter(contact, now)
     self:Queue(contact, "stealth")
     self:Changed()

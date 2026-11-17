@@ -135,7 +135,7 @@ L.enUS = {
     snoozeContact = "Quiet this player for 10 min", resumeContact = "Resume this player's alerts", snoozedFor = "Silenced for %s", snoozeUnavailable = "Only a current or recent identified player can be silenced.",
     legacyIdentity = "This older entry has no clear player identity. Editing is unavailable.", notePrivate = "Notes are hidden while streamer mode is on.",
     waveClassCount = "%d × %s", waveMore = "+%d more", keyboardEditHelp = "Enter saves; Escape leaves the field.",
-    stealthCast = "%s used", stealthAura = "Stealth aura observed", spellStealth = "Stealth", spellVanish = "Vanish", spellProwl = "Prowl", spellShadowmeld = "Shadowmeld", spellInvisibility = "Invisibility",
+    stealthCast = "%s used", stealthAura = "Stealth aura observed", spellStealth = "Stealth", spellVanish = "Vanish", spellProwl = "Prowl", spellShadowmeld = "Shadowmeld", spellInvisibility = "Invisibility", spellCamouflage = "Camouflage",
     nativeSettingsHelp = "Set up class alerts, the Nearby panel, profiles and your personal lists. You can also open RivalGuard settings with /rg settings.",
     openSettings = "Open RivalGuard settings", nativeUnavailable = "RivalGuard settings are currently unavailable.",
 }
@@ -274,7 +274,7 @@ L.ruRU = {
     snoozeContact = "Не оповещать об игроке 10 мин", resumeContact = "Возобновить оповещения об игроке", snoozedFor = "Оповещения отключены ещё на %s", snoozeUnavailable = "Отключить оповещения можно для опознанного игрока из текущих или недавних встреч.",
     legacyIdentity = "В старой записи нет однозначных сведений об игроке. Редактирование недоступно.", notePrivate = "Заметки скрыты в режиме трансляции.",
     waveClassCount = "%d × %s", waveMore = "ещё %d", keyboardEditHelp = "Enter сохраняет, Esc снимает фокус.",
-    stealthCast = "Замечено применение: %s", stealthAura = "Замечен эффект скрытности", spellStealth = "Незаметность", spellVanish = "Исчезновение", spellProwl = "Крадущийся зверь", spellShadowmeld = "Слиться с тенью", spellInvisibility = "Невидимость",
+    stealthCast = "Замечено применение: %s", stealthAura = "Замечен эффект скрытности", spellStealth = "Незаметность", spellVanish = "Исчезновение", spellProwl = "Крадущийся зверь", spellShadowmeld = "Слиться с тенью", spellInvisibility = "Невидимость", spellCamouflage = "Маскировка",
     nativeSettingsHelp = "Настройте оповещения по классам, окно «Рядом», профили и личные списки. Настройки RivalGuard также открываются командой /rg settings.",
     openSettings = "Открыть настройки RivalGuard", nativeUnavailable = "Настройки RivalGuard сейчас недоступны.",
 }

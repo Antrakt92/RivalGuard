@@ -230,6 +230,9 @@ H.Test("client aura evidence distinguishes positive absent restricted and failed
     api.C_Secrets = { ShouldAurasBeSecret = function() return false end }
     stealth, readable = client:Stealth("target")
     H.False(stealth); H.True(readable)
+    api.C_UnitAuras.GetAuraDataByIndex = function(_, index) if index == 1 then return { spellId = 8822 } end end
+    stealth, readable = client:Stealth("target")
+    H.False(stealth); H.True(readable)
     api.C_UnitAuras.GetAuraDataByIndex = function() return secret end
     stealth, readable = client:Stealth("target")
     H.Nil(stealth); H.False(readable)

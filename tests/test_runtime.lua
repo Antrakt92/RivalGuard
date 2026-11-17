@@ -2136,6 +2136,101 @@ H.Test("an expired retained Vanish can be evicted ahead of live contacts", funct
     H.Equal(#state.sounds, sounds)
 end)
 
+local function camouflageFixture(interface)
+    local auras = {}
+    local state, _, app = setup(nil, function(fixture)
+        fixture.api.GetBuildInfo = function() return "Fixture", "Fixture", "", interface end
+        fixture.api.C_Secrets = { ShouldAurasBeSecret = function() return false end }
+        fixture.api.C_UnitAuras = { GetAuraDataByIndex = function(token, index)
+            if index == 1 and auras[token] then return { spellId = auras[token] } end
+        end }
+    end)
+    local profile = app.db:GetProfile()
+    profile.alerts.muteOrdinary = true
+    profile.locale = "ruRU"
+    app:ProfileChanged()
+    local function add(token, guid, class)
+        state:Unit(token, { guid = guid, name = "Rival", class = class, hostile = true, isPlayer = true })
+        state:Fire("NAME_PLATE_UNIT_ADDED", token)
+    end
+    return state, app, add, auras
+end
+
+H.Test("Retail Camouflage cast and aura share one alert with the localized cast name", function()
+    local state, app, add, auras = camouflageFixture(120105)
+    add("nameplate1", "Player-HunterCamouflage", "HUNTER")
+    H.Nil(app.engine:Snapshot()[1].stealth)
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-Camouflage", 199483)
+    local cast = app.engine:Snapshot()[1]
+    H.Equal(cast.stealth, "confirmed")
+    H.Equal(cast.stealthEvidence, "cast")
+    H.Equal(cast.stealthSpell, "Camouflage")
+    auras.nameplate1 = 199483
+    state:Fire("UNIT_AURA", "nameplate1")
+    state:Advance(0.5)
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(app.engine.history[1].kind, "stealth")
+    H.Equal(app.ui.banner.title:GetText(), app.ui:F("stealthCast", app.ui:T("spellCamouflage")))
+    state:Fire("UNIT_AURA", "nameplate1")
+    state:Advance(1)
+    H.Equal(app.engine.counters.alerts, 1)
+end)
+
+H.Test("Retail Camouflage aura alone confirms stealth without attributing a cast", function()
+    local state, app, add, auras = camouflageFixture(120105)
+    add("nameplate1", "Player-HunterAura", "HUNTER")
+    auras.nameplate1 = 199483
+    state:Fire("UNIT_AURA", "nameplate1")
+    state:Advance(0.5)
+    local contact = app.engine:Snapshot()[1]
+    H.Equal(contact.stealth, "confirmed")
+    H.Equal(contact.stealthEvidence, "aura")
+    H.Nil(contact.stealthSpell)
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(app.ui.banner.title:GetText(), app.ui:T("stealthAura"))
+end)
+
+H.Test("Retail Camouflage rejects restricted spell IDs and casts without a proven current owner", function()
+    local state, app, add, auras = camouflageFixture(120105)
+    add("nameplate1", "Player-CamouflageOld", "HUNTER")
+    local secret = H.Secret("unreadable Camouflage spell")
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-Restricted", secret)
+    auras.nameplate1 = secret
+    state:Fire("UNIT_AURA", "nameplate1")
+    state:Advance(0.5)
+    H.Nil(app.engine:Snapshot()[1].stealth)
+    H.Equal(app.engine.counters.alerts, 0)
+
+    state:Unit("nameplate2", { guid = "Player-CamouflageUntracked", name = "Untracked", class = "HUNTER", hostile = true, isPlayer = true })
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate2", "Cast-NoOwner", 199483)
+    auras.nameplate1 = nil
+    state:Unit("nameplate1", { guid = "Player-CamouflageReplacement", name = "Replacement", class = "HUNTER", hostile = true, isPlayer = true })
+    state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-Recycled", 199483)
+    state:Advance(0.5)
+    H.Equal(app.engine.counters.alerts, 0)
+    for _, contact in ipairs(app.engine:Snapshot()) do H.Nil(contact.stealth) end
+end)
+
+for _, client in ipairs({ { interface = 16001, label = "Forever" }, { label = "an unknown client" } }) do
+    H.Test("Camouflage stays unavailable on " .. client.label .. " while Vanish still warns", function()
+        local state, app, add, auras = camouflageFixture(client.interface)
+        add("nameplate1", "Player-UnsupportedCamouflage", "HUNTER")
+        state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-UnsupportedCamouflage", 199483)
+        auras.nameplate1 = 199483
+        state:Fire("UNIT_AURA", "nameplate1")
+        state:Advance(0.5)
+        H.Equal(app.engine.counters.alerts, 0)
+        H.Nil(app.engine:Snapshot()[1].stealth)
+
+        add("nameplate2", "Player-CommonVanish", "ROGUE")
+        state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate2", "Cast-CommonVanish", 1856)
+        state:Advance(0.5)
+        H.Equal(app.engine.counters.alerts, 1)
+        H.Equal(app.engine.history[1].kind, "stealth")
+        H.Equal(app.ui.banner.title:GetText(), app.ui:F("stealthCast", app.ui:T("spellVanish")))
+    end)
+end
+
 H.Test("journal entries expire online and refresh the open journal without new sightings", function()
     local state, _, app = setup()
     local now = state.api.time()

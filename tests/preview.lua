@@ -65,7 +65,19 @@ elseif view == "explanation" then
     end
     app.ui:Select(app.engine:Snapshot()[1])
     app.ui:ShowExplanation()
-elseif view == "banner" then app.ui:PreviewAlert()
+elseif view == "banner" then
+    if page == "camouflage" then
+        app.engine:Clear()
+        local token = "nameplate80"
+        local name = locale == "ruRU" and "Пример охотника" or "Example hunter"
+        state:Unit(token, { guid = "Player-CamouflagePreview", name = name, class = "HUNTER", hostile = true, isPlayer = true })
+        state:Fire("NAME_PLATE_UNIT_ADDED", token)
+        state:Fire("UNIT_SPELLCAST_SUCCEEDED", token, "Cast-CamouflagePreview", 199483)
+        state:Advance(0.45)
+        assert(app.ui.activeBanner and app.ui.activeBanner.stealthSpell == "Camouflage", "camouflage preview did not alert")
+    else
+        app.ui:PreviewAlert()
+    end
 elseif view == "locator" then
     local token = "nameplate80"
     local name = locale == "ruRU" and "Пример противника" or "Example opponent"

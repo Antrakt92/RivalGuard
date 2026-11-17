@@ -4,15 +4,12 @@ Client.__index = Client
 
 local CLASS = {}
 for _, name in ipairs(RG.Defaults.classes) do CLASS[name] = true end
-local STEALTH = {
-    [1784] = true, [1785] = true, [1786] = true, [1787] = true,
-    [5215] = true, [6783] = true, [9913] = true,
-    [1856] = true, [1857] = true, [11327] = true, [11329] = true,
-    [20580] = true, [58984] = true, [66] = true, [3680] = true, [11392] = true,
-}
-
 function Client.New(api, diagnostics)
     local self = setmetatable({ api = api or _G, diagnostics = diagnostics }, Client)
+    local _, _, _, interface = self:Safe(self.api.GetBuildInfo)
+    interface = self:Number(interface)
+    self.interface = interface
+    self.retailStealth = interface ~= nil and interface >= 120000 and interface < 130000
     if RG.Range then self.range = RG.Range.New(self.api, self) end
     return self
 end
@@ -221,7 +218,7 @@ function Client:Stealth(token)
         end
         if type(aura) ~= "table" then return nil, false end
         local id = self:Number(self:Safe(function() return aura.spellId end))
-        if id and STEALTH[id] then return true, true end
+        if id and RG.Defaults.IsStealthAura(id, self.retailStealth) then return true, true end
         if not id then allReadable = false end
     end
     return nil, false
@@ -304,10 +301,8 @@ end
 
 function Client:Capabilities()
     local api = self.api
-    local _, _, _, interface = self:Safe(api.GetBuildInfo)
-    interface = self:Number(interface)
     return {
-        interface = interface,
+        interface = self.interface,
         nameplates = type(api.C_NamePlate) == "table" and type(api.C_NamePlate.GetNamePlates) == "function",
         secretValues = type(api.issecretvalue) == "function",
         auras = type(api.C_UnitAuras) == "table" and type(api.C_UnitAuras.GetAuraDataByIndex) == "function",

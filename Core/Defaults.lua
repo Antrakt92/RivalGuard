@@ -5,6 +5,23 @@ D.classes = { "WARRIOR", "PALADIN", "HUNTER", "ROGUE", "PRIEST", "DEATHKNIGHT", 
 D.classSet = {}
 for _, class in ipairs(D.classes) do D.classSet[class] = true end
 
+local STEALTH_SPELLS = {
+    [1784] = "Stealth", [1785] = "Stealth", [1786] = "Stealth", [1787] = "Stealth", [8822] = "Stealth",
+    [5215] = "Prowl", [6783] = "Prowl", [9913] = "Prowl",
+    [1856] = "Vanish", [1857] = "Vanish", [11327] = "Vanish", [11329] = "Vanish",
+    [20580] = "Shadowmeld", [58984] = "Shadowmeld", [66] = "Invisibility", [3680] = "Invisibility", [11392] = "Invisibility",
+}
+
+function D.StealthSpell(spellID, retailStealth)
+    if retailStealth and spellID == 199483 then return "Camouflage" end
+    return STEALTH_SPELLS[spellID]
+end
+
+function D.IsStealthAura(spellID, retailStealth)
+    -- This legacy rank is tracked as a cast only.
+    return spellID ~= 8822 and D.StealthSpell(spellID, retailStealth) ~= nil
+end
+
 D.profile = {
     enabled = true,
     preset = "balanced",
