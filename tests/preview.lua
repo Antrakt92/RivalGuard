@@ -49,6 +49,13 @@ app.ui:Refresh()
 if view == "settings" then
     if page == "support-limited" then
         app.ui:OpenSettings("support")
+    elseif page == "support-capacity" then
+        for i = 1, 129 do
+            local token = "nameplate" .. (200 + i)
+            state:Unit(token, { guid = "Creature-Crowd-" .. i, name = "Crowd " .. i, isPlayer = false })
+            state:Fire("NAME_PLATE_UNIT_ADDED", token)
+        end
+        app.ui:OpenSettings("support")
     elseif page == "profile-rename" then
         local name = locale == "ruRU" and "Патруль" or "Patrol"
         assert(app.db:CreateProfile(name, "farming"))

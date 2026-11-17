@@ -4812,10 +4812,10 @@ local function fullNameplateFixture()
     end
     H.Equal(app.sensors.plateCount, 124)
     H.Equal(#app.engine:Snapshot(), 0)
-    local function appear(index)
+    local function appear(index, isPlayer)
         local token = "nameplate" .. index
         state:Unit(token, { guid = "Player-Overflow" .. index, name = "Overflow rogue " .. index,
-            class = "ROGUE", hostile = true, isPlayer = true })
+            class = "ROGUE", hostile = true, isPlayer = isPlayer ~= false })
         state:Unit(token .. "target", state.units.player)
         state:Fire("NAME_PLATE_UNIT_ADDED", token)
         H.Nil(app.sensors.active[token])
@@ -4875,6 +4875,71 @@ H.Test("removing an overflow token cancels waiting admission and releases its pl
     H.Equal(current.identity, "guid:Player-Overflow126")
     H.Equal(#app.db:GetJournal(), 1)
     H.Equal(app.db:GetJournal()[1].identity, current.identity)
+end)
+
+H.Test("Support and copied diagnostics show current nameplate overflow even without any player observations", function()
+    local state, app, appear, disappear, reads, scans = fullNameplateFixture()
+    local ui, bind = app.ui, state.api.RivalGuard_Binding
+    app.db:GetProfile().locale = "ruRU"
+    app:OnSettingsChanged()
+    ui:OpenSettings("support")
+    state:Advance(0.3)
+    local function status(deferred, detection, stateName, blocked)
+        local current = app:Status()
+        H.Equal(current.detectionState, detection)
+        H.Equal(current.deferredNameplates, deferred)
+        H.Equal(current.state, stateName)
+        H.Equal(app:AlertBlock(), blocked)
+        H.True(current.capabilities.nameplateEvents)
+    end
+    local function capacityHint(deferred)
+        for count = 0, 2 do
+            local message = ui.supportStatus:GetText():find(ui:F("nameplatesCapacity", count), 1, true)
+            H.Equal(message ~= nil, deferred == count)
+        end
+    end
+    local function checkReport(deferred, detection)
+        ui:ShowDiagnostics()
+        local report = ui.copyFrame.edit:GetText()
+        H.True(report:find("deferredNameplates=" .. deferred, 1, true) ~= nil)
+        H.True(report:find("detection=" .. detection, 1, true) ~= nil)
+        H.True(report:find("sensor_capacity=2", 1, true) ~= nil)
+        for _, private in ipairs({ "nameplate125", "nameplate126", "Player-Overflow", "Overflow rogue", "Fixture NPC" }) do
+            H.Nil(report:find(private, 1, true))
+        end
+        ui.copyFrame:Hide()
+    end
+
+    H.Equal(app:Status().detectionState, "active")
+    capacityHint()
+    H.False(app.dirty)
+    local first, second = appear(125, false), appear(126, false)
+    status(2, "limited", "limited", nil)
+    state:Advance(0.3)
+    capacityHint(2)
+    checkReport(2, "limited")
+    bind("pause")
+    status(2, "limited", "paused", "paused")
+    bind("pause")
+    status(2, "limited", "limited", nil)
+    state:Advance(0.3)
+
+    disappear(first)
+    status(1, "limited", "limited", nil)
+    state:Advance(0.3)
+    capacityHint(1)
+    checkReport(1, "limited")
+    disappear("nameplate1")
+    state:Advance(0.3)
+    H.Equal(reads[second], 1)
+    H.Equal(scans(), 0)
+    status(0, "active", "active", nil)
+    capacityHint()
+    checkReport(0, "active")
+    H.Equal(ui.currentPage, "support")
+    H.Equal(#app.engine:Snapshot(), 0)
+    H.Equal(#app.db:GetJournal(), 0)
+    H.Equal(#state.sounds, 0)
 end)
 
 H.Test("nameplate discovery uses current sanctuary state before the zone event", function()

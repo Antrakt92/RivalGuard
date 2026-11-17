@@ -140,14 +140,15 @@ function App:Status()
     local alwaysPlates = self.client:Boolean(self.client:Safe(read, "nameplateShowAll"))
     local capabilities = self.client:Capabilities()
     if self.sensors and self.sensors.running then capabilities.nameplateEvents = self.sensors.nameplateEvents end
+    local deferredNameplates = self.sensors and #self.sensors.deferredPlates or 0
     local detectionState = "active"
     if not profile.enabled then detectionState = "disabled"
     elseif plates == false or not capabilities.nameplates or capabilities.nameplateEvents == false
-        or (self.sensors and not self.sensors.running) then detectionState = "limited" end
+        or deferredNameplates > 0 or (self.sensors and not self.sensors.running) then detectionState = "limited" end
     local state = detectionState
     if profile.enabled and self.engine.pausedUntil and self.engine.pausedUntil > self.engine:Now() then state = "paused" end
     return { state = state, detectionState = detectionState, nameplates = plates, alwaysNameplates = alwaysPlates,
-        capabilities = capabilities, context = self.client:Context(),
+        capabilities = capabilities, context = self.client:Context(), deferredNameplates = deferredNameplates,
         contacts = RG.Util.Count(self.engine.contacts), errors = self.diagnostics.counts.errors or 0,
         writable = self.db.writable }
 end
@@ -257,6 +258,7 @@ function App:ExportDiagnostics()
         alertBlock = self:AlertBlock(),
         nameplates = status.nameplates,
         alwaysNameplates = status.alwaysNameplates,
+        deferredNameplates = status.deferredNameplates,
     })
 end
 
@@ -492,6 +494,10 @@ function App:Update(elapsed)
     if self.journalElapsed >= 60 then
         self.journalElapsed = 0
         if self.db:Prune(readClock(self.api, "time")) > 0 then self.dirty = true end
+    end
+    local status = self.ui.statusCache
+    if status and status.deferredNameplates ~= #self.sensors.deferredPlates then
+        self.ui.statusAt, self.dirty = nil, true
     end
     if self.dirty then
         self.dirty = false

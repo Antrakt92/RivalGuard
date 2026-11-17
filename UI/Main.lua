@@ -1389,6 +1389,8 @@ function UI.New(app)
                 end
                 local coverageHint = M.NameplateCoverageHint(appStatus)
                 if coverageHint then lines[#lines + 1] = self:T(coverageHint) end
+                local deferred = M.Number(appStatus.deferredNameplates, 0)
+                if deferred > 0 then lines[#lines + 1] = self:F("nameplatesCapacity", deferred) end
                 if appStatus.writable == false then lines[#lines + 1] = self:T("sessionOnly") end
                 self.supportStatus:SetText(table.concat(lines, "\n\n"))
             end
