@@ -574,7 +574,7 @@ function UI.New(app)
             if not row.contact then return end
             tooltip(row, row.nameText:GetText(), self:T("rowHint") .. "\n" .. self:T("noTarget"))
         end)
-        row:SetScript("OnLeave", hideTooltip)
+        row:SetScript("OnLeave", function() hideOwnedTooltip(row) end)
         paintShown(row, false)
         self.rows[i] = row
     end

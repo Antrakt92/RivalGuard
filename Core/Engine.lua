@@ -435,6 +435,7 @@ function E:RememberEvictedEncounter(contact, now, expiredRow)
     end
     local record = {
         guid = contact.guid, slot = cursor, lastSeen = contact.lastSeen, expiredRow = expiredRow,
+        encounterAt = contact.encounterAt or contact.firstSeen,
         encounterRecorded = contact.encounterRecorded, arrivalNotified = contact.arrivalNotified, hasReturned = contact.hasReturned,
         notifiedClass = contact.notifiedClass, lastStealthCast = contact.lastStealthCast,
         targetingNotified = contact.targetingNotified, stealth = contact.stealth,
@@ -458,6 +459,7 @@ function E:RestoreEvictedEncounter(contact, now)
         if contact.arrivalNotified or contact.encounterRecorded or contact.hasReturned then return nil end
         contact.hasReturned = true
     else
+        if not contact.encounterAt or record.encounterAt > contact.encounterAt then contact.encounterAt = record.encounterAt end
         contact.hasReturned = contact.hasReturned or record.hasReturned
         contact.encounterRecorded = contact.encounterRecorded or record.encounterRecorded
         contact.arrivalNotified = contact.arrivalNotified or record.arrivalNotified

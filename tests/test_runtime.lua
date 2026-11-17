@@ -1321,6 +1321,29 @@ H.Test("Nearby stays stable across sensor phases and drops a tooltip when its ro
     H.Equal(row.contact.identity, identity(13))
     H.True(tooltip:IsShown())
     H.Equal(tooltip:GetOwner(), ui.pauseButton)
+    row.scripts.OnLeave(row)
+    H.True(tooltip:IsShown())
+end)
+
+H.Test("Nearby preserves the same encounter order when capacity evicts a still observed player", function()
+    local state, _, app = setup()
+    local profile = app.db:GetProfile()
+    profile.retention.maxContacts = 32
+    app:ProfileChanged()
+    local function arrive(index)
+        local token = "nameplate" .. index
+        state:Unit(token, { guid = "Player-EvictedOrder-" .. index, name = "Rival " .. index,
+            class = "ROGUE", hostile = true, isPlayer = true })
+        state:Fire("NAME_PLATE_UNIT_ADDED", token)
+        state.clock.Advance(0.01)
+    end
+    for index = 1, 33 do arrive(index) end
+    local identity = "guid:Player-EvictedOrder-1"
+    H.Nil(app.engine.identities[identity])
+    state:Fire("UNIT_FLAGS", "nameplate1")
+    H.True(app.engine.identities[identity] ~= nil)
+    local row = app.engine:NearbyPage(0, 1)[1]
+    H.Equal(row.identity, "guid:Player-EvictedOrder-33")
 end)
 
 H.Test("a live Nearby refresh builds only the visible page in a mixed crowd", function()
