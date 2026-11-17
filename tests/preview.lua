@@ -39,6 +39,9 @@ elseif view == "appearance" then app.ui:OpenSettings("appearance")
 elseif view == "import" then app.ui:OpenTransfer("import")
 elseif view == "export" then app.ui:OpenTransfer("export")
 elseif view == "details" then app.ui:Select(app.engine:Snapshot()[1])
+elseif view == "explanation" then
+    app.ui:Select(app.engine:Snapshot()[1])
+    app.ui:ShowExplanation()
 elseif view == "banner" then app.ui:PreviewAlert()
 elseif view == "wave" then
     app.ui:Alert({ kind = "wave", count = 38, classes = { ROGUE = 12, HUNTER = 10, MAGE = 8, WARRIOR = 8 }, banner = true })
