@@ -460,7 +460,7 @@ function UI.New(app)
     self.content = content
     local scrollbar = CreateFrame("Slider", nil, settings)
     scrollbar:SetPoint("TOPLEFT", scroll, "TOPRIGHT", 7, 0); scrollbar:SetPoint("BOTTOMLEFT", scroll, "BOTTOMRIGHT", 7, 0)
-    scrollbar:SetWidth(12); scrollbar:SetOrientation("VERTICAL"); scrollbar:SetMinMaxValues(0, 500); scrollbar:SetValueStep(20)
+    scrollbar:SetWidth(12); scrollbar:SetOrientation("VERTICAL"); scrollbar:SetMinMaxValues(0, 500); scrollbar:SetValueStep(1)
     fill(scrollbar, C.panel)
     scrollbar:SetThumbTexture("Interface\\Buttons\\UI-ScrollBar-Knob")
     scrollbar:SetScript("OnValueChanged", function(_, value) scroll:SetVerticalScroll(value) end)
@@ -470,6 +470,14 @@ function UI.New(app)
     end)
     self.scroll, self.scrollbar = scroll, scrollbar
     settings:Hide()
+
+    local function resizeSettingsPage(height, resetScroll)
+        self.pageHeight = height
+        content:SetHeight(height)
+        local maximum = math.max(0, height - scroll:GetHeight())
+        scrollbar:SetMinMaxValues(0, maximum)
+        scrollbar:SetValue(resetScroll and 0 or math.min(maximum, scrollbar:GetValue()))
+    end
 
     local function section(page, key, y, explanation)
         local h = label(page, key, 16, C.accent)
@@ -660,24 +668,27 @@ function UI.New(app)
     local presetButton = button(profiles, self:T("balanced"), 180, function()
         local index = 1
         for i, value in ipairs(presetTokens) do if value == self.newPreset then index = i break end end
-        self.newPreset = presetTokens[index % #presetTokens + 1]; self:Refresh()
+        self.newPreset = presetTokens[index % #presetTokens + 1]; self:RefreshProfiles()
     end)
     presetButton:SetPoint("TOPLEFT", 0, y - 103); self.presetButton = presetButton
-    presetButton:SetScript("OnEnter", function() tooltip(presetButton, self:T(self.newPreset), self:T(self.newPreset .. "Tip")) end)
-    presetButton:SetScript("OnLeave", hideTooltip)
+    local presetDescription = font(profiles, 13, C.muted)
+    presetDescription:SetPoint("TOPLEFT", 0, y - 143); presetDescription:SetWidth(540)
+    self.presetDescription = presetDescription
     local createProfile = localButton(profiles, "createProfile", 200, function()
         if not app.db.CreateProfile then notify("noProfileAPI") return end
         local name = nameInput:GetText()
         local ok = app.db:CreateProfile(name, self.newPreset)
-        if ok then nameInput:SetText(""); nameInput:ClearFocus(); app:ProfileChanged(); notify("profileCreated") else notify("profileError") end
-        self:Refresh()
+        if not ok then notify("profileError") return end
+        nameInput:SetText(""); nameInput:ClearFocus()
+        self:RefreshProfiles(); notify("profileCreated")
     end)
     createProfile:SetPoint("LEFT", presetButton, "RIGHT", 12, 0)
     nameInput:SetScript("OnEnterPressed", function() createProfile:Click() end)
+    local firstProfileRowY, profileRowSpacing = y - 206, 39
     self.profileRows = {}
     for i = 1, 10 do
         local row = CreateFrame("Frame", nil, profiles)
-        row:SetPoint("TOPLEFT", 0, y - 158 - (i - 1) * 39); row:SetSize(550, 34)
+        row:SetPoint("TOPLEFT", 0, firstProfileRowY - (i - 1) * profileRowSpacing); row:SetSize(550, 34)
         row.nameText = font(row, 13); row.nameText:SetPoint("LEFT", 0, 0); row.nameText:SetWidth(300); row.nameText:SetJustifyV("MIDDLE")
         row.use = localButton(row, "useProfile", 95, function()
             if not row.profileName then return end
@@ -700,15 +711,13 @@ function UI.New(app)
         row.delete:SetPoint("RIGHT", 0, 0); self.profileRows[i] = row
     end
     local profilePrev = localButton(profiles, "previous", 120, function() self.profileOffset = math.max(0, self.profileOffset - 10); self:RefreshProfiles() end)
-    profilePrev:SetPoint("TOPLEFT", 0, y - 565)
     local profileNext = localButton(profiles, "next", 120, function() self.profileOffset = self.profileOffset + 10; self:RefreshProfiles() end)
     profileNext:SetPoint("LEFT", profilePrev, "RIGHT", 12, 0)
     self.profilePrev, self.profileNext = profilePrev, profileNext
     local exportProfile = localButton(profiles, "exportProfile", 245, function() if self.OpenTransfer then self:OpenTransfer("export") end end)
-    exportProfile:SetPoint("TOPLEFT", 0, y - 615)
     local importProfile = localButton(profiles, "importProfile", 245, function() if self.OpenTransfer then self:OpenTransfer("import") end end)
     importProfile:SetPoint("LEFT", exportProfile, "RIGHT", 12, 0)
-    profiles.height = -y + 670
+    profiles.height = -firstProfileRowY + profileRowSpacing + 54
 
     local journal = CreateFrame("Frame", nil, content); self.pages.journal = journal; journal:SetAllPoints()
     y = section(journal, "journal", 0, "journalHelp")
@@ -851,9 +860,18 @@ function UI.New(app)
         local activeName = app.db.GetActiveProfileName and app.db:GetActiveProfileName() or "Default"
         self.activeProfileText:SetText(self:T("selectedProfile") .. ": " .. M.Text(activeName, "Default"))
         self.presetButton.label:SetText(self:T(self.newPreset) .. "  ›")
+        self.presetDescription:SetText(self:T(self.newPreset .. "Tip"))
         self.profileOffset = math.max(0, math.min(self.profileOffset, math.max(0, math.floor((#names - 1) / 10) * 10)))
+        local paginated = #names > 10
+        local footerY = firstProfileRowY - math.min(10, #names - self.profileOffset) * profileRowSpacing - 12
+        self.profilePrev:SetShown(paginated); self.profileNext:SetShown(paginated)
         self.profilePrev:SetEnabled(self.profileOffset > 0)
         self.profileNext:SetEnabled(self.profileOffset + 10 < #names)
+        profilePrev:ClearAllPoints(); profilePrev:SetPoint("TOPLEFT", 0, footerY)
+        local transferY = paginated and footerY - 43 or footerY
+        exportProfile:ClearAllPoints(); exportProfile:SetPoint("TOPLEFT", 0, transferY)
+        profiles.height = -transferY + 50
+        if self.currentPage == "profiles" and self.pageHeight ~= profiles.height then resizeSettingsPage(profiles.height) end
         for i, row in ipairs(self.profileRows) do
             local name = names[self.profileOffset + i]
             row.profileName = name
@@ -1056,10 +1074,7 @@ function UI.New(app)
             frame:SetShown(key == page)
             self.nav[key].bg:SetColorTexture(unpack(key == page and { 0.10, 0.22, 0.28, 1 } or C.panel))
         end
-        self.pageHeight = self.pages[page].height
-        content:SetHeight(self.pageHeight)
-        scrollbar:SetMinMaxValues(0, math.max(0, self.pageHeight - scroll:GetHeight()))
-        scrollbar:SetValue(0)
+        resizeSettingsPage(self.pages[page].height, true)
         settings:Show(); self:Refresh()
     end
 

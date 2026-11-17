@@ -347,13 +347,41 @@ H.Test("profile export and import cannot replace active or existing settings", f
     H.True(dialog:IsShown())
 end)
 
+H.Test("profile setup describes the selected preset and creation keeps the active profile", function()
+    local state, _, app, ui = setup()
+    ui:OpenSettings("profiles")
+    H.False(ui.profilePrev:IsShown()); H.False(ui.profileNext:IsShown())
+    H.Equal(ui.presetDescription:GetText(), ui:T("balancedTip"))
+    for _, preset in ipairs({ "farming", "quiet", "battleground" }) do
+        ui.presetButton:Click()
+        H.Equal(ui.presetDescription:GetText(), ui:T(preset .. "Tip"))
+    end
+    ui.profileInput:SetText("Matches")
+    ui.profileInput.scripts.OnEnterPressed(ui.profileInput)
+    H.Equal(app.db:GetActiveProfileName(), "Default")
+    H.Equal(state.messages[#state.messages], ui:T("profileCreated"))
+    H.Equal(ui.profileRows[2].profileName, "Matches")
+    ui.profileRows[2].use:Click()
+    local profile = app.db:GetProfile()
+    H.Equal(app.db:GetActiveProfileName(), "Matches")
+    H.False(profile.context.world); H.True(profile.context.battleground)
+    H.True(profile.alerts.muteOrdinary); H.False(profile.alerts.targeting)
+end)
+
 H.Test("profile and journal pagination retain entries beyond first page", function()
     local state, _, app, ui = setup()
     for index = 1, 12 do assert(app.db:CreateProfile(string.format("Profile %02d", index))) end
+    ui.scroll:SetHeight(430)
     ui:OpenSettings("profiles")
     H.True(ui.profileNext.enabled)
+    local fullPageHeight = ui.pageHeight
+    ui.scrollbar:SetValue(fullPageHeight - ui.scroll:GetHeight())
     ui.profileNext:Click()
     H.Equal(ui.profileRows[1].profileName, "Profile 10")
+    H.True(ui.pageHeight < fullPageHeight)
+    H.Equal(ui.scrollbar:GetValue(), ui.pageHeight - ui.scroll:GetHeight())
+    H.True(ui.profilePrev:IsShown()); H.True(ui.profilePrev.enabled)
+    H.True(ui.profileNext:IsShown()); H.False(ui.profileNext.enabled)
     ui.profileRows[1].use:Click()
     H.Equal(app.db:GetActiveProfileName(), "Profile 10")
     for index = 1, 15 do app.db:Record({ identity = "guid:" .. index, name = "Enemy " .. index, class = "HUNTER" }, state.api.time() - index, "Fixture Zone") end
