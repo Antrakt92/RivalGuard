@@ -66,7 +66,7 @@ function Sensors:Observe(token, source, behindCamera, event, auraUpdate)
         return
     end
     local state = self.active[token]
-    local obs = self.client:ReadUnit(token, source, state and state.awaitingEligibility, auraUpdate)
+    local obs = self.client:ReadUnit(token, source, state and state.awaitingEligibility, auraUpdate, state)
     if not obs then
         self:Remove(token)
         if not DIRECT[token] and RG.Util.Count(self.plateRetries) < MAX_PLATES then

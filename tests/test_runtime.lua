@@ -7950,6 +7950,23 @@ for _, interface in ipairs({ 120105, 16001 }) do
     end)
 end
 
+H.Test("a recycled token cannot give its new owner a stale stealth addition", function()
+    local state, app, add, auras = camouflageFixture(120105)
+    add("nameplate1", "Player-AuraPrevious", "ROGUE")
+    state:Unit("nameplate1", { guid = "Player-AuraReplacement", name = "Replacement", class = "ROGUE",
+        hostile = true, isPlayer = true })
+    state:Fire("UNIT_AURA", "nameplate1", { isFullUpdate = false, addedAuras = { { isHelpful = true, spellId = 1784 } } })
+    state:Advance(0.5)
+    H.Equal(app.engine.counters.alerts, 0)
+    for _, contact in ipairs(app.engine:Snapshot()) do H.Nil(contact.stealth) end
+
+    auras.nameplate1 = 1784
+    state:Fire("UNIT_AURA", "nameplate1", { isFullUpdate = true })
+    state:Advance(0.5)
+    H.Equal(#app.engine.history, 1)
+    H.Equal(app.ui.activeBanner.identity, "guid:Player-AuraReplacement")
+end)
+
 H.Test("Retail Camouflage rejects restricted spell IDs and casts without a proven current owner", function()
     local state, app, add, auras = camouflageFixture(120105)
     add("nameplate1", "Player-CamouflageOld", "HUNTER")

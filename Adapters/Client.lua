@@ -272,7 +272,7 @@ function Client:Stealth(token, update)
     return nil, false
 end
 
-function Client:ReadUnit(token, source, checkRequalifiedAura, auraUpdate)
+function Client:ReadUnit(token, source, checkRequalifiedAura, auraUpdate, auraOwner)
     token = self:IsToken(token)
     if not token then return nil end
     local api = self.api
@@ -306,6 +306,11 @@ function Client:ReadUnit(token, source, checkRequalifiedAura, auraUpdate)
     -- reveal an aura that will not emit a separate update for this token.
     if (checkRequalifiedAura and player == true and hostile == true)
         or (source ~= "poll" and source ~= "unit" and source ~= "cast") then
+        -- An event can arrive while a token changes owners. Only a current
+        -- indexed read can establish presence when ownership changed.
+        local sameOwner = auraOwner and ((auraOwner.guid and auraOwner.guid == guid)
+            or (not auraOwner.guid and auraOwner.name and nameComplete and auraOwner.name == name))
+        if not sameOwner then auraUpdate = nil end
         observation.stealth, observation.stealthReadable = self:Stealth(token, auraUpdate)
     end
     if token:match("^nameplate%d+$") then

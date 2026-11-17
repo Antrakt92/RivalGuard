@@ -50,8 +50,8 @@ Available class controls can be populated from the client's
 `C_SpecializationInfo.GetAllClassIDs` and class information APIs. Failed or partial
 enumeration returns unknown rather than guessing classes from a build number.
 
-Aura checks accept readable helpful stealth additions from `UNIT_AURA`, then use
-`C_UnitAuras.GetAuraDataByIndex` when the event supplies no positive match. Each
+Aura checks accept readable helpful stealth additions from `UNIT_AURA` for a token
+whose owner still matches. Otherwise they use `C_UnitAuras.GetAuraDataByIndex`. Each
 scan is capped at 40 entries. Only a complete readable indexed scan can establish
 that the aura is absent. A confirmed nonhostile or
 non-player token retains identity evidence and skips threat detail queries. Its
