@@ -1806,6 +1806,78 @@ H.Test("journal entries expire online and refresh the open journal without new s
     H.Equal(#app.engine:Snapshot(), 0)
 end)
 
+H.Test("Recent renders a detached journal page without cloning history and clamps after expiry", function()
+    local state, RG, app = setup()
+    local db, ui = app.db, app.ui
+    app.db:GetProfile().retention.journalDays = 1
+    app:ProfileChanged()
+    local epoch = state.api.time()
+    local function identity(index) return string.format("guid:Player-Recent-%04d", index) end
+    local function name(index) return index == 14 and "Ёж Север" or string.format("Patrol %04d", index) end
+    for index = 1, 500 do
+        local seen = index <= 17 and epoch - index or epoch - 86400 + 10
+        assert(db:Record({ identity = identity(index), name = name(index), class = "ROGUE" }, seen))
+    end
+    assert(db:SetList(identity(14), "watch", "Northern evac", { name = name(14) }))
+    H.Equal(#db:GetJournal(), 500)
+    ui:OpenSettings("journal")
+    H.True(ui.journalRecent:IsShown())
+    H.Equal(ui.journalRows[1].contact.identity, identity(1))
+    H.Equal(ui.journalRows[12].contact.identity, identity(12))
+
+    local fullCopies, recordCopies, persisted = 0, 0, {}
+    for _, record in ipairs(db.root.journal) do persisted[record] = true end
+    local getJournal, copy = db.GetJournal, RG.Util.Copy
+    db.GetJournal = function(self)
+        fullCopies = fullCopies + 1
+        return getJournal(self)
+    end
+    RG.Util.Copy = function(value, seen)
+        if persisted[value] then recordCopies = recordCopies + 1 end
+        return copy(value, seen)
+    end
+    local initialLabel = ui.journalRows[1].label:GetText()
+    state.clock.Advance(1.2)
+    ui:Refresh()
+    local measuredFull, measuredRecords = fullCopies, recordCopies
+    H.True(ui.journalRows[1].label:GetText() ~= initialLabel)
+    H.True(ui.journalRows[1].label:GetText():find(ui:F("lastSeen", ui:F("seconds", 2)), 1, true) ~= nil)
+    local first = ui.journalRows[1].contact
+    H.False(persisted[first] == true)
+    first.name = "Locally changed"
+    H.Equal(db.root.journal[1].name, name(1))
+    H.Equal(db.root.journal[1].lastSeen, epoch - 1)
+
+    for _ = 1, 41 do ui.journalNext:Click() end
+    H.Equal(ui.journalOffset, 492)
+    H.Equal(ui.journalRows[8].contact.identity, identity(500))
+    H.False(ui.journalNext.enabled)
+    state.clock.Advance(61)
+    app:Update(61)
+    H.Equal(ui.journalCount:GetText(), ui:F("filteredCount", 17))
+    H.Equal(ui.journalOffset, 12)
+    H.Equal(ui.journalRows[1].contact.identity, identity(13))
+    H.Equal(ui.journalRows[5].contact.identity, identity(17))
+    H.Nil(ui.journalRows[6].contact)
+    H.True(ui.journalPrev.enabled)
+    H.False(ui.journalNext.enabled)
+
+    ui.journalSearch:SetText("  NORTHERN Evac  ")
+    H.Equal(ui.journalOffset, 0)
+    H.Equal(ui.journalCount:GetText(), ui:F("filteredCount", 1))
+    H.Equal(ui.journalRows[1].contact.identity, identity(14))
+    H.Equal(ui.journalRows[1].contact.note, "Northern evac")
+    H.Nil(ui.journalRows[2].contact)
+    ui.journalSearch:SetText("ЁЖ СЕВЕР")
+    H.Equal(ui.journalRows[1].contact.identity, identity(14))
+    ui.journalSearch:SetText("no results")
+    H.True(ui.journalEmpty:IsShown())
+    H.True(ui.journalClear.enabled)
+
+    H.Equal(measuredFull, 0, string.format("Recent refresh cloned history %d time(s) and copied %d records", measuredFull, measuredRecords))
+    H.Equal(measuredRecords, 12)
+end)
+
 H.Test("loss of epoch clock never rewrites an earlier saved encounter with a fake timestamp", function()
     local state, _, app = setup()
     local clock, identity = state.api.time, "guid:Player-ClockFixture"

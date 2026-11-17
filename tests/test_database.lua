@@ -123,6 +123,91 @@ H.Test("journal is bounded expires old entries and never restores live sightings
     H.Equal(#db:GetJournal(), 0)
 end)
 
+H.Test("journal pages preserve timestamp ties and return detached records", function()
+    local db = addon().Database.New()
+    for index = 25, 1, -1 do
+        local identity = string.format("guid:Player-%02d", index)
+        assert(db:Record({ identity = identity, name = "Rival " .. index, class = "ROGUE" }, 100, "Zone"))
+    end
+    local page, count, offset, history = db:GetJournalPage(12, 12)
+    H.Equal(#page, 12)
+    H.Equal(count, 25)
+    H.Equal(offset, 12)
+    H.True(history)
+    for index, row in ipairs(page) do
+        H.Equal(row.identity, string.format("guid:Player-%02d", index + 12))
+    end
+
+    page[1].name = "Changed"
+    page[1].lastSeen = nil
+    page[2] = nil
+    local reread = db:GetJournalPage(12, 12)
+    H.Equal(reread[1].name, "Rival 13")
+    H.Equal(reread[1].lastSeen, 100)
+    H.Equal(#reread, 12)
+    H.Equal(db:GetJournal()[13].name, "Rival 13")
+
+    page, count, offset, history = db:GetJournalPage(120, 12)
+    H.Equal(#page, 1)
+    H.Equal(page[1].identity, "guid:Player-25")
+    H.Equal(count, 25)
+    H.Equal(offset, 24)
+    H.True(history)
+end)
+
+H.Test("sparse journal name and note matches clamp after pruning and retain history state", function()
+    local db = addon().Database.New()
+    for index = 1, 39 do
+        local identity = "guid:Player-" .. index
+        local name = index % 6 == 0 and "Match " .. index or "Rival " .. index
+        assert(db:Record({ identity = identity, name = name, class = "ROGUE" }, index))
+        if index % 6 == 3 then assert(db:SetList(identity, "note", "Match by note only")) end
+    end
+    local function match(name, note)
+        assert(type(name) == "string" and (note == nil or type(note) == "string"))
+        return name:find("Match", 1, true) ~= nil or (note ~= nil and note:find("Match", 1, true) ~= nil)
+    end
+
+    local page, count, offset, history = db:GetJournalPage(0, 12, match)
+    H.Equal(#page, 12)
+    H.Equal(count, 13)
+    H.Equal(offset, 0)
+    H.True(history)
+    for index, row in ipairs(page) do H.Equal(row.lastSeen, 42 - 3 * index) end
+    page, count, offset = db:GetJournalPage(12, 12, match)
+    H.Equal(#page, 1)
+    H.Equal(page[1].identity, "guid:Player-3")
+    H.Equal(count, 13)
+    H.Equal(offset, 12)
+    page, count, offset = db:GetJournalPage(120, 12, match)
+    H.Equal(#page, 1)
+    H.Equal(page[1].identity, "guid:Player-3")
+    H.Equal(count, 13)
+    H.Equal(offset, 12)
+
+    local days = db:GetProfile().retention.journalDays
+    H.Equal(db:Prune(4 + days * 86400), 3)
+    page, count, offset, history = db:GetJournalPage(12, 12, match)
+    H.Equal(#page, 12)
+    H.Equal(page[12].identity, "guid:Player-6")
+    H.Equal(count, 12)
+    H.Equal(offset, 0)
+    H.True(history)
+
+    page, count, offset, history = db:GetJournalPage(12, 12, function() return false end)
+    H.Equal(#page, 0)
+    H.Equal(count, 0)
+    H.Equal(offset, 0)
+    H.True(history)
+
+    db:ClearJournal()
+    page, count, offset, history = db:GetJournalPage(12, 12)
+    H.Equal(#page, 0)
+    H.Equal(count, 0)
+    H.Equal(offset, 0)
+    H.False(history)
+end)
+
 H.Test("duplicate saved journal rows recover one identity with coherent recent metadata", function()
     local RG = addon()
     local raw = { schemaVersion = 1, journal = {

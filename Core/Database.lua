@@ -251,6 +251,27 @@ function DB:GetActiveProfileName() return self.root.activeProfile end
 function DB:ListProfiles() return U.SortedKeys(self.root.profiles) end
 function DB:GetList() return self.root.lists end
 function DB:GetJournal() return U.Copy(self.root.journal) end
+
+function DB:GetJournalPage(offset, pageSize, matches)
+    local journal = self.root.journal
+    local records = journal
+    if matches then
+        -- Filter order comes from the journal. Only the returned page is copied.
+        records = {}
+        for _, record in ipairs(journal) do
+            local entry = self.root.lists[record.identity]
+            if matches(record.name, entry and entry.note) then records[#records + 1] = record end
+        end
+    end
+    local count = #records
+    local lastPage = math.max(0, math.floor((count - 1) / pageSize) * pageSize)
+    offset = math.max(0, math.min(offset, lastPage))
+    local page = {}
+    for index = offset + 1, math.min(offset + pageSize, count) do
+        page[#page + 1] = U.Copy(records[index])
+    end
+    return page, count, offset, #journal > 0
+end
 function DB:HasSeenGuide() return self.root.onboardingSeen end
 function DB:MarkGuideSeen() self.root.onboardingSeen = true end
 

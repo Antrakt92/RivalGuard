@@ -980,6 +980,8 @@ function UI.New(app)
         local profile = self:Profile()
         local entries, list = {}, app.db:GetList()
         local personal = self.journalMode == "personal"
+        local pageSize = #self.journalRows
+        local count, entryOffset = 0, 0
         local hasJournalEntries = false
         local query = profile.display.streamer and "" or self.journalQuery
         if self.journalSearch.SetEnabled then self.journalSearch:SetEnabled(not profile.display.streamer) end
@@ -997,13 +999,16 @@ function UI.New(app)
                 if a.searchName ~= b.searchName then return a.searchName < b.searchName end
                 return a.identity < b.identity
             end)
+            count = #entries
+            local lastPage = math.max(0, math.floor((count - 1) / pageSize) * pageSize)
+            self.journalOffset = math.max(0, math.min(self.journalOffset, lastPage))
+            entryOffset = self.journalOffset
         else
-            local journalEntries = app.db.GetJournal and app.db:GetJournal() or {}
-            hasJournalEntries = #journalEntries > 0
-            for _, item in ipairs(journalEntries) do
-                local record = list[item.identity]
-                if M.Matches(query, item.name, record and record.note) then entries[#entries + 1] = item end
+            local matches
+            if query ~= "" then
+                matches = function(name, note) return M.Matches(query, name, note) end
             end
+            entries, count, self.journalOffset, hasJournalEntries = app.db:GetJournalPage(self.journalOffset, pageSize, matches)
         end
         self.journalRecent.bg:SetColorTexture(unpack(not personal and { 0.10, 0.22, 0.28, 1 } or C.panel))
         self.journalPersonal.bg:SetColorTexture(unpack(personal and { 0.10, 0.22, 0.28, 1 } or C.panel))
@@ -1013,16 +1018,15 @@ function UI.New(app)
         local confirming = self.clearJournalUntil and self.clearJournalUntil >= self:Now()
         self.journalClear.label:SetText(self:T(confirming and "clearJournalNow" or "clearJournal"))
         self.journalFilterButton.label:SetText(self:T(LIST_KIND_KEYS[self.journalFilter] or "allLists") .. "  ›")
-        paintText(self.journalCount, self:F("filteredCount", #entries))
-        paintShown(self.journalEmpty, #entries == 0)
+        paintText(self.journalCount, self:F("filteredCount", count))
+        paintShown(self.journalEmpty, count == 0)
         self.journalEmpty:SetText(self:T(query ~= "" and "noMatches" or personal and "listEmpty" or "emptyJournal"))
-        self.journalOffset = math.max(0, math.min(self.journalOffset, math.max(0, math.floor((#entries - 1) / 12) * 12)))
         self.journalPrev:SetEnabled(self.journalOffset > 0)
-        self.journalNext:SetEnabled(self.journalOffset + 12 < #entries)
+        self.journalNext:SetEnabled(self.journalOffset + pageSize < count)
         local epoch = not personal and app.engine.epoch and M.Number(app.engine.epoch())
         local now = self:Now()
         for i, row in ipairs(self.journalRows) do
-            local entry = entries[self.journalOffset + i]
+            local entry = entries[entryOffset + i]
             if entry then
                 entry.searchName = nil
                 entry.id = entry.identity
