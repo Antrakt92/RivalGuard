@@ -50,8 +50,10 @@ Available class controls can be populated from the client's
 `C_SpecializationInfo.GetAllClassIDs` and class information APIs. Failed or partial
 enumeration returns unknown rather than guessing classes from a build number.
 
-Aura checks use `C_UnitAuras.GetAuraDataByIndex` on relevant events. Restricted or
-failed reads cannot prove an aura disappeared. A confirmed nonhostile or
+Aura checks accept readable helpful stealth additions from `UNIT_AURA`, then use
+`C_UnitAuras.GetAuraDataByIndex` when the event supplies no positive match. Each
+scan is capped at 40 entries. Only a complete readable indexed scan can establish
+that the aura is absent. A confirmed nonhostile or
 non-player token retains identity evidence and skips threat detail queries. Its
 first clean return to hostile player status checks auras again. Steady-state
 polling does not walk aura lists. A disappearing nameplate does not establish
@@ -105,6 +107,8 @@ The initial API review used these immutable upstream source revisions:
 - [Spellbook range contracts](https://github.com/Gethe/wow-ui-source/blob/bebcb6bf309cf41b41bd74f8ca651e6a105b2676/Interface/AddOns/Blizzard_APIDocumentationGenerated/SpellBookDocumentation.lua)
 - [Class enumeration used by the client](https://github.com/Gethe/wow-ui-source/blob/bebcb6bf309cf41b41bd74f8ca651e6a105b2676/Interface/AddOns/Blizzard_ClassMenu/Blizzard_ClassMenu.lua)
 - [Unit comparison and target event declarations](https://github.com/Gethe/wow-ui-source/blob/bebcb6bf309cf41b41bd74f8ca651e6a105b2676/Interface/AddOns/Blizzard_APIDocumentationGenerated/UnitDocumentation.lua)
+- [`UNIT_AURA` payload in Retail](https://github.com/Gethe/wow-ui-source/blob/297d7aaaa736f346b3e036f38ee088eaf7f8c07f/Interface/AddOns/Blizzard_APIDocumentationGenerated/UnitAuraDocumentation.lua#L595-L606)
+- [Aura update handling in Forever](https://github.com/Gethe/wow-ui-source/blob/bebcb6bf309cf41b41bd74f8ca651e6a105b2676/Interface/AddOns/Blizzard_NamePlates/Blizzard_NamePlateAuras.lua#L340-L370)
 - [Restriction event sequencing](https://github.com/Gethe/wow-ui-source/blob/297d7aaaa736f346b3e036f38ee088eaf7f8c07f/Interface/AddOns/Blizzard_APIDocumentationGenerated/RestrictedActionsDocumentation.lua)
 - [Forever shard events](https://github.com/Gethe/wow-ui-source/blob/bebcb6bf309cf41b41bd74f8ca651e6a105b2676/Interface/AddOns/Blizzard_APIDocumentationGenerated/SystemDocumentation.lua)
 - [Retail sound playback declaration](https://github.com/Gethe/wow-ui-source/blob/297d7aaaa736f346b3e036f38ee088eaf7f8c07f/Interface/AddOns/Blizzard_APIDocumentationGenerated/SoundDocumentation.lua#L49-L66)

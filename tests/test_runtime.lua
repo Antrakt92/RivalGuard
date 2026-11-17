@@ -7901,6 +7901,55 @@ H.Test("Retail Camouflage aura alone confirms stealth without attributing a cast
     H.Equal(app.ui.banner.title:GetText(), app.ui:T("stealthAura"))
 end)
 
+for _, interface in ipairs({ 120105, 16001 }) do
+    H.Test("UNIT_AURA additions confirm readable stealth on interface " .. interface, function()
+        local state, app, add = camouflageFixture(interface)
+        local secret = H.Secret("restricted aura")
+        local indexed, reads = nil, 0
+        state.api.C_UnitAuras.GetAuraDataByIndex = function(_, index)
+            reads = reads + 1
+            if index == 1 then return indexed end
+        end
+        add("nameplate1", "Player-AuraDelta", "ROGUE")
+        local function update(additions)
+            state:Fire("UNIT_AURA", "nameplate1", { isFullUpdate = false, addedAuras = additions })
+        end
+        local stealth = { isHelpful = true, spellId = 1784 }
+        indexed, reads = secret, 0
+        update({ { isHelpful = false, spellId = 1784 }, { isHelpful = secret, spellId = 1784 },
+            { isHelpful = true, spellId = secret } })
+        H.Nil(app.engine:Snapshot()[1].stealth)
+        H.Equal(reads, 1)
+        state:Fire("UNIT_AURA", "nameplate1", { isFullUpdate = true, addedAuras = { stealth } })
+        H.Nil(app.engine:Snapshot()[1].stealth)
+        H.Equal(reads, 2)
+        state:Unit("nameplate2", { guid = "Player-Unobserved", name = "Unobserved", hostile = true, isPlayer = true })
+        state:Fire("UNIT_AURA", "nameplate2", { isFullUpdate = false, addedAuras = { stealth } })
+        H.Equal(#app.engine:Snapshot(), 1)
+        H.Equal(reads, 2)
+        update({ secret, stealth })
+        H.Equal(app.engine:Snapshot()[1].stealthEvidence, "aura")
+        H.Equal(reads, 2, "a positive addition should avoid the indexed scan")
+        state:Advance(0.5)
+        H.Equal(app.engine.history[1].kind, "stealth")
+        update(secret)
+        H.Equal(app.engine:Snapshot()[1].stealthEvidence, "aura")
+        update({ stealth })
+        state:Advance(0.5)
+        H.Equal(#app.engine.history, 1)
+
+        indexed = nil
+        state:Fire("UNIT_AURA", "nameplate1", { removedAuraInstanceIDs = { 42 } })
+        H.Nil(app.engine:Snapshot()[1].stealth)
+        state:Advance(31)
+        state.api.C_UnitAuras = nil
+        update({ stealth })
+        state:Advance(0.5)
+        H.Equal(#app.engine.history, 2)
+        H.Equal(app.engine:Snapshot()[1].stealthEvidence, "aura")
+    end)
+end
+
 H.Test("Retail Camouflage rejects restricted spell IDs and casts without a proven current owner", function()
     local state, app, add, auras = camouflageFixture(120105)
     add("nameplate1", "Player-CamouflageOld", "HUNTER")

@@ -2,6 +2,7 @@ local _, RG = ...
 local Client = RG.Register("Client", {})
 Client.__index = Client
 
+local MAX_AURAS = 40
 local CLASS = {}
 for _, name in ipairs(RG.Defaults.classes) do CLASS[name] = true end
 function Client.New(api, diagnostics)
@@ -226,7 +227,28 @@ function Client:Range(token, identity)
     return lower, upper, exclusive == true, evidence, sampledAt
 end
 
-function Client:Stealth(token)
+local function hasAddedStealth(client, update)
+    update = client:Clean(update)
+    if type(update) ~= "table" or client:Boolean(client:Safe(rawget, update, "isFullUpdate")) == true then return false end
+    local additions = client:Safe(rawget, update, "addedAuras")
+    if type(additions) ~= "table" then return false end
+    for index = 1, MAX_AURAS do
+        local ok, aura = pcall(rawget, additions, index)
+        if not ok then return false end
+        if client:Readable(aura) then
+            if aura == nil then return false end
+            if type(aura) == "table" and client:Boolean(client:Safe(rawget, aura, "isHelpful")) == true then
+                local id = client:Number(client:Safe(rawget, aura, "spellId"))
+                if id and RG.Defaults.IsStealthAura(id, client.retailStealth) then return true end
+            end
+        end
+    end
+    return false
+end
+
+function Client:Stealth(token, update)
+    -- A readable addition proves presence. Absence still requires a complete indexed read.
+    if hasAddedStealth(self, update) then return true, true end
     local api, ns = self.api, self.api.C_UnitAuras
     if type(ns) ~= "table" or type(ns.GetAuraDataByIndex) ~= "function" then return nil, false end
     local secrecy = api.C_Secrets
@@ -234,7 +256,7 @@ function Client:Stealth(token)
     if type(secrecy) == "table" then unrestricted = self:Boolean(self:Safe(secrecy.ShouldAurasBeSecret)) == false end
     if type(api.issecretvalue) ~= "function" then unrestricted = true end
     local allReadable = unrestricted == true
-    for index = 1, 40 do
+    for index = 1, MAX_AURAS do
         local ok, aura = pcall(ns.GetAuraDataByIndex, token, index, "HELPFUL")
         if not ok then self:Count("aura_errors"); return nil, false end
         if not self:Readable(aura) then return nil, false end
@@ -250,7 +272,7 @@ function Client:Stealth(token)
     return nil, false
 end
 
-function Client:ReadUnit(token, source, checkRequalifiedAura)
+function Client:ReadUnit(token, source, checkRequalifiedAura, auraUpdate)
     token = self:IsToken(token)
     if not token then return nil end
     local api = self.api
@@ -284,7 +306,7 @@ function Client:ReadUnit(token, source, checkRequalifiedAura)
     -- reveal an aura that will not emit a separate update for this token.
     if (checkRequalifiedAura and player == true and hostile == true)
         or (source ~= "poll" and source ~= "unit" and source ~= "cast") then
-        observation.stealth, observation.stealthReadable = self:Stealth(token)
+        observation.stealth, observation.stealthReadable = self:Stealth(token, auraUpdate)
     end
     if token:match("^nameplate%d+$") then
         local manager = api.C_NamePlateManager

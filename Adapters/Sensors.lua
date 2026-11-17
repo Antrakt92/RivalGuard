@@ -57,7 +57,7 @@ function Sensors:ForgetDeferredPlate(token)
     end
 end
 
-function Sensors:Observe(token, source, behindCamera, event)
+function Sensors:Observe(token, source, behindCamera, event, auraUpdate)
     token = self.client:IsToken(token)
     if not token then return end
     if not DIRECT[token] and not self.active[token] and self.plateCount >= MAX_PLATES then
@@ -66,7 +66,7 @@ function Sensors:Observe(token, source, behindCamera, event)
         return
     end
     local state = self.active[token]
-    local obs = self.client:ReadUnit(token, source, state and state.awaitingEligibility)
+    local obs = self.client:ReadUnit(token, source, state and state.awaitingEligibility, auraUpdate)
     if not obs then
         self:Remove(token)
         if not DIRECT[token] and RG.Util.Count(self.plateRetries) < MAX_PLATES then
@@ -253,7 +253,7 @@ function Sensors:Poll(scheduled)
     self:Call("Tick")
 end
 
-function Sensors:OnEvent(event, token, castGUID, spellID)
+function Sensors:OnEvent(event, token, unitEventData, spellID)
     if not self.running then return end
     if event == "SPELLS_CHANGED" or event == "PLAYER_SPECIALIZATION_CHANGED" or event == "SPELL_DATA_LOAD_RESULT"
         or event == "SPELL_TEXT_UPDATE" or event == "PLAYER_EQUIPMENT_CHANGED" or event == "UPDATE_SHAPESHIFT_FORM"
@@ -305,9 +305,13 @@ function Sensors:OnEvent(event, token, castGUID, spellID)
         or event == "NAME_PLATE_UNIT_BEHIND_CAMERA_CHANGED" then
         token = self.client:IsToken(token)
         if token and (self.active[token] or DIRECT[token]) then
-            local behind
-            if event == "NAME_PLATE_UNIT_BEHIND_CAMERA_CHANGED" then behind = self.client:Boolean(castGUID) end
-            self:Observe(token, event == "UNIT_AURA" and "aura" or "unit", behind, event)
+            if event == "UNIT_AURA" then
+                self:Observe(token, "aura", nil, event, unitEventData)
+            else
+                local behind
+                if event == "NAME_PLATE_UNIT_BEHIND_CAMERA_CHANGED" then behind = self.client:Boolean(unitEventData) end
+                self:Observe(token, "unit", behind, event)
+            end
         end
     else self:Call("SetContext", self.client:Context()) end
 end
