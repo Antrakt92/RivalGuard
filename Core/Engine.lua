@@ -289,10 +289,10 @@ local function ordinaryAlert(decision)
     return decision.priority < URGENT_PRIORITY and (decision.kind == "sighting" or decision.kind == "returning")
 end
 
-local function pendingDecision(engine, item, contact, now)
+local function pendingDecision(engine, item, contact, now, scheduled)
     if not contact or (item.event == "targeting" and (contact.targeting ~= true or contact.targetingNotified == true))
         or (engine.pausedUntil and now < engine.pausedUntil) or engine:SnoozedUntil(contact) then return end
-    local decision = engine:Explain(contact, item.event, now)
+    local decision = scheduled or engine:Explain(contact, item.event, now)
     if not decision then return end
     local key = contact.id .. ":" .. (decision.dedupKey or decision.kind)
     local cooldown = engine.cooldowns[key]
@@ -813,6 +813,7 @@ function E:Tick()
     local waveWindow = self.profile.alerts.waveWindow
     -- A newer or expired distance can change priority before wave grouping.
     local refreshRange = #self.pending > 0 and usesRangeRules(self.profile)
+    local scheduledRevision = refreshRange and self.revision
     local firstOrdinaryAt
     -- Pending entries are appended in observation order. The first arrival
     -- sets the deadline for its group, including arrivals close to that deadline.
@@ -835,7 +836,10 @@ function E:Tick()
     local ordinary, accepted = {}, {}
     for _, item in ipairs(ready) do
         local contact = self.contacts[item.id]
-        local decision, key = pendingDecision(self, item, contact, now)
+        -- Reuse the range check from scheduling unless a callback changed state.
+        -- The pending guard still checks the current targeting latch and cooldown.
+        local scheduled = scheduledRevision == self.revision and item.decision or nil
+        local decision, key = pendingDecision(self, item, contact, now, scheduled)
         if decision and key and not accepted[key] then
             accepted[key] = true
             decision.contact = self:View(contact, now)

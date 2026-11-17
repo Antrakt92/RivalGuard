@@ -921,6 +921,73 @@ H.Test("unchanged exact measurements do not reschedule sightings when no range f
     H.Equal(app.ui.activeBanner.count, 8)
 end)
 
+H.Test("a stable range-filtered tick checks each ready and waiting event once", function()
+    local state, app, see, _, RG = pendingRangeFixture(function(profile)
+        urgentRangeRule(profile, false)
+        profile.range.enabled, profile.range.yards, profile.range.policy, profile.range.unknown = true, 40, "confirmed", false
+    end)
+    see(1, 15); see(2, 21); see(3, 38)
+    local evaluate, checked = RG.Rules.Evaluate, {}
+    RG.Rules.Evaluate = function(profile, contact, ...)
+        local identity = contact.identity
+        checked[identity] = (checked[identity] or 0) + 1
+        return evaluate(profile, contact, ...)
+    end
+
+    state.clock.Advance(0.25)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 2)
+    H.Equal(#app.engine.pending, 1)
+    H.Equal(checked["guid:Player-PendingRange1"], 1)
+    H.Equal(checked["guid:Player-PendingRange2"], 1)
+    H.Equal(checked["guid:Player-PendingRange3"], 1)
+
+    state.clock.Advance(0.6)
+    app.engine:Tick()
+    H.Equal(app.engine.counters.alerts, 3)
+    H.Equal(#app.engine.pending, 0)
+    H.Equal(checked["guid:Player-PendingRange1"], 1)
+    H.Equal(checked["guid:Player-PendingRange2"], 1)
+    H.Equal(checked["guid:Player-PendingRange3"], 2)
+end)
+
+for _, update in ipairs({ "range", "class", "profile" }) do
+    H.Test("a ready range-filtered alert rechecks " .. update .. " after another alert changes it", function()
+        local state, app, see, move = pendingRangeFixture(function(profile)
+            profile.alerts.classes = { ROGUE = true }
+            profile.alerts.muteOrdinary = true
+            profile.range.enabled, profile.range.yards, profile.range.policy, profile.range.unknown = true, 35, "confirmed", false
+        end)
+        local requests = 0
+        state.api.PlaySound = function()
+            requests = requests + 1
+            if requests == 1 then
+                if update == "range" then move(2, 48)
+                elseif update == "class" then
+                    state.units.nameplate2.class = "HUNTER"
+                    state:Fire("UNIT_FLAGS", "nameplate2")
+                else
+                    app.db:GetProfile().alerts.stealth = false
+                    app:OnSettingsChanged()
+                end
+            end
+            return true
+        end
+        see(1, 21); see(2, 21)
+        state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate1", "Cast-FirstReady", 1856)
+        state:Fire("UNIT_SPELLCAST_SUCCEEDED", "nameplate2", "Cast-StaleReady", 1856)
+        H.Equal(#app.engine.pending, 2)
+        state.clock.Advance(0.25)
+        app.engine:Tick()
+        H.Equal(requests, 1)
+        H.Equal(app.engine.counters.alerts, 1)
+        H.Equal(app.engine.history[1].kind, "stealth")
+        H.Equal(app.ui.activeBanner.name, "Range rival 1")
+        H.Equal(#app.ui.bannerQueue, 0)
+        H.Equal(#app.engine.pending, 0)
+    end)
+end
+
 for _, queued in ipairs({ false, true }) do
     H.Test("targeting banner retires when evidence ends " .. (queued and "in the queue" or "while shown"), function()
         local state, _, app = setup()
