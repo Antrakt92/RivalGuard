@@ -25,6 +25,10 @@ spells from the modern spellbook. It combines valid range checks into approximat
 bounds; nil, errors and restricted returns contribute no evidence. A failed spell
 with a nonzero minimum range does not establish that the target is far away.
 Spell usability, resource cost and cooldown are not used as range evidence.
+The observation carries the source of its range when available. Conflicting
+valid probes leave the range unknown and are counted in diagnostics. If the
+spell probes simply yield no evidence, a successful interaction check can
+still provide an upper bound.
 
 Metadata rebuilding is event-driven and coalesced, including spell, specialization,
 equipment and form changes. Each rebuild visits at most 1,024 slots and 128

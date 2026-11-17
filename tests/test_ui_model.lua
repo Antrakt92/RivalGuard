@@ -12,6 +12,18 @@ H.Test("range labels convey intervals and reject invalid numbers", function()
     H.Equal(M.Range({ rangeMin = 0, rangeMax = 10 }, "enUS"), RG.Locale.Format("rangeWithin", "enUS", 10))
 end)
 
+H.Test("range provenance requires live compatible evidence", function()
+    local RG = addon()
+    local M, L = RG.UIModel, RG.Locale
+    H.Nil(M.RangeDetails({ visible = true, rangeEvidence = "exact" }, "enUS"))
+    H.Nil(M.RangeDetails({ visible = true, rangeEvidence = "spell", rangeMin = 20, rangeMax = 8 }, "enUS"))
+    H.Nil(M.RangeDetails({ visible = true, rangeEvidence = "combined", rangeMax = 20, preview = true }, "enUS"))
+    H.Nil(M.RangeDetails({ visible = true, rangeEvidence = "interaction", rangeMax = 20, savedOnly = true }, "enUS"))
+    H.Nil(M.RangeProvenance("unsupported", "enUS"))
+    H.Equal(M.RangeDetails({ visible = true, rangeEvidence = "unknown" }, "enUS"), L.Get("rangeEvidenceUnknown", "enUS"))
+    H.Equal(M.Range({ rangeEvidence = "conflict", rangeMax = 20 }, "enUS"), L.Get("rangeUnknown", "enUS"))
+end)
+
 H.Test("class toggle starts from all classes and never mutates saved table", function()
     local RG = addon()
     local original = {}

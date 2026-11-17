@@ -11,6 +11,7 @@ end
 function R.RangeMatches(config, contact)
     if not config.enabled then return true end
     local lower, upper = contact.rangeMin, contact.rangeMax
+    if contact.rangeEvidence == "conflict" then return config.unknown, "range_conflict" end
     if not U.IsFinite(lower) and not U.IsFinite(upper) then return config.unknown, "range_unknown" end
     if U.IsFinite(lower) and (lower > config.yards or (lower == config.yards and contact.rangeMinExclusive)) then
         return false, "range_outside"

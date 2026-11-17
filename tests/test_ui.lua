@@ -158,7 +158,7 @@ end)
 H.Test("Why describes a new sighting and clears configured outputs on rejection", function()
     local _, RG, app, ui = setup()
     ui.selected = { id = "sample" }
-    local result = { allowed = true, reason = "watch_list", sound = false, banner = true }
+    local result = { allowed = true, reason = "watch_list", sound = false, banner = true, rangeEvidence = "combined" }
     function app:Explain(contact)
         H.Equal(contact.id, "sample")
         return result
@@ -173,6 +173,7 @@ H.Test("Why describes a new sighting and clears configured outputs on rejection"
     H.True(scopeFound)
     H.Equal(frame.reason:GetText(), RG.Locale.Reason("watch_list", locale))
     H.Equal(frame.outputs:GetText(), ui:T("explanationBannerOnly"))
+    H.Equal(frame.rangeEvidence:GetText(), ui:T("rangeEvidenceCombined"))
     result.sound = true
     ui:ShowExplanation()
     H.Equal(frame.outputs:GetText(), ui:T("explanationSoundBanner"))
@@ -180,13 +181,34 @@ H.Test("Why describes a new sighting and clears configured outputs on rejection"
     ui:ShowExplanation()
     H.Equal(frame.outputs:GetText(), ui:T("explanationSoundOnly"))
 
-    for _, reason in ipairs({ "not_observed", "range_outside", "range_unconfirmed", "wave_only" }) do
-        result = { allowed = false, reason = reason }
+    for _, reason in ipairs({ "not_observed", "range_outside", "range_unconfirmed", "wave_only", "range_conflict" }) do
+        result = { allowed = false, reason = reason, rangeEvidence = reason == "range_conflict" and "conflict" or nil }
         ui:ShowExplanation()
         H.Equal(frame.reason:GetText(), RG.Locale.Reason(reason, locale))
         H.True(frame.reason:GetText() ~= RG.Locale.Reason("unavailable", "enUS"))
         H.True(RG.Locale.Reason(reason, "ruRU") ~= RG.Locale.Reason("unavailable", "ruRU"))
         H.Equal(frame.outputs:GetText(), "")
+        H.Equal(frame.rangeEvidence:GetText(), "")
+    end
+end)
+
+H.Test("Details retains targeting and range provenance only for a live sighting", function()
+    for _, locale in ipairs({ "enUS", "ruRU" }) do
+        local _, _, app, ui = setup()
+        app.db:GetProfile().locale = locale
+        local selected = { id = "sample", name = "Example", visible = true, rangeMin = 10, rangeMax = 20,
+            rangeEvidence = "spell", targeting = true, hostile = true, isPlayer = true, lastSeen = ui:Now() }
+        ui:Select(selected)
+        local info = ui.detailsFrame.info:GetText()
+        H.True(info:find(ui:T("targeting"), 1, true) ~= nil)
+        H.True(info:find(ui:F("rangeBracket", 10, 20) .. " · " .. ui:T("rangeEvidenceSpell"), 1, true) ~= nil)
+        ui.selectedOutside = true
+        ui:ShowDetails(true)
+        H.False(ui.detailsFrame.info:GetText():find(ui:T("rangeEvidenceSpell"), 1, true) ~= nil)
+        selected.targeting, selected.rangeEvidence = false, "conflict"
+        ui:Select(selected)
+        H.True(ui.detailsFrame.info:GetText():find(ui:T("rangeEvidenceConflict"), 1, true) ~= nil)
+        H.False(ui.detailsFrame.info:GetText():find(ui:F("rangeBracket", 10, 20), 1, true) ~= nil)
     end
 end)
 

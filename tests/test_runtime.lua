@@ -263,6 +263,36 @@ H.Test("integrated sensors engine and UI deliver one alert with configured sound
     H.Nil(app.diagnostics.counts.errors)
 end)
 
+H.Test("contradictory current range probes stay quiet until a fresh in-range reading agrees", function()
+    local distances = { nameplate1 = 10, target = 45 }
+    local state, _, app = setup(nil, function(fixture)
+        fixture.api.UnitDistanceSquared = function(token)
+            local distance = distances[token]
+            if distance then return distance * distance, true end
+        end
+    end)
+    local range = app.db:GetProfile().range
+    range.enabled, range.yards, range.policy, range.unknown = true, 25, "confirmed", false
+    app:ProfileChanged()
+    local unit = { guid = "Player-RangeCohort", name = "Rival", class = "ROGUE", hostile = true, isPlayer = true }
+    state:Unit("nameplate1", unit)
+    state:Unit("target", unit)
+    state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    state:Fire("PLAYER_TARGET_CHANGED")
+    local contact = app.engine:Snapshot()[1]
+    H.Nil(contact.rangeMax)
+    H.Equal(app:Explain(contact).reason, "range_conflict")
+    state:Advance(1.5)
+    H.Equal(#state.sounds, 0)
+    H.False(app.ui.banner:IsShown())
+
+    distances.nameplate1, distances.target = 14, 14
+    state:Advance(1.5)
+    H.Equal(#state.sounds, 1)
+    H.True(app.ui.banner:IsShown())
+    H.Equal(app.ui.banner.body:GetText(), unit.name)
+end)
+
 for _, queued in ipairs({ false, true }) do
     H.Test("targeting banner retires when evidence ends " .. (queued and "in the queue" or "while shown"), function()
         local state, _, app = setup()

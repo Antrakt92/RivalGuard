@@ -107,14 +107,14 @@ end
 function Range:Measure(token, identity)
     local read, api = self.reader, self.api
     token = read:IsToken(token)
-    if not token then return nil end
+    if not token then return nil, nil, false, false end
     identity = read:Text(identity, 200)
     if not identity then self:Forget(token) end
     local now = read:Number(read:Safe(api.GetTime))
-    if not self:Rebuild(now) then return nil end
+    if not self:Rebuild(now) then return nil, nil, false, false end
     local cached = self.cache[token]
     if now and cached and cached.identity == identity and now >= cached.at and now - cached.at < 0.5 then
-        return cached.minimum, cached.maximum, cached.minimumExclusive
+        return cached.minimum, cached.maximum, cached.minimumExclusive, cached.conflict
     end
     local book, spells = api.C_SpellBook, api.C_Spell
     local lower, upper, lowerExclusive, checks = nil, nil, false, 0
@@ -144,7 +144,8 @@ function Range:Measure(token, identity)
     end
     read:Count("range_samples")
     if read.diagnostics and read.diagnostics.Count then read.diagnostics:Count("range_checks", checks) end
-    if lower and upper and (lower > upper or (lower == upper and lowerExclusive)) then
+    local conflict = lower ~= nil and upper ~= nil and (lower > upper or (lower == upper and lowerExclusive))
+    if conflict then
         lower, upper, lowerExclusive = nil, nil, false
         read:Count("range_conflicts")
     end
@@ -153,7 +154,8 @@ function Range:Measure(token, identity)
             if self.cacheCount >= 128 then self.cache, self.cacheCount = {}, 0 end
             self.cacheCount = self.cacheCount + 1
         end
-        self.cache[token] = { identity = identity, at = now, minimum = lower, maximum = upper, minimumExclusive = lowerExclusive }
+        self.cache[token] = { identity = identity, at = now, minimum = lower, maximum = upper,
+            minimumExclusive = lowerExclusive, conflict = conflict }
     end
-    return lower, upper, lowerExclusive
+    return lower, upper, lowerExclusive, conflict
 end

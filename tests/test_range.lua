@@ -77,10 +77,51 @@ H.Test("range cached lower bounds retain strict boundary semantics", function()
 end)
 
 H.Test("range contradictory metadata probes become unknown", function()
-    local range, _, _, answers, _, _, _, _, counts = fixture()
+    local range, _, _, answers, _, calls, _, _, counts = fixture()
     answers[20], answers[40] = true, false
-    local low, high = range:Measure("target", "Player-A")
-    H.Nil(low); H.Nil(high); H.Equal(counts.range_conflicts, 1)
+    local low, high, exclusive, conflict = range:Measure("target", "Player-A")
+    H.Nil(low); H.Nil(high); H.False(exclusive); H.True(conflict)
+    local checks = calls.checks
+    low, high, exclusive, conflict = range:Measure("target", "Player-A")
+    H.Nil(low); H.Nil(high); H.False(exclusive); H.True(conflict)
+    H.Equal(calls.checks, checks); H.Equal(counts.range_conflicts, 1)
+end)
+
+H.Test("client range keeps contradictory spell readings unknown despite interaction", function()
+    local _, client, api, answers, _, calls, setTime = fixture()
+    local interactions = 0
+    api.CheckInteractDistance = function(_, index) interactions = interactions + 1; return index == 3 end
+    answers[20], answers[40] = true, false
+    for _ = 1, 2 do
+        local low, high, exclusive, source = client:Range("target", "Player-A")
+        H.Nil(low); H.Nil(high); H.False(exclusive); H.Equal(source, "conflict")
+    end
+    H.Equal(interactions, 0)
+    local checks = calls.checks
+    api.UnitDistanceSquared = function() return 144, true end
+    local low, high, exclusive, source = client:Range("target", "Player-A")
+    H.Equal(low, 12); H.Equal(high, 12); H.False(exclusive); H.Equal(source, "exact")
+    H.Equal(calls.checks, checks); H.Equal(interactions, 0)
+    api.UnitDistanceSquared = nil
+    answers[20], answers[40] = nil, nil
+    setTime(0.5)
+    low, high, exclusive, source = client:Range("target", "Player-A")
+    H.Equal(low, 0); H.Equal(high, 10); H.False(exclusive); H.Equal(source, "interaction")
+end)
+
+H.Test("client range distinguishes spell and combined bounds and counts cross-source conflicts", function()
+    local range, client, api, answers, _, _, _, _, counts = fixture()
+    answers[20], answers[40] = false, true
+    local low, high, exclusive, source = client:Range("target", "Player-A")
+    H.Equal(low, 20); H.Equal(high, 40); H.True(exclusive); H.Equal(source, "spell")
+    api.CheckInteractDistance = function(_, index) return index == 4 end
+    low, high, exclusive, source = client:Range("target", "Player-A")
+    H.Equal(low, 20); H.Equal(high, 28); H.True(exclusive); H.Equal(source, "combined")
+    answers[40] = false
+    range:Forget("target")
+    low, high, exclusive, source = client:Range("target", "Player-A")
+    H.Nil(low); H.Nil(high); H.False(exclusive); H.Equal(source, "conflict")
+    H.Equal(counts.range_conflicts, 1)
 end)
 
 H.Test("range direct spell fallback runs only after an invalid book answer", function()

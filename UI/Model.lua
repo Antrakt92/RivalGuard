@@ -1,6 +1,10 @@
 local _, RG = ...
 local M = RG.Register("UIModel", {})
 local aliasState = setmetatable({}, { __mode = "k" })
+local rangeEvidenceKeys = {
+    exact = "rangeEvidenceExact", spell = "rangeEvidenceSpell", interaction = "rangeEvidenceInteraction",
+    combined = "rangeEvidenceCombined", conflict = "rangeEvidenceConflict", unknown = "rangeEvidenceUnknown",
+}
 
 local function clean(value)
     if issecretvalue then
@@ -103,6 +107,8 @@ function M.Age(seconds, locale)
 end
 
 function M.Range(contact, locale)
+    local evidence = clean(contact.rangeEvidence)
+    if evidence == "conflict" or evidence == "unknown" then return RG.Locale.Get("rangeUnknown", locale) end
     local low = M.Number(contact.rangeMin)
     local high = M.Number(contact.rangeMax)
     if low and low < 0 then low = nil end
@@ -114,6 +120,21 @@ function M.Range(contact, locale)
     if high then return RG.Locale.Format("rangeWithin", locale, math.ceil(high)) end
     if low then return RG.Locale.Format("rangeBeyond", locale, math.floor(low)) end
     return RG.Locale.Get("rangeUnknown", locale)
+end
+
+function M.RangeProvenance(evidence, locale)
+    local key = rangeEvidenceKeys[clean(evidence)]
+    if key then return RG.Locale.Get(key, locale) end
+end
+
+function M.RangeDetails(contact, locale)
+    if clean(contact.visible) ~= true or clean(contact.savedOnly) == true or clean(contact.preview) == true then return nil end
+    local evidence = clean(contact.rangeEvidence)
+    local provenance = M.RangeProvenance(evidence, locale)
+    if not provenance then return nil end
+    local range = M.Range(contact, locale)
+    if evidence == "conflict" or evidence == "unknown" then return provenance, range end
+    if range ~= RG.Locale.Get("rangeUnknown", locale) then return range .. " · " .. provenance, range end
 end
 
 function M.Stealth(contact, locale)

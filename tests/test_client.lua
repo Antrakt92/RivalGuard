@@ -153,9 +153,11 @@ H.Test("client range requires successful finite evidence and preserves uncertain
     local client, api, _, secret = fixture()
     api.UnitDistanceSquared = function() return 0, false end
     H.Nil(client:ReadUnit("target", "poll").rangeMax)
+    H.Equal(client:ReadUnit("target", "poll").rangeEvidence, "unknown")
     api.UnitDistanceSquared = function() return 400, true end
     local obs = client:ReadUnit("target", "poll")
     H.Equal(obs.rangeMin, 20); H.Equal(obs.rangeMax, 20)
+    H.Equal(obs.rangeEvidence, "exact")
     for _, bad in ipairs({ math.huge, -1, secret, 0 / 0 }) do
         api.UnitDistanceSquared = function() return bad, true end
         H.Nil(client:ReadUnit("target", "poll").rangeMax)
@@ -164,9 +166,11 @@ H.Test("client range requires successful finite evidence and preserves uncertain
     api.CheckInteractDistance = function(_, index) return index == 4 end
     obs = client:ReadUnit("target", "poll")
     H.Equal(obs.rangeMin, 0); H.Equal(obs.rangeMax, 28)
+    H.Equal(obs.rangeEvidence, "interaction")
     api.CheckInteractDistance = function() return false end
     obs = client:ReadUnit("target", "poll")
     H.Nil(obs.rangeMin); H.Nil(obs.rangeMax)
+    H.Equal(obs.rangeEvidence, "unknown")
 end)
 
 H.Test("client names preserve regional surnames and reject placeholder identity", function()

@@ -1259,7 +1259,7 @@ function UI.New(app)
         if not self.detailsFrame then
             local detail = self:Window("RivalGuardDetails", UIParent)
             self.detailsFrame = detail
-            detail:SetSize(470, 525); detail:SetPoint("CENTER", 80, 0)
+            detail:SetSize(470, 555); detail:SetPoint("CENTER", 80, 0)
             detail:SetFrameStrata("DIALOG"); detail:SetClampedToScreen(true); detail:EnableMouse(true)
             fill(detail); outline(detail)
             detail.title = font(detail, 18, C.accent)
@@ -1270,7 +1270,7 @@ function UI.New(app)
             detail.info = font(detail, 13, C.text)
             detail.info:SetPoint("TOPLEFT", 18, -57); detail.info:SetWidth(432)
             detail.notice = label(detail, "noTarget", 11, C.muted)
-            detail.notice:SetPoint("TOPLEFT", 18, -155); detail.notice:SetWidth(432)
+            detail.notice:SetPoint("TOPLEFT", 18, -185); detail.notice:SetWidth(432)
             local function selectedList()
                 local contact = self.selected
                 local entry, identity = listEntry(contact)
@@ -1291,7 +1291,7 @@ function UI.New(app)
                     if not ok then notify("saveFailed") return end
                     self:SettingsChanged(); self:ShowDetails(true)
                 end)
-                b:SetPoint("TOPLEFT", 18 + (i - 1) * 142, -192)
+                b:SetPoint("TOPLEFT", 18 + (i - 1) * 142, -222)
                 detail.listActions[kind] = b
             end
             local remove = localButton(detail, "removeList", 150, function()
@@ -1302,14 +1302,14 @@ function UI.New(app)
                 if not ok then notify("saveFailed") return end
                 notify("confirmRemove"); self:SettingsChanged(); self:ShowDetails(true)
             end)
-            remove:SetPoint("TOPLEFT", 18, -231)
+            remove:SetPoint("TOPLEFT", 18, -261)
             detail.removeMembership = remove
             local why = localButton(detail, "why", 150, function() self:ShowExplanation() end)
-            why:SetPoint("TOPLEFT", 185, -231)
+            why:SetPoint("TOPLEFT", 185, -261)
             local noteTitle = label(detail, "note", 13)
-            noteTitle:SetPoint("TOPLEFT", 18, -275)
+            noteTitle:SetPoint("TOPLEFT", 18, -305)
             detail.note = CreateFrame("EditBox", nil, detail, "InputBoxTemplate")
-            detail.note:SetPoint("TOPLEFT", 25, -304); detail.note:SetSize(420, 28)
+            detail.note:SetPoint("TOPLEFT", 25, -334); detail.note:SetSize(420, 28)
             detail.note:SetAutoFocus(false); detail.note:SetMaxLetters(512)
             if detail.note.SetMaxBytes then detail.note:SetMaxBytes(512) end
             detail.note:SetScript("OnTextChanged", function(box, userInput)
@@ -1331,20 +1331,20 @@ function UI.New(app)
                 if ok then self.noteDraft = nil; self:ShowDetails() end
                 notify(ok and "noteSaved" or "saveFailed")
             end)
-            save:SetPoint("TOPLEFT", 18, -350)
+            save:SetPoint("TOPLEFT", 18, -380)
             save:SetScript("OnEnter", function() tooltip(save, self:T("saveNote"), self:T("keyboardEditHelp")) end)
             save:SetScript("OnLeave", hideTooltip)
             detail.saveNote, detail.noteTitle = save, noteTitle
             detail.note:SetScript("OnEnterPressed", function() save:Click() end)
             detail.privateNote = label(detail, "notePrivate", 12, C.muted)
-            detail.privateNote:SetPoint("TOPLEFT", 18, -304); detail.privateNote:SetWidth(432)
+            detail.privateNote:SetPoint("TOPLEFT", 18, -334); detail.privateNote:SetWidth(432)
             detail.snooze = button(detail, self:T("snoozeContact"), 274, function()
                 local contact = self.selected
                 if not self:CanSnooze(contact) then notify("snoozeUnavailable") return end
                 local ok = app:Snooze(contact, 600)
                 if ok then self:Refresh() else notify("snoozeUnavailable") end
             end)
-            detail.snooze:SetPoint("TOPLEFT", 18, -392)
+            detail.snooze:SetPoint("TOPLEFT", 18, -422)
             detail.snooze:SetScript("OnEnter", function()
                 local remaining = math.max(0, M.Number(self.selected and self.selected.snoozedUntil, 0) - self:Now())
                 local description = remaining > 0 and self:F("snoozedFor", M.Age(remaining, self:Profile().locale)) or self:T("snoozeContact")
@@ -1352,7 +1352,7 @@ function UI.New(app)
             end)
             detail.snooze:SetScript("OnLeave", hideTooltip)
             local help = label(detail, "identityUnknown", 11, C.muted)
-            help:SetPoint("TOPLEFT", 18, -445); help:SetWidth(432)
+            help:SetPoint("TOPLEFT", 18, -475); help:SetWidth(432)
             detail.identityHelp = help
             detail.removeSaved = localButton(detail, "deleteRecord", 220, function()
                 local contact, _, identity = selectedList()
@@ -1367,7 +1367,7 @@ function UI.New(app)
                 self.removeEntryAt, self.removeEntryIdentity = nil, nil
                 detail:Hide(); self:SettingsChanged(); notify("recordDeleted")
             end)
-            detail.removeSaved:SetPoint("TOPRIGHT", -16, -350)
+            detail.removeSaved:SetPoint("TOPRIGHT", -16, -380)
             if UISpecialFrames then UISpecialFrames[#UISpecialFrames + 1] = "RivalGuardDetails" end
         end
         local detail, contact = self.detailsFrame, self.selected
@@ -1388,7 +1388,10 @@ function UI.New(app)
         if self.selectedOutside and contact.visible then
             state = { visible = false, lastSeen = contact.lastSeen }
         end
-        lines[#lines + 1] = contact.savedOnly and self:T("noCurrentEvidence") or M.State(state, self:Now(), self:Profile().locale)
+        local stateText = contact.savedOnly and self:T("noCurrentEvidence") or M.State(state, self:Now(), profile.locale)
+        local rangeDetail, range = M.RangeDetails(state, profile.locale)
+        lines[#lines + 1] = rangeDetail and stateText == range and rangeDetail or stateText
+        if rangeDetail and stateText ~= range then lines[#lines + 1] = rangeDetail end
         if entry then lines[#lines + 1] = self:F("currentList", self:T(LIST_KIND_KEYS[entry.kind] or "unlisted")) end
         if not self.selectedOutside and contact.currentTarget == true then lines[#lines + 1] = self:T("yourTarget") end
         if not self.selectedOutside and contact.currentFocus == true then lines[#lines + 1] = self:T("yourFocus") end
@@ -1427,7 +1430,7 @@ function UI.New(app)
         local remaining = math.max(0, M.Number(contact.snoozedUntil, 0) - self:Now())
         detail.snooze:SetShown(canSnooze)
         detail.snooze.label:SetText(self:T(remaining > 0 and "resumeContact" or "snoozeContact"))
-        self:FitWindow(detail, 470, 525, 1)
+        self:FitWindow(detail, 470, 555, 1)
         detail:Show()
     end
 
@@ -1440,7 +1443,7 @@ function UI.New(app)
         if not self.explanationFrame then
             local frame = self:Window("RivalGuardExplanation", UIParent)
             self.explanationFrame = frame
-            frame:SetSize(460, 265); frame:SetPoint("CENTER", 0, 80); frame:SetFrameStrata("DIALOG")
+            frame:SetSize(460, 290); frame:SetPoint("CENTER", 0, 80); frame:SetFrameStrata("DIALOG")
             frame:SetClampedToScreen(true); frame:EnableMouse(true)
             fill(frame); outline(frame)
             local titleText = label(frame, "explanation", 17, C.accent)
@@ -1451,8 +1454,10 @@ function UI.New(app)
             event:SetPoint("TOPLEFT", 18, -57); event:SetWidth(420)
             frame.reason = font(frame, 14, C.text)
             frame.reason:SetPoint("TOPLEFT", 18, -89); frame.reason:SetWidth(420)
+            frame.rangeEvidence = font(frame, 13, C.muted)
+            frame.rangeEvidence:SetPoint("TOPLEFT", 18, -150); frame.rangeEvidence:SetWidth(420)
             frame.outputs = font(frame, 13, C.accent)
-            frame.outputs:SetPoint("TOPLEFT", 18, -151); frame.outputs:SetWidth(420)
+            frame.outputs:SetPoint("TOPLEFT", 18, -178); frame.outputs:SetWidth(420)
             local help = label(frame, "explanationHelp", 12, C.muted)
             help:SetPoint("BOTTOMLEFT", 18, 24); help:SetWidth(420)
             if UISpecialFrames then UISpecialFrames[#UISpecialFrames + 1] = "RivalGuardExplanation" end
@@ -1460,7 +1465,10 @@ function UI.New(app)
         local result = app.Explain and self.selected and app:Explain(self.selected) or nil
         local frame = self.explanationFrame
         result = type(result) == "table" and result or {}
-        frame.reason:SetText(RG.Locale.Reason(result.reason or "unavailable", self:Profile().locale))
+        local locale = self:Profile().locale
+        frame.reason:SetText(RG.Locale.Reason(result.reason or "unavailable", locale))
+        local rangeEvidence = result.reason ~= "range_conflict" and result.reason ~= "not_observed" and M.RangeProvenance(result.rangeEvidence, locale)
+        frame.rangeEvidence:SetText(rangeEvidence or "")
         local output
         if result.allowed == true then
             if result.sound == true and result.banner == true then output = "explanationSoundBanner"
@@ -1468,7 +1476,7 @@ function UI.New(app)
             elseif result.banner == true then output = "explanationBannerOnly" end
         end
         frame.outputs:SetText(output and self:T(output) or "")
-        self:FitWindow(frame, 460, 265, 1)
+        self:FitWindow(frame, 460, 290, 1)
         frame:Show()
     end
 

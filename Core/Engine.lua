@@ -4,6 +4,8 @@ local E = RG.Register("Engine", {})
 E.__index = E
 local MAX_PENDING_AGE = 5
 local EVICTED_ENCOUNTER_LIMIT = 512
+local MAX_RANGE_AGE = 2
+local RANGE_EVIDENCE = { exact = true, spell = true, interaction = true, combined = true, conflict = true, unknown = true }
 
 local SPELLS = {
     [1784] = "Stealth", [1785] = "Stealth", [1786] = "Stealth", [1787] = "Stealth", [8822] = "Stealth",
@@ -30,13 +32,19 @@ local function safeObservation(obs)
         stealthReadable = obs.stealthReadable == true,
         behindCamera = boolean(obs.behindCamera),
         rangeMinExclusive = obs.rangeMinExclusive == true,
+        rangeEvidence = RANGE_EVIDENCE[obs.rangeEvidence] and obs.rangeEvidence or nil,
     }
     if clean.source == "poll" or clean.source == "cast" or clean.source == "aura" or clean.source == "unit" then
         clean.source = token:match("^nameplate%d+$") and "nameplate" or token
     end
     if U.IsFinite(obs.rangeMin) and obs.rangeMin >= 0 and obs.rangeMin <= 10000 then clean.rangeMin = obs.rangeMin end
     if U.IsFinite(obs.rangeMax) and obs.rangeMax >= 0 and obs.rangeMax <= 10000 then clean.rangeMax = obs.rangeMax end
-    if clean.rangeMin and clean.rangeMax and clean.rangeMin > clean.rangeMax then clean.rangeMin, clean.rangeMax = nil, nil end
+    if clean.rangeEvidence == "conflict" or (clean.rangeMin and clean.rangeMax
+        and (clean.rangeMin > clean.rangeMax or (clean.rangeMin == clean.rangeMax and clean.rangeMinExclusive))) then
+        clean.rangeMin, clean.rangeMax, clean.rangeMinExclusive, clean.rangeEvidence = nil, nil, false, "conflict"
+    elseif not clean.rangeMin and not clean.rangeMax then
+        clean.rangeEvidence = "unknown"
+    end
     return clean
 end
 
@@ -58,7 +66,7 @@ function E.New(config)
         contacts = {}, identities = {}, nameOwners = {}, bindings = {}, tokenSerial = 0, contactCount = 0,
         pending = {}, history = {}, cooldowns = {}, snoozes = {}, serial = 0, sequence = 0,
         evictedEncounters = {}, evictionSlots = {}, evictionCursor = 0,
-        counters = { observations = 0, alerts = 0, suppressed = 0, evicted = 0, queueOverflow = 0 },
+        counters = { observations = 0, alerts = 0, suppressed = 0, evicted = 0, queueOverflow = 0, rangeAliasConflicts = 0 },
         pausedUntil = nil, lastSound = -math.huge, revision = 0,
     }, E)
 end
@@ -116,8 +124,13 @@ function E:SnoozedUntil(contact)
     if at and at > self:Now() then return at end
 end
 
-function E:View(contact)
+local function freshRange(contact, now)
+    return contact.rangeAt ~= nil and now >= contact.rangeAt and now - contact.rangeAt <= MAX_RANGE_AGE
+end
+
+function E:View(contact, now)
     local entry = self:ListEntry(contact)
+    local hasRange = contact.rangeAt ~= nil and freshRange(contact, now or self:Now())
     local sources = {}
     for token in pairs(contact.tokens) do
         local binding = self.bindings[token]
@@ -129,8 +142,9 @@ function E:View(contact)
         visible = next(contact.tokens) ~= nil, firstSeen = contact.firstSeen, lastSeen = contact.lastSeen,
         sources = sources, stealth = contact.stealth, stealthAt = contact.stealthAt,
         stealthEvidence = contact.stealthEvidence, stealthSpell = contact.stealthSpell,
-        targeting = contact.targeting, rangeMin = contact.rangeMin, rangeMax = contact.rangeMax,
-        rangeMinExclusive = contact.rangeMinExclusive,
+        targeting = contact.targeting, rangeMin = hasRange and contact.rangeMin or nil, rangeMax = hasRange and contact.rangeMax or nil,
+        rangeMinExclusive = hasRange and contact.rangeMinExclusive or false,
+        rangeEvidence = hasRange and contact.rangeEvidence or "unknown",
         watched = entry and (entry.kind == "watch" or entry.kind == "avoid") or false,
         listKind = entry and entry.kind, note = entry and entry.note,
         behindCamera = contact.behindCamera,
@@ -146,9 +160,9 @@ function E:Changed()
     if self.onChange then self.onChange() end
 end
 
-function E:Reconcile(contact)
+function E:Reconcile(contact, now)
     local hostile, player, targeting, dead, behind, currentTarget, currentFocus
-    local selectedRange
+    local rangeAt, rangeMin, rangeMax, rangeExclusive, rangeEvidence, conflict
     for token in pairs(contact.tokens) do
         local binding = self.bindings[token]
         local obs = binding and binding.observation
@@ -165,22 +179,44 @@ function E:Reconcile(contact)
             elseif obs.currentTarget == false and currentTarget == nil then currentTarget = false end
             if obs.currentFocus == true or token == "focus" then currentFocus = true
             elseif obs.currentFocus == false and currentFocus == nil then currentFocus = false end
-            if obs.rangeMin or obs.rangeMax then
-                if not selectedRange or binding.at > selectedRange.at
-                    or (binding.at == selectedRange.at and (obs.rangeMax or math.huge) < (selectedRange.observation.rangeMax or math.huge)) then selectedRange = binding end
+            if now >= binding.at and now - binding.at <= MAX_RANGE_AGE
+                and (obs.rangeMin or obs.rangeMax or obs.rangeEvidence == "conflict") then
+                if not rangeAt or binding.at > rangeAt then
+                    rangeAt, rangeMin, rangeMax = binding.at, obs.rangeMin, obs.rangeMax
+                    rangeExclusive, rangeEvidence = obs.rangeMinExclusive, obs.rangeEvidence
+                    conflict = obs.rangeEvidence == "conflict"
+                elseif binding.at == rangeAt then
+                    if obs.rangeMin and (not rangeMin or obs.rangeMin > rangeMin) then
+                        rangeMin, rangeExclusive = obs.rangeMin, obs.rangeMinExclusive
+                    elseif obs.rangeMin and obs.rangeMin == rangeMin then
+                        rangeExclusive = rangeExclusive or obs.rangeMinExclusive
+                    end
+                    if obs.rangeMax then rangeMax = math.min(rangeMax or math.huge, obs.rangeMax) end
+                    conflict = conflict or obs.rangeEvidence == "conflict"
+                    if obs.rangeEvidence == "exact" then rangeEvidence = "exact"
+                    elseif rangeEvidence ~= "exact" and obs.rangeEvidence and rangeEvidence and obs.rangeEvidence ~= rangeEvidence then
+                        rangeEvidence = "combined"
+                    else rangeEvidence = rangeEvidence or obs.rangeEvidence end
+                end
             end
         end
     end
     contact.hostile, contact.isPlayer = hostile, player
     contact.targeting, contact.dead, contact.behindCamera = targeting, dead, behind
     contact.currentTarget, contact.currentFocus = currentTarget, currentFocus
-    contact.rangeMin = selectedRange and selectedRange.observation.rangeMin
-    contact.rangeMax = selectedRange and selectedRange.observation.rangeMax
-    contact.rangeMinExclusive = selectedRange and selectedRange.observation.rangeMinExclusive or false
+    local incompatible = rangeMin and rangeMax and (rangeMin > rangeMax or (rangeMin == rangeMax and rangeExclusive))
+    if incompatible and not conflict and (contact.rangeEvidence ~= "conflict" or contact.rangeAt ~= rangeAt) then
+        self.counters.rangeAliasConflicts = self.counters.rangeAliasConflicts + 1
+    end
+    if conflict or incompatible then
+        rangeMin, rangeMax, rangeExclusive, rangeEvidence = nil, nil, false, "conflict"
+    end
+    contact.rangeMin, contact.rangeMax, contact.rangeMinExclusive = rangeMin, rangeMax, rangeExclusive == true
+    contact.rangeAt, contact.rangeEvidence = rangeAt, rangeEvidence or "unknown"
 end
 
-function E:Explain(contact, event)
-    local view = contact.tokens and self:View(contact) or contact
+function E:Explain(contact, event, now)
+    local view = contact.tokens and self:View(contact, now) or contact
     return Rules.Evaluate(self.profile, view, event or "sighting", self.context, self:ListEntry(contact))
 end
 
@@ -188,18 +224,22 @@ function E:ExplainView(id, event)
     local contact = self.contacts[id]
     if not contact then return { allowed = false, reason = "not_observed" } end
     if next(contact.tokens) == nil then return { allowed = false, reason = "not_observed" } end
-    if self:SnoozedUntil(contact) then return { allowed = false, reason = "contact_snoozed" } end
-    local decision, reason = self:Explain(contact, event)
-    if not decision then return { allowed = false, reason = reason } end
-    if self.pausedUntil and self:Now() < self.pausedUntil then return { allowed = false, reason = "paused" } end
-    if not decision.sound and not decision.banner then return { allowed = false, reason = "wave_only", kind = decision.kind } end
+    local now = self:Now()
+    local result = { allowed = false, rangeEvidence = freshRange(contact, now) and contact.rangeEvidence or "unknown" }
+    if self:SnoozedUntil(contact) then result.reason = "contact_snoozed"; return result end
+    local decision, reason = self:Explain(contact, event, now)
+    if not decision then result.reason = reason; return result end
+    if self.pausedUntil and now < self.pausedUntil then result.reason = "paused"; return result end
+    result.kind = decision.kind
+    if not decision.sound and not decision.banner then result.reason = "wave_only"; return result end
     local at = self.cooldowns[contact.id .. ":" .. (decision.dedupKey or decision.kind)]
-    if at and self:Now() - at < decision.cooldown then return { allowed = false, reason = "cooldown", kind = decision.kind } end
-    return { allowed = true, reason = decision.reason, priority = decision.priority, kind = decision.kind,
-        ruleName = decision.ruleName, sound = decision.sound, banner = decision.banner }
+    if at and now - at < decision.cooldown then result.reason = "cooldown"; return result end
+    result.allowed, result.reason, result.priority = true, decision.reason, decision.priority
+    result.ruleName, result.sound, result.banner = decision.ruleName, decision.sound, decision.banner
+    return result
 end
 
-function E:RecordEncounter(contact)
+function E:RecordEncounter(contact, now)
     if contact.encounterRecorded or not self.onEncounter or not self.profile.enabled or contact.ambiguousIdentity
         or not contact.identity or not contact.name or contact.hostile ~= true or contact.isPlayer ~= true
         or contact.dead or not Rules.ContextMatches(self.profile.context, self.context) then return end
@@ -207,7 +247,7 @@ function E:RecordEncounter(contact)
     if entry and entry.kind == "ignore" then return end
     -- A selective journal can decline the initial sighting. New evidence can
     -- qualify that encounter later without counting every poll as a meeting.
-    if self.onEncounter(self:View(contact), self.epoch()) ~= false then contact.encounterRecorded = true end
+    if self.onEncounter(self:View(contact, now), self.epoch()) ~= false then contact.encounterRecorded = true end
 end
 
 local function upgradeStealthEvidence(item, evidence, spell)
@@ -228,7 +268,7 @@ end
 function E:Queue(contact, event)
     local now = self:Now()
     if self:SnoozedUntil(contact) then return false end
-    local decision, reason = self:Explain(contact, event)
+    local decision, reason = self:Explain(contact, event, now)
     contact.lastReason = reason or (decision and decision.reason)
     if not decision then self.counters.suppressed = self.counters.suppressed + 1 return false end
     if self.pausedUntil and now < self.pausedUntil then return false end
@@ -511,7 +551,7 @@ function E:Observe(raw)
     if wasTargeting == nil and previous then wasTargeting = previous.targeting end
     -- A restricted alias cannot erase another available source's clean evidence.
     -- Conversely, evidence vanishes when every active source becomes unreadable.
-    self:Reconcile(contact)
+    self:Reconcile(contact, now)
     local oldStealth = contact.stealth or (previous and previous.stealth)
     if obs.stealthReadable then
         if obs.stealth == true then
@@ -521,7 +561,7 @@ function E:Observe(raw)
             contact.stealth, contact.stealthAt, contact.stealthEvidence, contact.stealthSpell = nil, nil, nil, nil
         end
     end
-    self:RecordEncounter(contact)
+    self:RecordEncounter(contact, now)
     if not contact.arrivalNotified and not contact.arrivalQueued then
         contact.arrivalQueued = self:Queue(contact, "sighting")
     elseif returning then
@@ -531,7 +571,7 @@ function E:Observe(raw)
     if contact.stealth and not oldStealth then self:Queue(contact, "stealth") end
     if contact.targeting and wasTargeting ~= true then self:Queue(contact, "targeting") end
     self:Changed()
-    return self:View(contact)
+    return self:View(contact, now)
 end
 
 function E:Remove(token, contradiction)
@@ -545,7 +585,7 @@ function E:Remove(token, contradiction)
         if not visible then
             contact.lastSeen = self:Now()
             contact.targeting, contact.currentTarget, contact.currentFocus = nil, nil, nil
-        else self:Reconcile(contact) end
+        else self:Reconcile(contact, self:Now()) end
         if contradiction and (not visible or contact.hostile ~= true or contact.isPlayer ~= true) then
             if contradiction.hostile == false then contact.hostile = false end
             if contradiction.isPlayer == false then contact.isPlayer = false end
@@ -571,7 +611,7 @@ function E:Cast(token, spellID)
     if contact.lastStealthCast and now - contact.lastStealthCast < 1 then return false end
     contact.lastStealthCast, contact.stealth, contact.stealthAt = now, "confirmed", now
     contact.stealthEvidence, contact.stealthSpell = "cast", SPELLS[spellID]
-    self:RecordEncounter(contact)
+    self:RecordEncounter(contact, now)
     self:Queue(contact, "stealth")
     self:Changed()
     return true
@@ -635,14 +675,14 @@ function E:Tick()
         local contact = self.contacts[item.id]
         local decision
         if contact and (item.event ~= "targeting" or contact.targeting == true) then
-            decision = self:Explain(contact, item.event)
+            decision = self:Explain(contact, item.event, now)
         end
         if decision and not (self.pausedUntil and now < self.pausedUntil) and not self:SnoozedUntil(contact) then
             local key = contact.id .. ":" .. (decision.dedupKey or decision.kind)
             if not accepted[key] and (not self.cooldowns[key] or now - self.cooldowns[key] >= decision.cooldown) then
                 accepted[key] = true
                 self.cooldowns[key] = now
-                decision.contact = self:View(contact)
+                decision.contact = self:View(contact, now)
                 decision.stealthEvidence, decision.stealthSpell = item.stealthEvidence, item.stealthSpell
                 contact.arrivalNotified, contact.arrivalQueued = true, false
                 if contact.class then contact.notifiedClass = contact.class end
@@ -699,8 +739,9 @@ end
 
 function E:Snapshot()
     local result = {}
+    local now = self:Now()
     for _, contact in pairs(self.contacts) do
-        local view = self:View(contact)
+        local view = self:View(contact, now)
         if Rules.Display(self.profile, view) then result[#result + 1] = view end
     end
     table.sort(result, function(a, b)

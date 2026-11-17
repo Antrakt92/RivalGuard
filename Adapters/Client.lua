@@ -158,17 +158,25 @@ function Client:Range(token, identity)
     squared, checked = self:Number(squared), self:Boolean(checked)
     if squared and squared >= 0 and checked == true then
         local distance = math.sqrt(squared)
-        return distance, distance, false
+        return distance, distance, false, "exact"
     end
     -- A failed interaction check does not establish an enemy's lower distance bound.
-    local lower, upper, exclusive
-    if self.range then lower, upper, exclusive = self.range:Measure(token, identity) end
+    local lower, upper, exclusive, conflict
+    if self.range then lower, upper, exclusive, conflict = self.range:Measure(token, identity) end
+    if conflict then return nil, nil, false, "conflict" end
+    local evidence = (lower ~= nil or upper ~= nil) and "spell" or "unknown"
     local interaction
     if self:Boolean(self:Safe(self.api.CheckInteractDistance, token, 3)) == true then interaction = 10
     elseif self:Boolean(self:Safe(self.api.CheckInteractDistance, token, 4)) == true then interaction = 28 end
-    if interaction then lower, upper = lower or 0, math.min(upper or math.huge, interaction) end
-    if lower and upper and (lower > upper or (lower == upper and exclusive)) then return nil, nil, false end
-    return lower, upper, exclusive == true
+    if interaction then
+        lower, upper = lower or 0, math.min(upper or math.huge, interaction)
+        evidence = evidence == "spell" and "combined" or "interaction"
+    end
+    if lower and upper and (lower > upper or (lower == upper and exclusive)) then
+        self:Count("range_conflicts")
+        return nil, nil, false, "conflict"
+    end
+    return lower, upper, exclusive == true, evidence
 end
 
 function Client:Stealth(token)
@@ -224,7 +232,8 @@ function Client:ReadUnit(token, source, checkRequalifiedAura)
     if level and (level <= 0 or level > 1000) then level = nil end
     local rangeOwner = guid and ("guid:" .. guid) or (nameComplete and ("name:" .. name))
     observation.class, observation.level = class, level
-    observation.rangeMin, observation.rangeMax, observation.rangeMinExclusive = self:Range(token, rangeOwner)
+    observation.rangeMin, observation.rangeMax, observation.rangeMinExclusive, observation.rangeEvidence =
+        self:Range(token, rangeOwner)
     -- Acquisition, aura events and the first clean return to eligibility may
     -- reveal an aura that will not emit a separate update for this token.
     if (checkRequalifiedAura and player == true and hostile == true)

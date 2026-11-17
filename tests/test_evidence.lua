@@ -1,7 +1,7 @@
 local H = RGTest
-local function fixture()
+local function fixture(config)
     local RG = H.Addon({ "Core/Bootstrap.lua", "Core/Util.lua", "Core/Defaults.lua", "Core/Rules.lua", "Core/Engine.lua" })
-    local engine = RG.Engine.New()
+    local engine = RG.Engine.New(config)
     local function observe(token, data)
         local obs = { token = token, guid = "Player-A", name = "Alpha", source = token }
         for key, value in pairs(data or {}) do obs[key] = value end
@@ -18,6 +18,81 @@ H.Test("unknown alias does not overwrite independently confirmed player and enem
     engine:Remove("nameplate1")
     local remaining = engine:Snapshot()[1]
     H.Nil(remaining.hostile); H.Nil(remaining.isPlayer)
+end)
+
+local function rangeFixture()
+    local clock, alerts = H.Clock(), {}
+    local engine, observe = fixture({ clock = clock.Now, onAlert = function(decision) alerts[#alerts + 1] = decision end })
+    local range = engine.profile.range
+    range.enabled, range.yards, range.policy, range.unknown = true, 25, "confirmed", false
+    local function sample(token, lower, upper, exclusive)
+        return observe(token, { hostile = true, isPlayer = true, class = "ROGUE",
+            rangeMin = lower, rangeMax = upper, rangeMinExclusive = exclusive })
+    end
+    return engine, sample, clock, alerts
+end
+
+H.Test("simultaneous compatible aliases intersect their bounds and keep an exclusive minimum", function()
+    local engine, sample = rangeFixture()
+    sample("nameplate1", 0, 25)
+    local combined = sample("target", 15, nil, true)
+    H.Equal(combined.rangeMin, 15)
+    H.True(combined.rangeMinExclusive)
+    H.Equal(combined.rangeMax, 25)
+    H.True(engine:ExplainView(combined.id).allowed)
+end)
+
+H.Test("a new conflicting range cohort cannot authorize an alert using older clean evidence", function()
+    local engine, sample, clock, alerts = rangeFixture()
+    local original = sample("nameplate1", 8, 8)
+    clock.Advance(0.1)
+    sample("target", 10, 10)
+    local conflicting = sample("focus", 45, 45)
+    H.Equal(conflicting.id, original.id)
+    H.Nil(conflicting.rangeMin)
+    H.Nil(conflicting.rangeMax)
+    H.False(engine:ExplainView(original.id).allowed)
+    H.Equal(engine:ExplainView(original.id).reason, "range_conflict")
+    clock.Advance(1)
+    engine:Tick()
+    H.Equal(#alerts, 0)
+
+    local far = sample("focus", 43, 43)
+    H.Equal(far.rangeMax, 43)
+    H.Equal(engine:ExplainView(original.id).reason, "range_outside")
+    clock.Advance(0.1)
+    local near = sample("target", 14, 14)
+    H.Equal(near.rangeMin, 14)
+    H.Equal(near.rangeMax, 14)
+    clock.Advance(1)
+    engine:Tick()
+    H.Equal(#alerts, 1)
+    H.Equal(alerts[1].contact.id, original.id)
+end)
+
+H.Test("unknown aliases retain a recent range sample but cannot keep it alive past its age limit", function()
+    local engine, sample, clock, alerts = rangeFixture()
+    local original = sample("nameplate1", 10, 10)
+    clock.Advance(1.9)
+    local recent = sample("target")
+    H.Equal(recent.rangeMax, 10)
+    H.True(engine:ExplainView(original.id).allowed)
+    clock.Advance(0.2)
+    H.Nil(engine:Snapshot()[1].rangeMax)
+    H.Equal(engine:ExplainView(original.id).reason, "range_unknown")
+    engine:Tick()
+    H.Equal(#alerts, 0)
+end)
+
+H.Test("an exclusive lower bound equal to its upper bound is not a valid range sample", function()
+    local engine, sample, clock, alerts = rangeFixture()
+    local invalid = sample("nameplate1", 20, 20, true)
+    H.Nil(invalid.rangeMin)
+    H.Nil(invalid.rangeMax)
+    H.Equal(engine:ExplainView(invalid.id).reason, "range_conflict")
+    clock.Advance(1)
+    engine:Tick()
+    H.Equal(#alerts, 0)
 end)
 
 H.Test("unknown range on another source preserves a currently readable interval", function()
