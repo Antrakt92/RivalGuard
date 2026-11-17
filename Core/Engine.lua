@@ -730,7 +730,7 @@ function E:Emit(decision, now)
         -- its priority closes the exception until the full gap passes again.
         local escalation = decision.priority >= URGENT_PRIORITY and self.lastSoundPriority < URGENT_PRIORITY
             and now >= self.lastSound + SOUND_ESCALATION_GAP
-        if self.profile.alerts.sounds[decision.kind] == "none" then
+        if (decision.soundCue or self.profile.alerts.sounds[decision.kind]) == "none" then
             decision.sound = false
         elseif not (gapReady or escalation) then
             decision.sound = false

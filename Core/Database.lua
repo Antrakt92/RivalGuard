@@ -40,7 +40,7 @@ local function ruleArray(value, strict)
         if type(index) ~= "number" or index % 1 ~= 0 or index < 1 or index > 32 or type(rule) ~= "table" then return nil end
         if strict then
             local allowed = { name = true, enabled = true, priority = true, classes = true, event = true, action = true, sound = true, banner = true, cooldown = true,
-                context = true, list = true, range = true, rangePolicy = true, rangeUnknown = true }
+                context = true, list = true, range = true, rangePolicy = true, rangeUnknown = true, soundCue = true }
             for key in pairs(rule) do if not allowed[key] then return nil end end
             for _, key in ipairs({ "enabled", "sound", "banner", "rangeUnknown" }) do
                 if rule[key] ~= nil and type(rule[key]) ~= "boolean" then return nil end
@@ -55,12 +55,17 @@ local function ruleArray(value, strict)
             if rule.event ~= nil and type(rule.event) ~= "string" then return nil end
             if rule.action ~= nil and type(rule.action) ~= "string" then return nil end
         end
+        local cue = rule.soundCue
+        if cue ~= nil and (type(cue) ~= "string" or cue == "none" or not D.soundLabels[cue]) then
+            if strict then return nil end
+            cue = nil
+        end
         local clean = {
             name = U.Text(rule.name, 80), enabled = rule.enabled ~= false,
             priority = U.Clamp(rule.priority, 1, 100, 50),
             classes = classMap(rule.classes or {}),
             event = rule.event or "sighting", action = rule.action or "alert",
-            sound = rule.sound ~= false, banner = rule.banner ~= false,
+            sound = rule.sound ~= false, banner = rule.banner ~= false, soundCue = cue,
             cooldown = U.Clamp(rule.cooldown, 0, 600, 30),
             context = RULE_CONTEXTS[rule.context] and rule.context or "any",
             list = RULE_LISTS[rule.list] and rule.list or "any",
@@ -150,9 +155,8 @@ function DB.ValidateProfile(value, strict)
             entry[1][entry[2]] = entry[4]
         end
     end
-    local sounds = { none = true, ping = true, warning = true, ready = true, whisper = true, quest = true }
     for event, choice in pairs(p.alerts.sounds) do
-        if not sounds[choice] then
+        if not D.soundLabels[choice] then
             if strict then return nil, "invalid_sound" end
             p.alerts.sounds[event] = D.profile.alerts.sounds[event]
         end

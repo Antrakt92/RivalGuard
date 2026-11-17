@@ -2,7 +2,6 @@ local _, RG = ...
 local Audio = RG.Register("Audio", {})
 Audio.__index = Audio
 
-Audio.choices = { "none", "ping", "warning", "ready", "whisper", "quest" }
 local SOUNDS = {
     ping = { kit = "MAP_PING", fallback = 3175 },
     warning = { kit = "RAID_WARNING", fallback = 8959 },
@@ -16,10 +15,10 @@ function Audio.New(api, getProfile, diagnostics)
     return setmetatable({ api = api or _G, getProfile = getProfile, diagnostics = diagnostics }, Audio)
 end
 
-function Audio:Play(kind, preview)
+function Audio:Play(kind, preview, soundCue)
     local profile = self.getProfile()
     if not preview and (not profile.enabled or not profile.alerts.enabled or not profile.alerts.sound) then return false end
-    local choice = profile.alerts.sounds[kind] or "ping"
+    local choice = soundCue or profile.alerts.sounds[kind] or "ping"
     if choice == "none" then return false end
     local spec = SOUNDS[choice]
     if not spec then

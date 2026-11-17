@@ -773,7 +773,7 @@ function UI.New(app)
     y = slider(alerts, "returnAfter", "alerts.returnAfter", y, 5, 180, 5, "returnAfterTip")
     y = choice(alerts, "soundChannel", "alerts.channel", { { "Master", "master" }, { "SFX", "sfx" }, { "Dialog", "dialog" }, { "Music", "music" }, { "Ambience", "ambience" } }, y)
     y = section(alerts, "sounds", y - 4)
-    local soundOptions = { { "none", "soundNone" }, { "ping", "soundPing" }, { "warning", "soundWarning" }, { "ready", "soundReady" }, { "whisper", "soundWhisper" }, { "quest", "soundQuest" } }
+    local soundOptions = RG.Defaults.soundOptions
     for _, entry in ipairs({ { "sighting", "eventSighting" }, { "returning", "eventReturning" }, { "watch", "eventWatch" }, { "stealth", "eventStealth" }, { "targeting", "eventTargeting" }, { "wave", "eventWave" } }) do
         local kind = entry[1]
         local rowY = y

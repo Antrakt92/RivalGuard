@@ -63,6 +63,28 @@ H.Test("saved variables recovery detaches tables and keeps future schema untouch
     H.True(RG.Database.New("corrupt").recovered)
 end)
 
+H.Test("profile transfers preserve explicit rule sounds and inherit when the field is absent", function()
+    local RG = addon()
+    local db = RG.Database.New()
+    local profile = db:GetProfile()
+    profile.rules = { { name = "Existing rule" }, { name = "Audible rule", soundCue = "warning" } }
+    local previous = assert(db:ExportProfile())
+    local imported = assert(db:ImportProfile("Sound transfer", previous))
+    H.Nil(imported.rules[1].soundCue)
+    H.Equal(imported.rules[2].soundCue, "warning")
+    H.Equal(profile.rules[2].soundCue, "warning")
+    for _, invalid in ipairs({ "none", "inherit", "Interface\\custom.ogg", 8959, {} }) do
+        profile.rules[2].soundCue = invalid
+        H.Nil(db:ExportProfile())
+        local encoded = assert(RG.Codec.Encode({ format = "RivalGuardProfile", schemaVersion = RG.schemaVersion, profile = profile }))
+        H.Nil(db:PreviewImport(encoded))
+        H.Equal(db.root.profiles["Sound transfer"].rules[2].soundCue, "warning")
+    end
+    local recovered = RG.Database.New(db.root):GetProfile()
+    H.Nil(recovered.rules[2].soundCue)
+    H.Equal(recovered.rules[2].name, "Audible rule")
+end)
+
 H.Test("profile limits count restored Default and do not partially create extras", function()
     local RG = addon()
     local db = RG.Database.New()

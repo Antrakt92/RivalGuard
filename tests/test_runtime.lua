@@ -135,6 +135,161 @@ H.Test("runtime alert block reports pause and global output controls", function(
     H.Equal(app:Status().detectionState, "disabled")
 end)
 
+local RULE_SOUND_KITS = { MAP_PING = 22001, RAID_WARNING = 22002, READY_CHECK = 22003,
+    TELL_MESSAGE = 22004, IG_QUEST_LIST_COMPLETE = 22005 }
+
+local function ruleSoundFixture()
+    local function soundKits(mock) mock.api.SOUNDKIT = RULE_SOUND_KITS end
+    local state, _, app = setup(nil, soundKits)
+    local profile = app.db:GetProfile()
+    for event in pairs(profile.alerts.sounds) do profile.alerts.sounds[event] = "none" end
+    profile.alerts.channel = "Dialog"
+    return state, app, profile, soundKits
+end
+
+local function soundRule(name, cue, priority)
+    return { name = name, enabled = true, event = "sighting", action = "alert", priority = priority,
+        classes = {}, cooldown = 30, sound = true, banner = true, soundCue = cue }
+end
+
+local function seeSoundRuleRival(state, index, class)
+    local token = "nameplate" .. index
+    state:Unit(token, { guid = "Player-RuleCue" .. index, name = "Sound rival " .. index,
+        class = class or "ROGUE", hostile = true, isPlayer = true })
+    state:Fire("NAME_PLATE_UNIT_ADDED", token)
+end
+
+H.Test("the winning rule's cue is audible with event sounds off and contributes to alert status", function()
+    local state, app, profile = ruleSoundFixture()
+    profile.alerts.banner = false
+    profile.rules = { soundRule("First match", "warning", 70), soundRule("Higher priority match", "quest", 90) }
+    app:OnSettingsChanged()
+    seeSoundRuleRival(state, 1)
+    state:Advance(0.5)
+    H.Equal(#state.sounds, 1)
+    H.Equal(state.sounds[1].id, RULE_SOUND_KITS.IG_QUEST_LIST_COMPLETE)
+    H.Equal(state.sounds[1].channel, "Dialog")
+    H.Equal(app.engine.history[1].reason, "custom_rule")
+    H.False(app.ui.banner:IsShown())
+    H.Nil(app:AlertBlock())
+    H.Nil(app:AlertBlock(true))
+
+    profile.alerts.sounds.sighting = "ping"
+    app:OnSettingsChanged()
+    state:Advance(1.5)
+    seeSoundRuleRival(state, 2)
+    state:Advance(0.5)
+    H.Equal(#state.sounds, 2)
+    H.Equal(state.sounds[2].id, RULE_SOUND_KITS.IG_QUEST_LIST_COMPLETE)
+
+    profile.alerts.sounds.sighting = "none"
+    for _, rule in ipairs(profile.rules) do rule.context = "battleground" end
+    app:OnSettingsChanged()
+    H.Equal(app:AlertBlock(), "outputs_disabled")
+    H.Equal(app:AlertBlock(true), "outputs_disabled")
+end)
+
+H.Test("a grouped alert uses its configured wave cue instead of individual rule cues", function()
+    local state, app, profile = ruleSoundFixture()
+    profile.alerts.sounds.wave = "ready"
+    local rogue, hunter = soundRule("Rogue cue", "warning", 50), soundRule("Hunter cue", "quest", 55)
+    rogue.classes, hunter.classes = { ROGUE = true }, { HUNTER = true }
+    profile.rules = { rogue, hunter }
+    app:OnSettingsChanged()
+    seeSoundRuleRival(state, 1)
+    seeSoundRuleRival(state, 2, "HUNTER")
+    seeSoundRuleRival(state, 3)
+    state:Advance(1.5)
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(app.engine.history[1].kind, "wave")
+    H.Equal(app.ui.activeBanner.count, 3)
+    H.Equal(#state.sounds, 1)
+    H.Equal(state.sounds[1].id, RULE_SOUND_KITS.READY_CHECK)
+end)
+
+H.Test("a listed-only rule cue warns for a known Watch identity and keeps ordinary status quiet", function()
+    local state, app, profile = ruleSoundFixture()
+    profile.alerts.banner = false
+    local rule = soundRule("Watch cue", "whisper", 90)
+    rule.list = "listed"
+    profile.rules = { rule }
+    assert(app.db:SetList("guid:Player-RuleCue1", "watch", nil, { name = "Sound rival 1" }))
+    app:OnSettingsChanged()
+    seeSoundRuleRival(state, 1, "UNKNOWN_FIXTURE")
+    seeSoundRuleRival(state, 2)
+    state:Advance(1.5)
+    H.Equal(app.engine.counters.alerts, 1)
+    H.Equal(app.engine.history[1].kind, "watch")
+    H.Equal(#state.sounds, 1)
+    H.Equal(state.sounds[1].id, RULE_SOUND_KITS.TELL_MESSAGE)
+    H.Nil(app:AlertBlock())
+    H.Equal(app:AlertBlock(true), "outputs_disabled")
+end)
+
+for _, blocker in ipairs({ "global mute", "silent rule", "unidentified class" }) do
+    H.Test("a rule cue honors " .. blocker, function()
+        local state, app, profile = ruleSoundFixture()
+        local rule = soundRule("Quiet unless eligible", "quest", 80)
+        profile.rules = { rule }
+        if blocker == "global mute" then profile.alerts.sound = false end
+        if blocker == "silent rule" then rule.sound = false end
+        app:OnSettingsChanged()
+        seeSoundRuleRival(state, 1, blocker == "unidentified class" and "UNKNOWN_FIXTURE" or nil)
+        state:Advance(0.5)
+        H.Equal(app.engine.counters.alerts, 1)
+        H.Equal(app.engine.history[1].reason, "custom_rule")
+        H.True(app.ui.banner:IsShown())
+        H.Equal(#state.sounds, 0)
+        if blocker ~= "unidentified class" then
+            profile.alerts.banner = false
+            app:OnSettingsChanged()
+            H.Equal(app:AlertBlock(), "outputs_disabled")
+            H.Equal(app:AlertBlock(true), "outputs_disabled")
+        end
+    end)
+end
+
+H.Test("advanced rule cue preview is detached and saving makes the cue survive reload", function()
+    local state, app, profile, soundKits = ruleSoundFixture()
+    profile.alerts.sound, profile.alerts.banner = false, false
+    app:OnSettingsChanged()
+    local ui = app.ui
+    ui:OpenRules()
+    local dialog = ui.rulesDialog
+    H.False(dialog.previewCue.enabled)
+    dialog.soundCue:Click()
+    dialog.soundCue:Click()
+    H.True(dialog.previewCue.enabled)
+    dialog.previewCue:Click()
+    H.Equal(#state.sounds, 1)
+    H.Equal(state.sounds[1].id, RULE_SOUND_KITS.RAID_WARNING)
+    H.Equal(state.sounds[1].channel, "Dialog")
+    H.Equal(#profile.rules, 0)
+    H.Equal(app.engine.counters.alerts, 0)
+    H.Equal(#app.engine.history, 0)
+    H.False(ui.banner:IsShown())
+    dialog.sound:Click()
+    H.False(dialog.previewCue.enabled)
+    dialog.previewCue:Click()
+    H.Equal(#state.sounds, 1)
+    dialog.sound:Click()
+    H.True(dialog.previewCue.enabled)
+    dialog.save:Click()
+    H.Equal(profile.rules[1].soundCue, "warning")
+
+    state:Fire("PLAYER_LOGOUT")
+    local fresh, _, reloaded = setup(state.api.RivalGuardDB, soundKits)
+    H.Equal(reloaded.db:GetProfile().rules[1].soundCue, "warning")
+    H.Equal(reloaded:AlertBlock(true), "outputs_disabled")
+    fresh.api.RivalGuard_Binding("mute")
+    H.Nil(reloaded:AlertBlock(true))
+    seeSoundRuleRival(fresh, 1)
+    fresh:Advance(1.5)
+    H.Equal(reloaded.engine.counters.alerts, 1)
+    H.Equal(#fresh.sounds, 1)
+    H.Equal(fresh.sounds[1].id, RULE_SOUND_KITS.RAID_WARNING)
+end)
+
 H.Test("hidden Nearby skips row production while minimap census and alerts stay live", function()
     local state, RG, app = setup(nil, function(fixture)
         local map = fixture.api.CreateFrame("Frame", "Minimap", fixture.api.UIParent)

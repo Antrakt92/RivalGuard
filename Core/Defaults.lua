@@ -5,6 +5,11 @@ D.classes = { "WARRIOR", "PALADIN", "HUNTER", "ROGUE", "PRIEST", "DEATHKNIGHT", 
 D.classSet = {}
 for _, class in ipairs(D.classes) do D.classSet[class] = true end
 
+D.soundOptions = { { "none", "soundNone" }, { "ping", "soundPing" }, { "warning", "soundWarning" },
+    { "ready", "soundReady" }, { "whisper", "soundWhisper" }, { "quest", "soundQuest" } }
+D.soundLabels = {}
+for _, option in ipairs(D.soundOptions) do D.soundLabels[option[1]] = option[2] end
+
 local STEALTH_SPELLS = {
     [1784] = "Stealth", [1785] = "Stealth", [1786] = "Stealth", [1787] = "Stealth", [8822] = "Stealth",
     [5215] = "Prowl", [6783] = "Prowl", [9913] = "Prowl",

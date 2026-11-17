@@ -49,6 +49,7 @@ function D.Attach(ui, app, H)
         self.ruleDraft.range = self.ruleDraft.range or 0
         self.ruleDraft.rangePolicy = self.ruleDraft.rangePolicy or "possible"
         self.ruleDraft.rangeUnknown = self.ruleDraft.rangeUnknown == true
+        self.ruleDraft.soundCue = self.ruleDraft.soundCue or "inherit"
         if self.rulesFrame then
             self.loadingRule = true
             self.rulesFrame.nameInput:SetText(self.ruleDraft.name)
@@ -180,7 +181,18 @@ function D.Attach(ui, app, H)
             H.tooltip(f.clearClasses, t("clearClassSelection"), t("clearRuleClassesTip"))
         end)
         f.clearClasses:SetScript("OnLeave", H.hideTooltip)
-        f.action = draftChoice(base, "ruleAction", "action", { { "alert", "ruleAlert" }, { "suppress", "ruleSuppress" } }, 253, -395, 495)
+        f.action = draftChoice(base, "ruleAction", "action", { { "alert", "ruleAlert" }, { "suppress", "ruleSuppress" } }, 253, -395, 190)
+        local cues = { { "inherit", "ruleSoundInherit" } }
+        for _, option in ipairs(RG.Defaults.soundOptions) do
+            if option[1] ~= "none" then cues[#cues + 1] = option end
+        end
+        f.soundCue = draftChoice(base, "ruleSoundCue", "soundCue", cues, 455, -395, 179)
+        f.previewCue = H.localButton(base, "previewSound", 102, function()
+            if app.PreviewSound and self.ruleDraft then app:PreviewSound(nil, self.ruleDraft.soundCue) end
+        end)
+        f.previewCue:SetPoint("LEFT", f.soundCue, "RIGHT", 12, 0)
+        f.soundCue:SetScript("OnEnter", function() H.tooltip(f.soundCue, t("ruleSoundCue"), t("ruleSoundCueHelp")) end)
+        f.soundCue:SetScript("OnLeave", H.hideTooltip)
         f.sound = draftCheck(base, "ruleSound", "sound", 250, -453)
         f.banner = draftCheck(base, "ruleBanner", "banner", 470, -453)
         -- Keep each checkbox's hit area in its own column.
@@ -235,7 +247,7 @@ function D.Attach(ui, app, H)
         f.basic.bg:SetColorTexture(unpack(not conditionTab and { 0.10, 0.22, 0.28, 1 } or H.C.panel))
         f.conditions.bg:SetColorTexture(unpack(conditionTab and { 0.10, 0.22, 0.28, 1 } or H.C.panel))
         for _, field in ipairs({ "enabled", "sound", "banner", "rangeUnknown" }) do f[field]:SetChecked(self.ruleDraft[field] == true) end
-        for _, key in ipairs({ "event", "action", "context", "list", "rangePolicy" }) do
+        for _, key in ipairs({ "event", "action", "soundCue", "context", "list", "rangePolicy" }) do
             for _, option in ipairs(f[key].ruleOptions) do
                 if self.ruleDraft[f[key].ruleField] == option[1] then f[key].label:SetText(t(option[2]) .. "  ›") end
             end
@@ -258,6 +270,9 @@ function D.Attach(ui, app, H)
         end
         local alert = self.ruleDraft.action == "alert"
         f.sound:SetEnabled(alert); f.banner:SetEnabled(alert)
+        local sound = alert and self.ruleDraft.sound == true
+        f.soundCue:SetEnabled(sound)
+        f.previewCue:SetEnabled(sound and self.ruleDraft.soundCue ~= "inherit")
         f.rangePolicy:SetEnabled(self.ruleDraft.range > 0); f.rangeUnknown:SetEnabled(self.ruleDraft.range > 0)
         f.delete:SetEnabled(self.ruleIndex ~= nil)
         self.loadingRule = false
@@ -272,6 +287,7 @@ function D.Attach(ui, app, H)
         local index = self.ruleIndex or (#profile.rules + 1)
         if index > 32 then notify("ruleLimit") return end
         local draft = RG.Util.Copy(self.ruleDraft)
+        if draft.soundCue == "inherit" then draft.soundCue = nil end
         draft.name = RG.Util.Text(self.rulesFrame.nameInput:GetText(), 80)
         if not draft.name then notify("ruleNeedsName") return end
         local candidate = RG.Util.Copy(profile)

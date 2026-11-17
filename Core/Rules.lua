@@ -79,7 +79,8 @@ function R.Evaluate(profile, contact, event, context, listEntry)
     -- An unidentified class remains useful visually, without sounding like a
     -- confirmed match for one of the selected classes.
     local soundAllowed = profile.alerts.sound and (not matched or matched.sound) and (contact.class ~= nil or watched == true)
-    decision.sound = soundAllowed and profile.alerts.sounds[kind] ~= "none"
+    decision.soundCue = matched and matched.soundCue or nil
+    decision.sound = soundAllowed and (decision.soundCue or profile.alerts.sounds[kind]) ~= "none"
     decision.waveSound = soundAllowed and profile.alerts.sounds.wave ~= "none"
         and decision.priority < 70 and (kind == "sighting" or kind == "returning")
     if not decision.sound and not decision.banner and not decision.waveSound then return nil, "outputs_disabled" end

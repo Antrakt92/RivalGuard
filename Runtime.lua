@@ -63,8 +63,29 @@ function App:ToggleMute()
     self:OnSettingsChanged()
 end
 
-function App:PreviewSound(kind)
-    return self.audio and self.audio:Play(kind or "sighting", true)
+function App:PreviewSound(kind, soundCue)
+    return self.audio and self.audio:Play(kind or "sighting", true, soundCue)
+end
+
+local function ruleCanPlay(profile, context, ordinaryOnly)
+    local alerts = profile.alerts
+    for _, rule in ipairs(profile.rules) do
+        if rule.enabled and rule.action == "alert" and rule.sound and rule.soundCue
+            and (not rule.context or rule.context == "any" or rule.context == context) then
+            local sighting = rule.event == "sighting" or rule.event == "any"
+            local unlisted = rule.list ~= "listed" and not alerts.watchedOnly
+            if ordinaryOnly then
+                if sighting and unlisted then return true end
+            else
+                local listed = rule.list ~= "unlisted"
+                local returned = rule.event == "returning" or rule.event == "any"
+                if (sighting or returned) and (listed or unlisted and not alerts.muteOrdinary) then return true end
+                if (listed or unlisted) and ((alerts.stealth and (rule.event == "stealth" or rule.event == "any"))
+                    or (alerts.targeting and (rule.event == "targeting" or rule.event == "any"))) then return true end
+            end
+        end
+    end
+    return false
 end
 
 function App:AlertBlock(ordinaryOnly)
@@ -77,7 +98,8 @@ function App:AlertBlock(ordinaryOnly)
     if ordinaryOnly then
         if alerts.watchedOnly then return "watch_only" end
         if alerts.muteOrdinary then return "ordinary_muted" end
-        if alerts.banner or (alerts.sound and (alerts.sounds.sighting ~= "none" or alerts.sounds.wave ~= "none")) then return nil end
+        if alerts.banner or (alerts.sound and (alerts.sounds.sighting ~= "none" or alerts.sounds.wave ~= "none"
+            or ruleCanPlay(profile, self.engine.context.kind, true))) then return nil end
         return "outputs_disabled"
     end
     if alerts.banner then return nil end
@@ -89,6 +111,7 @@ function App:AlertBlock(ordinaryOnly)
                 return nil
             end
         end
+        if ruleCanPlay(profile, self.engine.context.kind, false) then return nil end
     end
     return "outputs_disabled"
 end
@@ -373,7 +396,7 @@ function App:Initialize()
         end,
         onAlert = function(decision)
             local soundAccepted
-            if decision.sound then soundAccepted = self.audio:Play(decision.kind, false) end
+            if decision.sound then soundAccepted = self.audio:Play(decision.kind, false, decision.soundCue) end
             if self.ui then
                 local ok = pcall(self.ui.Alert, self.ui, decision)
                 if not ok then self.diagnostics:Error("ui_alert") end
