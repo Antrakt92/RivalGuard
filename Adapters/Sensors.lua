@@ -14,6 +14,7 @@ local EVENTS = {
 }
 local DIRECT = { target = true, focus = true, mouseover = true, softenemy = true }
 local MAX_ACTIVE = 128
+local MAX_PLATES = MAX_ACTIVE - RG.Util.Count(DIRECT)
 local POLL_SECONDS = 0.25
 local PLATE_PHASES = 4
 local SAMPLE_BOUNDARY = {
@@ -24,7 +25,7 @@ local SAMPLE_BOUNDARY = {
 }
 
 function Sensors.New(app, client, api)
-    return setmetatable({ app = app, client = client, api = api or _G, active = {}, count = 0,
+    return setmetatable({ app = app, client = client, api = api or _G, active = {}, count = 0, plateCount = 0,
         generation = 0, elapsed = 0, phase = 0, running = false, loading = false }, Sensors)
 end
 
@@ -44,6 +45,10 @@ end
 function Sensors:Observe(token, source, behindCamera)
     token = self.client:IsToken(token)
     if not token then return end
+    if not DIRECT[token] and not self.active[token] and self.plateCount >= MAX_PLATES then
+        self.client:Count("sensor_capacity")
+        return
+    end
     local obs = self.client:ReadUnit(token, source)
     if not obs then self:Remove(token); return end
     self:Record(obs, behindCamera)
@@ -52,19 +57,17 @@ end
 function Sensors:Record(obs, behindCamera)
     local token = obs.token
     local state = self.active[token]
-    if not state then
-        if self.count >= MAX_ACTIVE then self.client:Count("sensor_capacity"); return end
-        self.generation = self.generation + 1
-        state = { generation = self.generation }
-        self.active[token], self.count = state, self.count + 1
-    end
     local name = obs.nameComplete and obs.name or nil
-    if (state.guid and obs.guid and state.guid ~= obs.guid)
-        or (not state.guid and state.name and name and state.name ~= name) then
+    if state and ((state.guid and obs.guid and state.guid ~= obs.guid)
+        or (not state.guid and state.name and name and state.name ~= name)) then
         self:Remove(token)
+        state = nil
+    end
+    if not state then
         self.generation = self.generation + 1
         state = { generation = self.generation }
         self.active[token], self.count = state, self.count + 1
+        if not DIRECT[token] then self.plateCount = self.plateCount + 1 end
     end
     obs.generation = state.generation
     if behindCamera ~= nil then obs.behindCamera = behindCamera end
@@ -85,6 +88,7 @@ function Sensors:Remove(token)
     if token then self.client:ForgetToken(token) end
     if not token or not self.active[token] then return end
     self.active[token], self.count = nil, self.count - 1
+    if not DIRECT[token] then self.plateCount = self.plateCount - 1 end
     self:Call("Remove", token)
     if type(self.app.OnTokenRemoved) == "function" then
         local ok = pcall(self.app.OnTokenRemoved, self.app, token)
@@ -219,11 +223,14 @@ end
 
 function Sensors:Start()
     if self.running then return true end
+    local frame = self.frame
+    if not frame and type(self.api.CreateFrame) == "function" then
+        local ok, created = pcall(self.api.CreateFrame, "Frame")
+        if not ok or not created then self:Error("sensor_frame"); return false end
+        frame, self.frame = created, created
+    end
     self.running = true
-    if type(self.api.CreateFrame) == "function" then
-        local ok, frame = pcall(self.api.CreateFrame, "Frame")
-        if not ok or not frame then self.running = false; self:Error("sensor_frame"); return false end
-        self.frame = frame
+    if frame then
         for _, event in ipairs(EVENTS) do
             local registered = pcall(frame.RegisterEvent, frame, event)
             if not registered then self.client:Count("unsupported_events") end
@@ -242,15 +249,16 @@ function Sensors:Start()
 end
 
 function Sensors:Stop()
+    if not self.running then return end
     self.running = false
     if self.frame then
         pcall(self.frame.UnregisterAllEvents, self.frame)
         self.frame:SetScript("OnEvent", nil)
         self.frame:SetScript("OnUpdate", nil)
-        self.frame = nil
     end
     self:Clear()
-    self.client:InvalidateRangeSamples()
+    -- Spellbook changes can occur while event handling is stopped.
+    self.client:InvalidateRanges()
     self.elapsed, self.phase, self.loading = 0, 0, false
     self.refreshSamples, self.reseed, self.targetChanged, self.focusChanged = nil, nil, nil, nil
 end

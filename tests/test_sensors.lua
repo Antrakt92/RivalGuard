@@ -136,9 +136,11 @@ H.Test("sensors loading transitions clear tokens and suspend observations", func
     H.False(sensors.loading)
 end)
 
-H.Test("sensors keep ticker independent of UI visibility and stop old frames on restart", function()
+H.Test("sensors reuse one independent ticker across repeated disable and enable cycles", function()
     local sensors, units, observed, _, _, frames = fixture()
     units.target = player()
+    local invalidated = 0
+    sensors.client.InvalidateRanges = function() invalidated = invalidated + 1 end
     sensors:Start()
     local first = frames[1]
     local before = #observed
@@ -146,12 +148,20 @@ H.Test("sensors keep ticker independent of UI visibility and stop old frames on 
     H.Equal(#observed, before)
     first.scripts.OnUpdate(first, 0.15)
     H.True(#observed > before)
-    sensors:Stop()
-    H.Nil(first.scripts.OnUpdate); H.Nil(first.scripts.OnEvent); H.Nil(next(first.events))
-    H.Equal(sensors.count, 0)
-    sensors:Start()
-    H.Equal(#frames, 2); H.True(frames[2].scripts.OnUpdate ~= nil)
-    H.Nil(first.scripts.OnUpdate)
+    for cycle = 1, 32 do
+        local update, onEvent = first.scripts.OnUpdate, first.scripts.OnEvent
+        sensors:Stop(); sensors:Stop()
+        H.Nil(first.scripts.OnUpdate); H.Nil(first.scripts.OnEvent); H.Nil(next(first.events))
+        H.Equal(sensors.count, 0)
+        before = #observed
+        update(first, 1)
+        onEvent(first, "PLAYER_TARGET_CHANGED")
+        H.Equal(#observed, before)
+        H.True(sensors:Start()); H.True(sensors:Start())
+        H.Equal(#frames, 1); H.Equal(sensors.frame, first)
+        H.True(first.scripts.OnUpdate ~= nil); H.True(first.events.PLAYER_TARGET_CHANGED)
+        H.Equal(invalidated, cycle)
+    end
 end)
 
 H.Test("sensors seed only nonforbidden nameplates and never change CVars", function()
@@ -206,7 +216,7 @@ H.Test("one GUID on several tokens merges into a single engine contact", functio
     H.False(engine:Snapshot()[1].visible)
 end)
 
-H.Test("sensors bound active token tracking and reject excess slots", function()
+H.Test("sensors reserve direct token slots within the total capacity", function()
     local sensors, units = fixture()
     sensors:Start()
     for index = 1, 140 do
@@ -214,7 +224,16 @@ H.Test("sensors bound active token tracking and reject excess slots", function()
         units[token] = player("Enemy" .. index, "Player-" .. index)
         sensors:OnEvent("NAME_PLATE_UNIT_ADDED", token)
     end
-    H.Equal(sensors.count, 128); H.Nil(sensors.active.nameplate129)
+    H.Equal(sensors.count, 124); H.Nil(sensors.active.nameplate125)
+    units.target = player("Active Target", "Player-T")
+    sensors:OnEvent("PLAYER_TARGET_CHANGED")
+    H.True(sensors.active.target ~= nil)
+    units.focus = player("Focus Target", "Player-F")
+    units.mouseover = player("Mouseover Target", "Player-M")
+    units.softenemy = player("Soft Enemy", "Player-S")
+    sensors:Poll()
+    H.True(sensors.active.focus ~= nil); H.True(sensors.active.mouseover ~= nil); H.True(sensors.active.softenemy ~= nil)
+    H.Equal(sensors.count, 128)
     sensors:Remove("nameplate1")
     sensors:OnEvent("NAME_PLATE_UNIT_ADDED", "nameplate129")
     H.Equal(sensors.count, 128); H.True(sensors.active.nameplate129 ~= nil)
@@ -226,7 +245,7 @@ H.Test("sensors spread ordinary plate reads across four ticks and keep active th
     api.UnitGUID = function(token) calls = calls + 1; return units[token].guid end
     api.UnitIsUnit = function(token, other) return token == "nameplate1target" and other == "player" and targeting end
     sensors:Start()
-    for index = 1, 128 do
+    for index = 1, 124 do
         local token = "nameplate" .. index
         units[token] = player("Enemy" .. index, "Player-" .. index)
         sensors:OnEvent("NAME_PLATE_UNIT_ADDED", token)
@@ -235,14 +254,14 @@ H.Test("sensors spread ordinary plate reads across four ticks and keep active th
     local update = frames[1].scripts.OnUpdate
     for tick = 1, 4 do
         update(frames[1], 0.25)
-        H.Equal(calls, tick * 32)
+        H.Equal(calls, tick * 31)
     end
     targeting = true
     sensors:OnEvent("UNIT_TARGET", "nameplate1")
     H.True(observed[#observed].targeting)
     calls = 0
     for _ = 1, 4 do update(frames[1], 0.25) end
-    H.Equal(calls, 131)
+    H.Equal(calls, 127)
 end)
 
 H.Test("sensors refresh new and previous badge selections by the next tick", function()

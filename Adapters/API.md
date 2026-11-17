@@ -47,7 +47,8 @@ Nameplates behind the camera have a separate state when the client exposes it.
 Target and focus preference comes from readable `UnitIsUnit` comparisons. The
 quarter-second sensor tick refreshes direct tokens and plates with a confirmed
 selection or targeting threat. It spreads ordinary plates across four ticks for
-a nominal one-second refresh. Unit events remain immediate, and selection changes
+a nominal one-second refresh. The 128-token limit reserves one slot each for the
+target, focus, mouseover and soft enemy. Unit events remain immediate, and selection changes
 refresh affected plates on the next tick. A completed shard transfer clears old
 bindings before reacquiring nameplates from the client.
 Decorations must respect forbidden frames and the client's protected-operation
