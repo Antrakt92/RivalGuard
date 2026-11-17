@@ -100,6 +100,30 @@ H.Test("integrated sensors engine and UI deliver one alert with configured sound
     H.Nil(app.diagnostics.counts.errors)
 end)
 
+for _, queued in ipairs({ false, true }) do
+    H.Test("targeting banner retires when evidence ends " .. (queued and "in the queue" or "while shown"), function()
+        local state, _, app = setup()
+        if queued then
+            assert(app.db:SetList("guid:Player-AlertFirst", "watch", nil, { name = "Watched" }))
+            state:Unit("nameplate1", { guid = "Player-AlertFirst", name = "Watched", class = "ROGUE" })
+            state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+            state:Advance(0.4)
+            H.Equal(app.ui.activeBanner.kind, "watch")
+        end
+        state:Unit("player", { guid = "Player-Self" })
+        state:Unit("nameplate2", { guid = "Player-Targeting", name = "Hunter", class = "HUNTER" })
+        state:Unit("nameplate2target", { guid = "Player-Self" })
+        state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+        state:Advance(0.4)
+        if queued then H.Equal(app.ui.bannerQueue[1].kind, "targeting")
+        else H.Equal(app.ui.activeBanner.kind, "targeting") end
+        state.units.nameplate2target = nil
+        state:Fire("UNIT_TARGET", "nameplate2")
+        state:Advance(queued and 3.7 or 0.4)
+        H.Nil(app.ui.activeBanner)
+    end)
+end
+
 for _, scenario in ipairs({ { kind = "sighting", count = 1 }, { kind = "wave", count = 3 } }) do
     H.Test("a silent " .. scenario.kind .. " banner leaves sound budget for the next warning", function()
         local state, _, app = setup()

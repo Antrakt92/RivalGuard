@@ -88,6 +88,12 @@ function App:Explain(contact)
     return self.engine:ExplainView(contact.id, "sighting")
 end
 
+function App:HasTargetingEvidence(id)
+    local contact = self.engine.contacts[id]
+    return contact ~= nil and contact.targeting == true and contact.hostile == true
+        and contact.isPlayer == true and contact.dead ~= true
+end
+
 function App:Snooze(contact, seconds)
     if not contact or not contact.id then return nil, "not_observed" end
     local ok, untilTime = self.engine:ToggleContactSnooze(contact.id, seconds)

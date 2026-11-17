@@ -1103,6 +1103,11 @@ function UI.New(app)
         end
     end
 
+    local function bannerHasEvidence(item)
+        if item.preview or item.kind ~= "targeting" or not app.HasTargetingEvidence then return true end
+        return app:HasTargetingEvidence(item.id)
+    end
+
     function self:AdvanceBanner(now)
         local active = self.activeBanner
         local pausedUntil = M.Number(app.engine.pausedUntil)
@@ -1110,7 +1115,7 @@ function UI.New(app)
             self:ClearBanners()
             active = self.activeBanner
         end
-        if active and self.bannerUntil > now then
+        if active and self.bannerUntil > now and bannerHasEvidence(active) then
             local left = self.bannerUntil - now
             local alpha = self:Profile().display.reducedMotion and 1 or math.min(1, left * 2)
             if alpha ~= self.bannerAlpha then banner:SetAlpha(alpha); self.bannerAlpha = alpha end
@@ -1121,7 +1126,7 @@ function UI.New(app)
         local queue = self.bannerQueue
         while #queue > 0 do
             local item = table.remove(queue, 1)
-            if now - item.at <= BANNER_MAX_AGE then self:ShowBanner(item, now); return end
+            if now - item.at <= BANNER_MAX_AGE and bannerHasEvidence(item) then self:ShowBanner(item, now); return end
         end
     end
 
