@@ -37,7 +37,8 @@ current profile would handle that new sighting in the open world.
   to use the general unknown-class setting, as existing rules do by default.
   **Check draft** shows which rule would win for sample opponents before you save.
   Try near, far, a distance estimate across the limit, or an unknown distance.
-  Group warnings use the wave sound.
+  Group warnings use the wave sound. When the group has neither a sound nor a
+  banner, enabled individual sounds still follow the usual sound pacing.
   Below the class buttons, see the active profile and which settings block
   first sightings or returning encounters outside your personal lists.
   Turn on **Highlight opponents targeting you** to mark an available nameplate

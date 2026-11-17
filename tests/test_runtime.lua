@@ -430,6 +430,53 @@ H.Test("a grouped alert uses its configured wave cue instead of individual rule 
     H.Equal(state.sounds[1].id, RULE_SOUND_KITS.READY_CHECK)
 end)
 
+for _, wave in ipairs({ "disabled", "banner", "sound" }) do
+    H.Test("a full wave uses available outputs when the group output is " .. wave, function()
+        local state, app, profile = ruleSoundFixture()
+        profile.alerts.banner = wave == "banner"
+        profile.alerts.sounds.sighting = "ping"
+        profile.alerts.sounds.wave = wave == "sound" and "ready" or "none"
+        local hunter = soundRule("Hunter cue", "quest", 60)
+        hunter.classes = { HUNTER = true }
+        profile.rules = { hunter }
+        app:OnSettingsChanged()
+        seeSoundRuleRival(state, 1, "ROGUE")
+        seeSoundRuleRival(state, 2, "HUNTER")
+        seeSoundRuleRival(state, 3, "MAGE")
+        state:Advance(1.5)
+        H.Equal(app.engine.counters.alerts, 1)
+        H.Equal(app.engine.history[1].kind, wave == "disabled" and "sighting" or "wave")
+        H.Equal(#state.sounds, wave == "banner" and 0 or 1)
+        H.Equal(app.ui.banner:IsShown(), wave == "banner")
+        if wave == "disabled" then
+            H.Equal(state.sounds[1].id, RULE_SOUND_KITS.IG_QUEST_LIST_COMPLETE)
+            for _, contact in ipairs(app.engine:Snapshot()) do
+                local played = contact.class == "HUNTER"
+                local outcome = app:Explain(contact).lastSound
+                H.Equal(outcome.status, played and "playback_requested" or "sound_gap")
+                H.Equal(outcome.soundCue, played and "quest" or "ping")
+            end
+        elseif wave == "sound" then
+            H.Equal(state.sounds[1].id, RULE_SOUND_KITS.READY_CHECK)
+        else
+            H.Equal(app.ui.activeBanner.count, 3)
+        end
+    end)
+end
+
+H.Test("a single wave-only sighting stays silent", function()
+    local state, app, profile = ruleSoundFixture()
+    profile.alerts.banner = false
+    profile.alerts.sounds.wave = "ready"
+    app:OnSettingsChanged()
+    seeSoundRuleRival(state, 1)
+    state:Advance(1.5)
+    H.Equal(app.engine.counters.alerts, 0)
+    H.Equal(#state.sounds, 0)
+    H.False(app.ui.banner:IsShown())
+    H.Equal(#app.engine.history, 0)
+end)
+
 H.Test("a listed-only rule cue warns for a known Watch identity and keeps ordinary status quiet", function()
     local state, app, profile = ruleSoundFixture()
     profile.alerts.banner = false

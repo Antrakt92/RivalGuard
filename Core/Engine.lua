@@ -804,19 +804,22 @@ function E:Emit(decision, now)
 end
 
 function E:EmitOrdinary(group, now)
-    if #group < self.profile.alerts.waveThreshold then
-        if #group > 1 then table.sort(group, strongerAlert) end
-        for _, item in ipairs(group) do self:Emit(item.decision, now) end
-        return
+    if #group >= self.profile.alerts.waveThreshold then
+        local classes, sound, banner = {}, false, false
+        for _, item in ipairs(group) do
+            local decision = item.decision
+            local class = decision.contact.class or "UNKNOWN"
+            classes[class] = (classes[class] or 0) + 1
+            sound, banner = sound or decision.waveSound, banner or decision.banner
+        end
+        if sound or banner then
+            self:Emit({ kind = "wave", count = #group, classes = classes, priority = 35, sound = sound, banner = banner, reason = "multiple_sightings" }, now)
+            return
+        end
     end
-    local classes, sound, banner = {}, false, false
-    for _, item in ipairs(group) do
-        local decision = item.decision
-        local class = decision.contact.class or "UNKNOWN"
-        classes[class] = (classes[class] or 0) + 1
-        sound, banner = sound or decision.waveSound, banner or decision.banner
-    end
-    self:Emit({ kind = "wave", count = #group, classes = classes, priority = 35, sound = sound, banner = banner, reason = "multiple_sightings" }, now)
+    -- A group with both outputs off cannot replace enabled individual cues.
+    if #group > 1 then table.sort(group, strongerAlert) end
+    for _, item in ipairs(group) do self:Emit(item.decision, now) end
 end
 
 local function usesRangeRules(profile)
