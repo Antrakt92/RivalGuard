@@ -150,7 +150,7 @@ function App:Explain(contact)
         if not decision then result.reason = reason; return result end
         if not decision.sound and not decision.banner then result.reason = "wave_only"; return result end
         result.allowed, result.reason = true, decision.reason
-        result.sound, result.banner = decision.sound, decision.banner
+        result.sound, result.banner, result.soundCue = decision.sound, decision.banner, decision.soundCue
         return result
     end
     local result = self.engine:ExplainView(contact.id, "sighting")

@@ -66,13 +66,18 @@ elseif view == "details" and page == "sample" then
     app.ui:Select(app.ui.previewContacts[2])
 elseif view == "details" then app.ui:Select(app.engine:Snapshot()[1])
 elseif view == "explanation" then
-    if page == "sound" then
+    if page == "sound" or page == "sound-changed" then
         app.engine:Clear()
         state.api.PlaySound = function() return false end
         local name = locale == "ruRU" and "Пример противника" or "Example opponent"
         state:Unit("nameplate80", { guid = "Player-SoundPreview", name = name, class = "ROGUE", hostile = true, isPlayer = true })
         state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate80")
         state:Advance(1.2)
+        if page == "sound-changed" then
+            local alerts = app.db:GetProfile().alerts
+            alerts.sounds.sighting = "warning"
+            app:ProfileChanged()
+        end
     end
     app.ui:Select(app.engine:Snapshot()[1])
     app.ui:ShowExplanation()

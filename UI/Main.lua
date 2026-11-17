@@ -1685,6 +1685,13 @@ function UI.New(app)
             and (not contact.sources or not contact.sources.journal) and M.Text(contact.id, "", 256) ~= ""
     end
 
+    local function withSoundCue(text, cue)
+        local key = M.Text(cue, "")
+        local label = RG.Defaults.soundLabels[key]
+        if not label or key == "none" then return text end
+        return (text ~= "" and text .. "\n" or "") .. self:F("soundCueEvidence", self:T(label))
+    end
+
     function self:ShowExplanation()
         if not self.explanationFrame then
             local frame = self:Window("RivalGuardExplanation", UIParent)
@@ -1728,15 +1735,16 @@ function UI.New(app)
             elseif result.sound == true then output = "explanationSoundOnly"
             elseif result.banner == true then output = "explanationBannerOnly" end
         end
-        paintText(frame.outputs, output and self:T(output) or "")
+        paintText(frame.outputs, withSoundCue(output and self:T(output) or "", result.soundCue))
         local lastSound = type(result.lastSound) == "table" and result.lastSound or nil
         local soundEvent = lastSound and SOUND_EVENT_KEYS[lastSound.kind]
         local soundStatus = lastSound and SOUND_STATUS_KEYS[lastSound.status]
+        local lastCue = lastSound and lastSound.soundCue
         local showSound = not preview and not self.selectedFromJournal and soundEvent ~= nil and soundStatus ~= nil
         paintShown(frame.lastSoundHeading, showSound)
         paintShown(frame.lastSound, showSound)
         paintText(frame.lastSoundHeading, showSound and self:F("lastSoundHeading", self:T(soundEvent)) or "")
-        paintText(frame.lastSound, showSound and self:T(soundStatus) or "")
+        paintText(frame.lastSound, showSound and withSoundCue(self:T(soundStatus), lastCue) or "")
         local height = showSound and 370 or 290
         if frame.soundSectionShown ~= showSound then
             frame:SetHeight(height)

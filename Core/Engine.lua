@@ -250,6 +250,7 @@ function E:ExplainView(id, event)
     if self.pausedUntil and now < self.pausedUntil then result.reason = "paused"; return result end
     result.kind = decision.kind
     if not decision.sound and not decision.banner then result.reason = "wave_only"; return result end
+    result.soundCue = decision.soundCue
     local at = self.cooldowns[contact.id .. ":" .. (decision.dedupKey or decision.kind)]
     if at and now - at < decision.cooldown then result.reason = "cooldown"; return result end
     result.allowed, result.reason, result.priority = true, decision.reason, decision.priority
@@ -710,37 +711,41 @@ end
 function E:LastSoundOutcome(id)
     local contact = self.contacts[id]
     local outcome = contact and contact.soundOutcome
-    if outcome then return { kind = outcome.kind, status = outcome.status } end
+    if outcome then return { kind = outcome.kind, status = outcome.status, soundCue = outcome.soundCue } end
 end
 
-local function rememberSoundOutcome(engine, decision, status)
+local function rememberSoundOutcome(engine, decision, status, soundCue)
     local contact = decision.contact and engine.contacts[decision.contact.id]
     if not contact then return end
     engine.soundOutcomeSequence = engine.soundOutcomeSequence + 1
     local outcome = contact.soundOutcome or {}
     outcome.kind, outcome.status, outcome.sequence = decision.kind, status, engine.soundOutcomeSequence
+    outcome.soundCue = status ~= "not_requested" and soundCue or nil
     contact.soundOutcome = outcome
 end
 
 function E:Emit(decision, now)
     local soundStatus = "not_requested"
+    local cue
     if decision.sound then
+        cue = decision.soundCue or self.profile.alerts.sounds[decision.kind]
         local gapReady = now >= self.lastSound + self.profile.alerts.soundGap
         -- An urgent cue may interrupt the ordinary cooldown once. Recording
         -- its priority closes the exception until the full gap passes again.
         local escalation = decision.priority >= URGENT_PRIORITY and self.lastSoundPriority < URGENT_PRIORITY
             and now >= self.lastSound + SOUND_ESCALATION_GAP
-        if (decision.soundCue or self.profile.alerts.sounds[decision.kind]) == "none" then
+        if cue == "none" then
             decision.sound = false
         elseif not (gapReady or escalation) then
             decision.sound = false
             soundStatus = "sound_gap"
         else
             self.lastSound, self.lastSoundPriority = now, decision.priority
+            decision.soundCue = cue
         end
     end
     if not decision.sound and not decision.banner then
-        if soundStatus == "sound_gap" then rememberSoundOutcome(self, decision, soundStatus) end
+        if soundStatus == "sound_gap" then rememberSoundOutcome(self, decision, soundStatus, cue) end
         return false
     end
     self.counters.alerts = self.counters.alerts + 1
@@ -748,7 +753,7 @@ function E:Emit(decision, now)
     local requestedSound = decision.sound
     local accepted = self.onAlert(decision)
     if requestedSound then soundStatus = accepted == true and "playback_requested" or "playback_unconfirmed" end
-    rememberSoundOutcome(self, decision, soundStatus)
+    rememberSoundOutcome(self, decision, soundStatus, cue)
     return true
 end
 

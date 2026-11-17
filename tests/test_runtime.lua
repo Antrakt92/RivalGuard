@@ -927,9 +927,13 @@ H.Test("Why shows a live contact's last sound outcome separately from current al
         H.True(type(result.lastSound) == "table")
         H.Equal(result.lastSound.kind, "sighting")
         H.Equal(result.lastSound.status, status)
+        local cue = status ~= "not_requested" and "ping" or nil
+        H.Equal(result.lastSound.soundCue, cue)
         ui:Select(current)
         ui:ShowExplanation()
-        H.Equal(ui.explanationFrame.lastSound:GetText(), ui:T(key))
+        local expected = ui:T(key)
+        if cue then expected = expected .. "\n" .. ui:F("soundCueEvidence", ui:T("soundPing")) end
+        H.Equal(ui.explanationFrame.lastSound:GetText(), expected)
         H.True(ui.explanationFrame.lastSoundHeading:IsShown())
         H.Equal(ui.explanationFrame.lastSoundHeading:GetText(), ui:F("lastSoundHeading", ui:T("eventSighting")))
         return result
@@ -973,9 +977,71 @@ H.Test("Why shows a live contact's last sound outcome separately from current al
     H.Nil(report:find("Private Sound", 1, true))
     H.Nil(report:find("Player-SoundOutcome-", 1, true))
     H.Nil(report:find("lastSound=", 1, true))
+    H.Nil(report:find("soundCue", 1, true))
     for _, status in ipairs({ "not_requested", "sound_gap", "playback_requested", "playback_unconfirmed" }) do
         H.Nil(report:find(status, 1, true))
     end
+end)
+
+H.Test("Why shows current custom and inherited cues without rewriting the last cue", function()
+    local state, app, profile = ruleSoundFixture()
+    local ui = app.ui
+    profile.alerts.sounds.sighting = "ping"
+    profile.alerts.cooldown = 0
+    app:OnSettingsChanged()
+    local function contact(index)
+        local identity = "guid:Player-RuleCue" .. index
+        for _, view in ipairs(app.engine:Snapshot()) do if view.identity == identity then return view end end
+        error("missing sound cue contact")
+    end
+    local function show(index, current, currentLabel, historical, historicalLabel)
+        local live = contact(index)
+        local result = app:Explain(live)
+        H.True(result.allowed); H.True(result.sound)
+        H.Equal(result.soundCue, current)
+        ui:Select(live)
+        ui:ShowExplanation()
+        local frame = ui.explanationFrame
+        H.Equal(frame.outputs:GetText(), ui:T("explanationSoundBanner") .. "\n" .. ui:F("soundCueEvidence", ui:T(currentLabel)))
+        if historical then
+            H.Equal(result.lastSound.soundCue, historical)
+            H.Equal(result.lastSound.status, "playback_requested")
+            H.Equal(frame.lastSound:GetText(), ui:T("lastSoundRequested") .. "\n" .. ui:F("soundCueEvidence", ui:T(historicalLabel)))
+        else
+            H.Nil(result.lastSound)
+            H.False(frame.lastSoundHeading:IsShown())
+        end
+    end
+
+    seeSoundRuleRival(state, 1)
+    show(1, "ping", "soundPing")
+    state:Advance(1.25)
+    H.Equal(state.sounds[1].id, RULE_SOUND_KITS.MAP_PING)
+    show(1, "ping", "soundPing", "ping", "soundPing")
+
+    local custom = soundRule("Quest signal", "quest", 90)
+    custom.cooldown = 0
+    profile.rules = { custom }
+    app:OnSettingsChanged()
+    show(1, "quest", "soundQuest", "ping", "soundPing")
+    state.clock.Advance(2)
+    seeSoundRuleRival(state, 2)
+    show(2, "quest", "soundQuest")
+    state:Advance(0.5)
+    H.Equal(state.sounds[2].id, RULE_SOUND_KITS.IG_QUEST_LIST_COMPLETE)
+
+    custom.soundCue = "warning"
+    profile.locale = "ruRU"
+    app:OnSettingsChanged()
+    show(2, "warning", "soundWarning", "quest", "soundQuest")
+
+    profile.alerts.sound = false
+    app:OnSettingsChanged()
+    local muted = app:Explain(contact(2))
+    H.Nil(muted.soundCue)
+    H.Equal(muted.lastSound.soundCue, "quest")
+    H.Equal(ui.explanationFrame.outputs:GetText(), ui:T("explanationBannerOnly"))
+    H.Equal(#state.sounds, 2)
 end)
 
 H.Test("Why leaves per-contact sound outcome absent on waves previews and saved journal selections", function()
@@ -1006,7 +1072,8 @@ H.Test("Why leaves per-contact sound outcome absent on waves previews and saved 
     end
     ui:OpenSettings("journal")
     H.Equal(ui.journalRows[1].contact.identity, identity)
-    H.Nil(app:Explain(ui.journalRows[1].contact).lastSound)
+    local recent = app:Explain(ui.journalRows[1].contact)
+    H.Nil(recent.lastSound); H.Nil(recent.soundCue)
     ui.journalRows[1]:Click()
     ui:Refresh()
     assertNoSection()
@@ -1014,15 +1081,19 @@ H.Test("Why leaves per-contact sound outcome absent on waves previews and saved 
     assert(app.db:SetList(identity, "watch", nil, { name = "Rival 4" }))
     ui.journalPersonal:Click()
     H.True(ui.journalRows[1].contact.savedOnly)
-    H.Nil(app:Explain(ui.journalRows[1].contact).lastSound)
+    local saved = app:Explain(ui.journalRows[1].contact)
+    H.Nil(saved.lastSound); H.Nil(saved.soundCue)
     ui.journalRows[1]:Click()
     assertNoSection()
 
     app:Demo()
     ui.rows[1]:Click()
     H.True(ui.selected.preview)
-    H.Nil(app:Explain(ui.selected).lastSound)
+    local sample = app:Explain(ui.selected)
+    H.Equal(sample.soundCue, "ping")
+    H.Nil(sample.lastSound)
     assertNoSection()
+    H.Equal(ui.explanationFrame.outputs:GetText(), ui:T("explanationSoundBanner") .. "\n" .. ui:F("soundCueEvidence", ui:T("soundPing")))
 end)
 
 H.Test("cosmetic streamer setting keeps a queued encounter and applies redaction at delivery", function()
