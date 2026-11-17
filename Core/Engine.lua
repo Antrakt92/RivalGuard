@@ -791,19 +791,41 @@ function E:CountVisible()
     return count
 end
 
+local function contactBefore(a, b)
+    if a.watched ~= b.watched then return a.watched end
+    if a.visible ~= b.visible then return a.visible end
+    if a.lastSeen ~= b.lastSeen then return a.lastSeen > b.lastSeen end
+    return a.id < b.id
+end
+
+local function displayedView(engine, contact, now)
+    if not contact then return nil end
+    local view = engine:View(contact, now)
+    if Rules.Display(engine.profile, view) then return view end
+end
+
+function E:SelectedContact(id, identity)
+    local direct = self.contacts[id]
+    local indexed = identity and self.contacts[self.identities[identity]]
+    local now = self:Now()
+    local view = displayedView(self, direct, now)
+    -- The index can contain a name alias. Only a canonical identity is a
+    -- match for a card that outlives its original contact ID.
+    if indexed and indexed ~= direct and indexed.identity == identity then
+        local fallback = displayedView(self, indexed, now)
+        if fallback and (not view or contactBefore(fallback, view)) then return fallback end
+    end
+    return view
+end
+
 function E:Snapshot()
     local result = {}
     local now = self:Now()
     for _, contact in pairs(self.contacts) do
-        local view = self:View(contact, now)
-        if Rules.Display(self.profile, view) then result[#result + 1] = view end
+        local view = displayedView(self, contact, now)
+        if view then result[#result + 1] = view end
     end
-    table.sort(result, function(a, b)
-        if a.watched ~= b.watched then return a.watched end
-        if a.visible ~= b.visible then return a.visible end
-        if a.lastSeen ~= b.lastSeen then return a.lastSeen > b.lastSeen end
-        return a.id < b.id
-    end)
+    table.sort(result, contactBefore)
     return result
 end
 

@@ -17,6 +17,75 @@ local function fixture(profile, lists)
     return engine, observe, clock, alerts, encounters, RG
 end
 
+local function selectLikeSnapshot(engine, id, identity)
+    local expected
+    for _, view in ipairs(engine:Snapshot()) do
+        if view.id == id or (identity and view.identity == identity) then
+            expected = view
+            break
+        end
+    end
+    local selected = engine:SelectedContact(id, identity)
+    H.Equal(selected and selected.id, expected and expected.id)
+    return selected
+end
+
+H.Test("selected contact follows identity promotion and reattachment by canonical identity", function()
+    local engine, observe, clock = fixture()
+    local anonymous = observe("target", { class = "ROGUE" })
+    H.Nil(anonymous.identity)
+    local known = observe("target", { guid = "Player-A", name = "Alpha", class = "ROGUE" })
+    H.Equal(known.id, anonymous.id)
+    H.Equal(selectLikeSnapshot(engine, anonymous.id).identity, known.identity)
+
+    engine:Drop(known.id)
+    local returned = observe("nameplate1", {
+        guid = "Player-A", name = "Alpha", class = "ROGUE", rangeMin = 12, rangeMax = 12, rangeEvidence = "exact",
+    })
+    H.True(returned.id ~= known.id)
+    H.Nil(selectLikeSnapshot(engine, known.id))
+    local selected = selectLikeSnapshot(engine, known.id, known.identity)
+    H.Equal(selected.id, returned.id)
+    H.Equal(selected.rangeMax, 12)
+    selected.sources.test = nil
+    clock.Advance(3)
+    local refreshed = selectLikeSnapshot(engine, known.id, known.identity)
+    H.True(refreshed.sources.test)
+    H.Nil(refreshed.rangeMax)
+    H.Equal(refreshed.rangeEvidence, "unknown")
+end)
+
+H.Test("selected contact excludes a former canonical name after it becomes an alias", function()
+    local engine, observe = fixture()
+    local known = observe("nameplate1", { guid = "Player-A", class = "ROGUE" })
+    local nameOnly = observe("target", { name = "Alpha", realm = "Realm", class = "ROGUE" })
+    H.True(nameOnly.id ~= known.id)
+    H.Equal(selectLikeSnapshot(engine, nil, nameOnly.identity).id, nameOnly.id)
+
+    local merged = observe("target", { guid = "Player-A", name = "Alpha", realm = "Realm", class = "ROGUE" })
+    H.Equal(merged.id, known.id)
+    H.Equal(engine.identities[nameOnly.identity], known.id)
+    H.Nil(selectLikeSnapshot(engine, nameOnly.id, nameOnly.identity))
+    H.Equal(selectLikeSnapshot(engine, nameOnly.id, known.identity).id, known.id)
+end)
+
+H.Test("selected contact preserves snapshot filter and competing match order", function()
+    local engine, observe = fixture()
+    local rogue = observe("nameplate1", { guid = "Player-A", class = "ROGUE" })
+    local hunter = observe("nameplate2", { guid = "Player-B", class = "HUNTER" })
+    H.True(rogue.id < hunter.id)
+    H.Equal(rogue.lastSeen, hunter.lastSeen)
+    H.Equal(selectLikeSnapshot(engine, hunter.id, rogue.identity).id, rogue.id)
+    engine.lists[hunter.identity] = { kind = "watch" }
+    H.Equal(selectLikeSnapshot(engine, hunter.id, rogue.identity).id, hunter.id)
+
+    engine.profile.display.classes = { ROGUE = true }
+    H.Nil(selectLikeSnapshot(engine, hunter.id, hunter.identity))
+    H.Equal(selectLikeSnapshot(engine, hunter.id, rogue.identity).id, rogue.id)
+    engine.lists[rogue.identity] = { kind = "ignore" }
+    H.Nil(selectLikeSnapshot(engine, hunter.id, rogue.identity))
+end)
+
 H.Test("merging an anonymous contact retains its already known class and level", function()
     local engine, observe = fixture()
     observe("target", { class = "ROGUE", level = 60 })

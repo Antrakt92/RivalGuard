@@ -195,7 +195,7 @@ H.Test("hidden Nearby skips row production while minimap census and alerts stay 
     H.Equal(ui.rows[1].contact.identity, "guid:Player-Count-1")
 end)
 
-H.Test("an open contact card refreshes while Nearby is hidden without building rows", function()
+H.Test("an open contact card refreshes in a crowd without building a hidden Nearby list", function()
     local state, RG, app = setup()
     local unit = { guid = "Player-HiddenDetails", name = "First name", realm = "FixtureRealm", class = "ROGUE", hostile = true, isPlayer = true }
     state:Unit("nameplate1", unit)
@@ -204,20 +204,65 @@ H.Test("an open contact card refreshes while Nearby is hidden without building r
     local ui = app.ui
     ui.rows[1]:Click()
     H.Equal(ui.detailsFrame.title:GetText(), "First name-FixtureRealm")
-    local rowCalls, rows = 0, RG.UIModel.Rows
+    local snapshotCalls, rowCalls, snapshot, rows = 0, 0, app.engine.Snapshot, RG.UIModel.Rows
+    app.engine.Snapshot = function(engine)
+        snapshotCalls = snapshotCalls + 1
+        return snapshot(engine)
+    end
     RG.UIModel.Rows = function(...)
         rowCalls = rowCalls + 1
         return rows(...)
     end
     ui:Toggle()
     H.False(ui.frame:IsShown())
+    for index = 2, 96 do
+        local token = "nameplate" .. index
+        state:Unit(token, { guid = "Player-HiddenCrowd-" .. index, name = "Crowd " .. index,
+            class = "HUNTER", hostile = true, isPlayer = true })
+        state:Fire("NAME_PLATE_UNIT_ADDED", token)
+    end
+    local observed = app.engine.counters.observations
+    app.sensors:Poll()
+    H.Equal(app.engine.counters.observations - observed, 96)
+    local firstSeen = ui.selected.lastSeen
     unit.name = "Updated name"
+    state.clock.Advance(0.5)
     state:Fire("UNIT_NAME_UPDATE", "nameplate1")
-    state:Advance(0.5)
+    ui:Refresh()
     H.True(ui.detailsFrame:IsShown())
     H.Equal(ui.detailsFrame.title:GetText(), "Updated name-FixtureRealm")
+    H.True(ui.selected.lastSeen > firstSeen)
     H.False(ui.selectedOutside)
+    H.Equal(ui.visibleCount, 96)
     H.Equal(rowCalls, 0)
+    H.Equal(snapshotCalls, 0)
+
+    assert(app.db:SetList("guid:Player-HiddenDetails", "watch", "Saved note",
+        { name = "Saved rival", class = "ROGUE" }))
+    ui:OpenSettings("journal")
+    ui.journalPersonal:Click()
+    ui.journalRows[1]:Click()
+    ui:Refresh()
+    H.True(ui.selected.savedOnly)
+    H.Equal(ui.detailsFrame.title:GetText(), "Saved rival")
+    H.Equal(ui.detailsFrame.note:GetText(), "Saved note")
+    H.False(ui.detailsFrame.locate:IsShown())
+    H.Equal(rowCalls, 0)
+    H.Equal(snapshotCalls, 0)
+
+    app:Demo()
+    H.True(ui.frame:IsShown())
+    H.True(ui.selected.savedOnly)
+    H.True(rowCalls > 0)
+    H.Equal(snapshotCalls, 0)
+    ui.rows[1]:Click()
+    H.True(ui.selected.preview)
+    H.False(ui.detailsFrame.locate:IsShown())
+    state.clock.Advance(16)
+    ui:Refresh()
+    H.False(ui.frame:IsShown())
+    H.False(ui.detailsFrame:IsShown())
+    H.Equal(snapshotCalls, 0)
 end)
 
 H.Test("contact snooze removes only its live alerts and resumes without persisting a setting", function()

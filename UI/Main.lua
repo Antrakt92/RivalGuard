@@ -1069,7 +1069,7 @@ function UI.New(app)
         local detailsShown = self.detailsFrame and self.detailsFrame:IsShown() and self.selected
         local liveDetailsShown = detailsShown and not self.selected.preview
         local liveSnapshot
-        if nearbyShown and not preview or liveDetailsShown then liveSnapshot = app.engine:Snapshot() end
+        if nearbyShown and not preview then liveSnapshot = app.engine:Snapshot() end
         local untilTime = M.Number(app.engine.pausedUntil)
         local paused = untilTime ~= nil and untilTime > now
         local needsStatus = self.statusAt == nil or now - self.statusAt >= 1
@@ -1157,8 +1157,12 @@ function UI.New(app)
         if self.dialogs then self.dialogs:Refresh() end
         if liveDetailsShown then
             local current
-            for _, contact in ipairs(liveSnapshot) do
-                if contact.id == self.selected.id or self.selected.identity and contact.identity == self.selected.identity then current = contact break end
+            if liveSnapshot then
+                for _, contact in ipairs(liveSnapshot) do
+                    if contact.id == self.selected.id or self.selected.identity and contact.identity == self.selected.identity then current = contact break end
+                end
+            else
+                current = app.engine:SelectedContact(self.selected.id, self.selected.identity)
             end
             if current and not self.selected.savedOnly then self.selected = current end
             self.selectedOutside = current == nil
