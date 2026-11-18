@@ -5,6 +5,10 @@ DB.__index = DB
 
 local MAX_PROFILES, MAX_LISTS = 20, 1000
 local function profileName(name) return U.Text(name, 64) end
+local function identityKey(value)
+    local identity = U.Text(value, 256)
+    if identity and (identity:match("^guid:.+$") or identity:match("^name:.+$")) then return identity end
+end
 local RULE_CONTEXTS = { any = true, world = true, battleground = true, arena = true, instance = true }
 local RULE_LISTS = { any = true, listed = true, unlisted = true }
 local RULE_POLICIES = { possible = true, confirmed = true }
@@ -27,17 +31,19 @@ local function positions(value)
         count = count + 1
         if count > 8 or not U.Text(key, 32) or type(pos) ~= "table" then return nil end
         if not points[pos.point] or not U.IsFinite(pos.x) or not U.IsFinite(pos.y) or math.abs(pos.x) > 10000 or math.abs(pos.y) > 10000 then return nil end
-        result[key] = { point = pos.point, relativePoint = points[pos.relativePoint] and pos.relativePoint or pos.point, x = pos.x, y = pos.y }
+        local relative = pos.relativePoint or pos.relative
+        result[key] = { point = pos.point, relativePoint = points[relative] and relative or pos.point, x = pos.x, y = pos.y }
     end
     return result
 end
 
 local function ruleArray(value, strict)
     if type(value) ~= "table" then return nil end
-    local result, count = {}, 0
+    local result, count, highest = {}, 0, 0
     for index, rule in pairs(value) do
         count = count + 1
         if type(index) ~= "number" or index % 1 ~= 0 or index < 1 or index > 32 or type(rule) ~= "table" then return nil end
+        highest = math.max(highest, index)
         if strict then
             local allowed = { name = true, enabled = true, priority = true, classes = true, event = true, action = true, sound = true, banner = true, cooldown = true,
                 context = true, list = true, range = true, rangePolicy = true, rangeUnknown = true, soundCue = true, knownClassOnly = true,
@@ -84,7 +90,14 @@ local function ruleArray(value, strict)
         if clean.action ~= "alert" and clean.action ~= "suppress" then return nil end
         result[index] = clean
     end
-    if count > 32 or #result ~= count then return nil end
+    if highest ~= count then
+        if strict then return nil end
+        local compact = {}
+        for index = 1, highest do
+            if result[index] then compact[#compact + 1] = result[index] end
+        end
+        return compact
+    end
     return result
 end
 
@@ -238,7 +251,7 @@ function DB.New(raw)
         for _, item in ipairs(raw.journal) do
             if #self.root.journal >= 1000 then break end
             if type(item) == "table" and U.IsFinite(item.lastSeen) and item.lastSeen > 0 then
-                local identity, name = U.Text(item.identity, 256), U.Text(item.name, 160)
+                local identity, name = identityKey(item.identity), U.Text(item.name, 160)
                 if identity and name then
                     local record = self.journalByIdentity[identity]
                     local count = math.floor(U.Clamp(item.encounters, 1, 1000000, 1))
@@ -319,7 +332,6 @@ function DB:SetProfile(name)
     self.root.activeProfile = name
     return self:GetProfile()
 end
-DB.UseProfile = DB.SetProfile
 
 function DB:RenameProfile(name, newName)
     local profile = self.root.profiles[name]
@@ -361,8 +373,8 @@ function DB:ResetProfile()
 end
 
 function DB:SetList(identity, kind, note, metadata)
-    identity = U.Text(identity, 256)
-    if not identity or not (identity:match("^guid:") or identity:match("^name:")) then return nil, "unknown_identity" end
+    identity = identityKey(identity)
+    if not identity then return nil, "unknown_identity" end
     if kind ~= nil and kind ~= "watch" and kind ~= "avoid" and kind ~= "ignore" and kind ~= "note" then return nil, "invalid_list" end
     local savedNote = kind and U.Text(note, 512)
     if kind and note ~= nil and not savedNote and (type(note) ~= "string" or #note > 512 or not note:match("^ *$")) then
@@ -416,14 +428,15 @@ function DB:ImportProfile(name, text)
 end
 
 function DB:Record(contact, epoch, zone)
-    if not contact.identity or not contact.name or not U.IsFinite(epoch) or epoch <= 0 then return false end
+    local identity = identityKey(contact.identity)
+    if not identity or not contact.name or not U.IsFinite(epoch) or epoch <= 0 then return false end
     local profile = self:GetProfile()
     if profile.retention.journalDays == 0 then return false end
     local mode = profile.retention.journalMode
     if mode == "watched" and not contact.watched then return false end
     if mode == "threats" and not contact.watched and not contact.targeting and contact.stealth ~= "confirmed" then return false end
     local journal, lookup = self.root.journal, self.journalByIdentity
-    local record = lookup[contact.identity]
+    local record = lookup[identity]
     -- The wall clock can move backwards. Count the encounter without
     -- replacing newer timestamps or their associated display evidence.
     if record and epoch < record.lastSeen then
@@ -434,8 +447,8 @@ function DB:Record(contact, epoch, zone)
     if record then
         table.remove(journal, encounterPosition(journal, record))
     else
-        record = { identity = contact.identity, encounters = 0 }
-        lookup[contact.identity] = record
+        record = { identity = identity, encounters = 0 }
+        lookup[identity] = record
     end
     record.name, record.class, record.lastSeen = contact.name, contact.class, epoch
     record.zone = U.Text(zone, 160)

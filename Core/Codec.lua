@@ -2,6 +2,17 @@ local _, RG = ...
 local C = RG.Register("Codec", {})
 local LIMIT_BYTES, LIMIT_NODES, LIMIT_DEPTH = 65536, 4096, 8
 
+local function decimalMark()
+    return string.format("%.1f", 1.5):match("^1(.+)5$") or "."
+end
+
+local function replaceDecimal(text, from, to)
+    if from == to then return text end
+    local first, last = text:find(from, 1, true)
+    if not first then return text end
+    return text:sub(1, first - 1) .. to .. text:sub(last + 1)
+end
+
 local function checksum(text)
     local a, b = 1, 0
     for i = 1, #text do
@@ -13,6 +24,7 @@ end
 
 function C.Encode(value)
     local nodes, active = 0, {}
+    local decimal = decimalMark()
     local function encode(item, depth)
         nodes = nodes + 1
         if nodes > LIMIT_NODES or depth > LIMIT_DEPTH then error("data_too_complex", 0) end
@@ -20,7 +32,7 @@ function C.Encode(value)
         if kind == "boolean" then return item and "t" or "f" end
         if kind == "number" then
             if not RG.Util.IsFinite(item) then error("invalid_number", 0) end
-            local text = string.format("%.17g", item)
+            local text = replaceDecimal(string.format("%.17g", item), decimal, ".")
             return "n" .. #text .. ":" .. text
         end
         if kind == "string" then
@@ -65,6 +77,7 @@ function C.Decode(text)
     local body = hex:gsub("..", function(byte) return string.char(tonumber(byte, 16)) end)
     if checksum(body) ~= digest:lower() then return nil, "checksum_mismatch" end
     local position, nodes = 1, 0
+    local decimal = decimalMark()
     local function length()
         local start, stop, digits = body:find("^(%d+):", position)
         if not start or #digits > 5 then error("invalid_length", 0) end
@@ -88,7 +101,7 @@ function C.Decode(text)
             position = position + count
             if tag == "s" then return value end
             if not value:match("^[%+%-]?%d*%.?%d+[eE]?[%+%-]?%d*$") then error("invalid_number", 0) end
-            local number = tonumber(value)
+            local number = tonumber(replaceDecimal(value, ".", decimal))
             if not number or not RG.Util.IsFinite(number) then error("invalid_number", 0) end
             return number
         end

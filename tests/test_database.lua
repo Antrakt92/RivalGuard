@@ -172,6 +172,39 @@ H.Test("strict profile imports reject unknown fields malformed rules and unsafe 
     rejected(function(p) p.display.highlightTargeting = "true" end)
 end)
 
+H.Test("sparse rules fail strict transfer and are recovered in saved order", function()
+    local RG = addon()
+    local profile = RG.Defaults.NewProfile()
+    profile.rules = {
+        [1] = { name = "One" }, [2] = { name = "Two" },
+        [4] = { name = "Four" }, [6] = { name = "Six" },
+    }
+    local raw = { schemaVersion = RG.schemaVersion, profiles = { Default = profile } }
+    local db = RG.Database.New(raw)
+    local encoded = assert(RG.Codec.Encode({ format = "RivalGuardProfile", schemaVersion = RG.schemaVersion, profile = profile }))
+    local rejected, reason = db:PreviewImport(encoded)
+    H.Nil(rejected); H.Equal(reason, "invalid_rules")
+    local rules = db:GetProfile().rules
+    H.Equal(#rules, 4)
+    H.Equal(rules[1].name, "One"); H.Equal(rules[2].name, "Two")
+    H.Equal(rules[3].name, "Four"); H.Equal(rules[4].name, "Six")
+    H.Equal(raw.profiles.Default.rules[4].name, "Four")
+end)
+
+H.Test("legacy and current relative anchors survive profile load and transfer", function()
+    local RG = addon()
+    local profile = RG.Defaults.NewProfile()
+    profile.positions.nearby = { point = "TOPLEFT", relative = "BOTTOMRIGHT", x = 18, y = 34 }
+    profile.positions.alert = { point = "TOP", relative = "LEFT", relativePoint = "RIGHT", x = 40, y = 20 }
+    local db = RG.Database.New({ schemaVersion = RG.schemaVersion, profiles = { Default = profile } })
+    local nearby = db:GetProfile().positions.nearby
+    H.Equal(nearby.point, "TOPLEFT"); H.Equal(nearby.relativePoint, "BOTTOMRIGHT")
+    H.Equal(nearby.x, 18); H.Equal(nearby.y, 34)
+    H.Equal(db:GetProfile().positions.alert.relativePoint, "RIGHT")
+    local imported = assert(db:PreviewImport(assert(db:ExportProfile())))
+    H.Equal(imported.positions.nearby.relativePoint, "BOTTOMRIGHT")
+end)
+
 H.Test("watchlists validate durable identities and notes without partial updates", function()
     local RG = addon()
     local db = RG.Database.New()
@@ -184,6 +217,24 @@ H.Test("watchlists validate durable identities and notes without partial updates
     H.Equal(db:GetList()["name:Somebody-Realm"].note, "Careful")
     H.True(db:SetList("name:Somebody-Realm", nil))
     H.Nil(db:GetList()["name:Somebody-Realm"])
+end)
+
+H.Test("personal lists and the journal reject identities with no owner", function()
+    local RG = addon()
+    local db = RG.Database.New({
+        schemaVersion = RG.schemaVersion,
+        lists = { ["guid:"] = { kind = "watch" } },
+        journal = { { identity = "name:", name = "Unknown", lastSeen = 100 } },
+    })
+    H.Nil(next(db:GetList()))
+    H.Equal(#db:GetJournal(), 0)
+    for _, identity in ipairs({ "guid:", "name:   " }) do
+        local result, reason = db:SetList(identity, "watch")
+        H.Nil(result); H.Equal(reason, "unknown_identity")
+        H.False(db:Record({ identity = identity, name = "Unknown" }, 100))
+    end
+    H.Nil(next(db:GetList()))
+    H.Equal(#db:GetJournal(), 0)
 end)
 
 H.Test("blank notes do not use capacity and clearing a note frees its slot", function()

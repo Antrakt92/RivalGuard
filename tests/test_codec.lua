@@ -31,6 +31,31 @@ H.Test("codec has canonical ordering independent of insertion order", function()
     H.Equal(C.Encode(first), C.Encode(second))
 end)
 
+H.Test("codec decimal format is independent of the process numeric locale", function()
+    local C = addon().Codec
+    local localeString = setmetatable({}, { __index = string })
+    function localeString.format(format, ...)
+        local text = string.format(format, ...)
+        if format == "%.17g" or format == "%.1f" then return text:gsub("%.", ",") end
+        return text
+    end
+    local env = setmetatable({ string = localeString, tonumber = function(text, base)
+        if text:find(".", 1, true) then return nil end
+        return tonumber((text:gsub(",", ".")), base)
+    end }, { __index = _G })
+    local localized = {}
+    H.Load(localized, "Core/Bootstrap.lua", env)
+    H.Load(localized, "Core/Util.lua", env)
+    H.Load(localized, "Core/Codec.lua", env)
+    local data = { scale = 1.25, range = 17.5, small = -1.25e-100 }
+    local encoded = assert(C.Encode(data))
+    H.Equal(localized.Codec.Encode(data), encoded)
+    local decoded = assert(localized.Codec.Decode(encoded))
+    H.Equal(decoded.scale, data.scale)
+    H.Equal(decoded.range, data.range)
+    H.Equal(decoded.small, data.small)
+end)
+
 H.Test("codec rejects corrupt, truncated, trailing and executable imports", function()
     local C = addon().Codec
     local good = assert(C.Encode({ enabled = true }))
