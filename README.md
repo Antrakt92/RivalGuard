@@ -28,8 +28,9 @@ see how your current profile would handle that new sighting in the open world.
 
 - **Nearby:** view current sightings and distinguish them from recently seen
   players. Left-click a visible player to show a direction arrow above Nearby.
-  The same click attempts to target the player outside combat. On Forever it
-  also attempts a skull marker on an unmarked, confirmed target. Click **Note**
+  Outside combat, the same click attempts to target the player when the game
+  supplies their complete name. On Forever it also attempts a skull marker
+  on an unmarked, confirmed target. Click **Note**
   to edit a note under a player. Right-click a row for additional options.
   **Why?** checks what the current settings would do for a new sighting and
   shows the matching rule, fresh distance, applicable global and rule limits,

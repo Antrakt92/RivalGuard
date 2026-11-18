@@ -127,7 +127,8 @@ local function classColor(token)
 end
 
 local function paintNearbyRow(row, data, index, profile, inset)
-    if row.contact and (not data or row.contact.id ~= data.contact.id or row.nameText.paintedText ~= data.name) then
+    local previous = row.contact
+    if previous and (not data or previous.id ~= data.contact.id or row.nameText.paintedText ~= data.name) then
         hideOwnedTooltip(row)
     end
     row.contact = data and data.contact or nil
@@ -639,17 +640,24 @@ function UI.New(app)
     inlineInput:SetAutoFocus(false); inlineInput:SetMaxLetters(512)
     if inlineInput.SetMaxBytes then inlineInput:SetMaxBytes(512) end
     local inlineDraft, inlineRow
+    local function detachInlineNote()
+        if not inlineRow then return end
+        inlineRow = nil
+        inlineNote:Hide()
+        inlineInput:ClearFocus()
+    end
     local function closeInlineNote()
         if not inlineDraft then return end
-        inlineDraft, inlineRow = nil, nil
-        inlineNote:Hide()
-        inlineInput:ClearFocus(); inlineInput:SetText("")
+        inlineDraft = nil
+        detachInlineNote()
+        inlineInput:SetText("")
     end
     local function saveInlineNote()
-        if not inlineDraft or self:Profile().display.streamer then return end
-        local contact = inlineRow and inlineRow.contact
+        if not inlineDraft or not inlineRow or self:Profile().display.streamer then return end
+        local contact = inlineRow.contact
         local _, key = listEntry(contact)
-        if not contact or contact.id ~= inlineDraft.id or key ~= inlineDraft.key then
+        if not contact or contact.id ~= inlineDraft.id or M.EditableIdentity(contact) ~= inlineDraft.identity
+            or key ~= inlineDraft.key then
             closeInlineNote(); self:Refresh(); notify("identityUnknown")
             return
         end
@@ -676,8 +684,14 @@ function UI.New(app)
         if entering and row.contact then tooltip(row, row.nameText:GetText(), self:T("rowHint"))
         else hideOwnedTooltip(row) end
     end
+    local function scrollNearby(delta)
+        if not body:IsShown() then return end
+        local count = self.renderedCount or 0
+        self.offset = math.max(0, math.min(math.max(0, count - self:Profile().display.maxRows), self.offset - delta))
+        self:Refresh()
+    end
     if RG.NearbyTarget and app.NearbyTarget then
-        self.nearbyTarget = RG.NearbyTarget.New(app, main, function(contact) self:Select(contact) end, hoverNearbyRow)
+        self.nearbyTarget = RG.NearbyTarget.New(app, main, function(contact) self:Select(contact) end, hoverNearbyRow, scrollNearby)
     end
     for i = 1, 20 do
         local row = CreateFrame("Button", nil, body)
@@ -739,12 +753,7 @@ function UI.New(app)
     demoButton:SetPoint("LEFT", muteButton, "RIGHT", 5, 0)
     demoButton:SetScript("OnEnter", function() tooltip(demoButton, self:T("demo"), self:T("demoTip")) end)
     demoButton:SetScript("OnLeave", hideTooltip)
-    main:SetScript("OnMouseWheel", function(_, delta)
-        if not body:IsShown() then return end
-        local count = self.renderedCount or 0
-        self.offset = math.max(0, math.min(math.max(0, count - self:Profile().display.maxRows), self.offset - delta))
-        self:Refresh()
-    end)
+    main:SetScript("OnMouseWheel", function(_, delta) scrollNearby(delta) end)
 
     local banner = self:Window("RivalGuardAlert", UIParent)
     self.banner = banner
@@ -1496,9 +1505,9 @@ function UI.New(app)
         if paged then
             livePage, nearbyCount, nearbyVisible, self.offset, nearbyIds = app.engine:NearbyPage(self.offset, maxRows, profile.display.streamer)
         end
+        if compact or preview or not profile.enabled or not profile.display.showList or profile.display.streamer then closeInlineNote() end
         local expanded = not compact and (preview == true or moving or (profile.display.showList
-            and (nearbyOpened or inlineDraft ~= nil or profile.display.showEmpty or (nearbyVisible or 0) > 0)))
-        if not expanded or preview or profile.display.streamer then closeInlineNote() end
+            and (nearbyOpened or inlineRow ~= nil or profile.display.showEmpty or (nearbyVisible or 0) > 0)))
         local untilTime = M.Number(app.engine.pausedUntil)
         local paused = untilTime ~= nil and untilTime > now
         local supportShown = settings:IsShown() and self.currentPage == "support"
@@ -1541,11 +1550,12 @@ function UI.New(app)
                 for i = 1, math.min(shownRows, #rows - rowOffset) do
                     local contact = rows[rowOffset + i].contact
                     if contact.id == inlineDraft.id and M.EditableIdentity(contact) == inlineDraft.identity then
-                        noteIndex = i
+                        local _, key = listEntry(contact)
+                        if key == inlineDraft.key then noteIndex = i else closeInlineNote() end
                         break
                     end
                 end
-                if not noteIndex then closeInlineNote() end
+                if not noteIndex then detachInlineNote() end
             end
             local mainHeight = UI.layout.header + shownRows * rowHeight + UI.layout.footer
             fitNearby(UI.layout.width, mainHeight + (noteIndex and inlineNoteHeight or 0), profile)
@@ -1574,6 +1584,7 @@ function UI.New(app)
                 empty:SetText(self:T(titleKey)); emptyHelp:SetText(self:T(helpKey))
             end
         else
+            detachInlineNote()
             if compact then fitNearby(112, 28, profile) end
             self.visibleCount = app.engine:CountVisible()
             self.renderedCount = 0

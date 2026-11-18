@@ -55,6 +55,47 @@ local function resizeViewport(state, width, height)
     parent:SetSize(width / scale, height / scale)
 end
 
+H.Test("Nearby retains an inline note while paging without writing to a reused row", function()
+    local _, _, app, ui = setup()
+    app.db:GetProfile().display.maxRows = 3
+    for index = 1, 4 do
+        app.engine:Observe({ token = "nameplate" .. index, guid = "Player-InlineNote" .. index,
+            name = "Rival" .. index, realm = "Realm", class = "ROGUE", hostile = true,
+            isPlayer = true, source = "nameplate" })
+    end
+    ui:Refresh()
+    local row, editor = ui.rows[1], ui.nearbyNote
+    local original = row.contact.identity
+    row.noteButton:Click()
+    H.True(editor:IsVisible())
+    editor.input:SetText("Draft to keep while paging")
+    ui.frame.scripts.OnMouseWheel(ui.frame, -1)
+    local replacement = row.contact.identity
+    H.True(replacement ~= original)
+    H.False(editor:IsVisible())
+    H.False(editor.input:HasFocus())
+    editor.save:Click()
+    H.Nil(app.db:GetList()[replacement])
+    H.Nil(app.db:GetList()[original])
+
+    ui.frame.scripts.OnMouseWheel(ui.frame, 1)
+    H.True(editor:IsVisible())
+    H.Equal(row.contact.identity, original)
+    H.Equal(editor.input:GetText(), "Draft to keep while paging")
+    editor.save:Click()
+    H.Equal(app.db:GetList()[original].note, "Draft to keep while paging")
+    H.Nil(app.db:GetList()[replacement])
+    row.noteButton:Click()
+    editor.input:SetText("Discard on collapse")
+    ui.frame.scripts.OnMouseWheel(ui.frame, -1)
+    ui.nearbyCollapseButton:Click()
+    ui.nearbyExpandButton:Click()
+    ui.frame.scripts.OnMouseWheel(ui.frame, 1)
+    H.False(editor:IsVisible())
+    row.noteButton:Click()
+    H.Equal(editor.input:GetText(), "Draft to keep while paging")
+end)
+
 local function compactViewport(state)
     state.api.UIParent:SetScale(1.35)
     resizeViewport(state, 640, 480)
