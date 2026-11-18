@@ -181,6 +181,57 @@ H.Test("range metadata invalidation is coalesced and never rescans absent APIs p
     H.Equal(calls.scan, 2); H.False(range.dirty)
 end)
 
+H.Test("range recovers a temporarily unreadable spellbook without another invalidation event", function()
+    local range, _, api, answers, _, calls, setTime, secret = fixture({ { id = 20, min = 0, max = 20 } })
+    local lineCount = api.C_SpellBook.GetNumSpellBookSkillLines
+    local ready = false
+    api.C_SpellBook.GetNumSpellBookSkillLines = function()
+        if ready then return lineCount() end
+        calls.scan = calls.scan + 1
+        return secret
+    end
+    answers[20] = true
+    local low, high = range:Measure("target", "Player-A")
+    H.Nil(low); H.Nil(high)
+    H.Equal(calls.scan, 1)
+
+    setTime(0.5)
+    for _ = 1, 12 do range:Measure("target", "Player-A") end
+    H.Equal(calls.scan, 1)
+
+    ready = true
+    setTime(1)
+    low, high = range:Measure("target", "Player-A")
+    H.Equal(calls.scan, 2)
+    H.Equal(low, 0); H.Equal(high, 20)
+
+    range:Invalidate()
+    ready = false
+    setTime(2)
+    low, high = range:Measure("target", "Player-A")
+    H.Nil(low); H.Nil(high)
+    H.Equal(calls.scan, 3)
+    H.Equal(calls.checks, 1)
+end)
+
+H.Test("a missing range clock cannot spin rebuilds and can recover together with the spellbook", function()
+    local range, _, api, answers, _, calls, setTime = fixture({ { id = 20, min = 0, max = 20 } })
+    local lineCount = api.C_SpellBook.GetNumSpellBookSkillLines
+    api.C_SpellBook.GetNumSpellBookSkillLines = function() calls.scan = calls.scan + 1 end
+    answers[20] = true
+    setTime(nil)
+    for _ = 1, 12 do
+        local low, high = range:Measure("target", "Player-A")
+        H.Nil(low); H.Nil(high)
+    end
+    H.Equal(calls.scan, 1)
+    api.C_SpellBook.GetNumSpellBookSkillLines = lineCount
+    setTime(1)
+    local low, high = range:Measure("target", "Player-A")
+    H.Equal(low, 0); H.Equal(high, 20)
+    H.Equal(calls.scan, 2)
+end)
+
 H.Test("range skips unknown passive future offspec helpful and invalid spells", function()
     local range = fixture({
         { id = 1, min = 0, max = 40, unknown = true }, { id = 2, min = 0, max = 40, passive = true },

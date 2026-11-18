@@ -17,7 +17,7 @@ local MAX_ACTIVE = 128
 local MAX_PLATES = MAX_ACTIVE - RG.Util.Count(DIRECT)
 local POLL_SECONDS = 0.25
 local PLATE_PHASES = 4
-local PLATE_RETRY_POLLS = 3
+local PLATE_RETRY_ATTEMPTS = 3
 local PLATE_AURA_LOOKUPS = 16
 local DIRECT_AURA_LOOKUPS = 4
 local PLATE_EVENTS = { NAME_PLATE_UNIT_ADDED = true, NAME_PLATE_UNIT_REMOVED = true }
@@ -84,7 +84,7 @@ function Sensors:Observe(token, source, behindCamera, event, auraUpdate)
         self:Remove(token)
         if not DIRECT[token] and RG.Util.Count(self.plateRetries) < MAX_PLATES then
             local frame = self.client:Nameplate(token)
-            if frame then self.plateRetries[token] = { frame = frame, pollsLeft = PLATE_RETRY_POLLS } end
+            if frame then self.plateRetries[token] = { frame = frame, attemptsLeft = PLATE_RETRY_ATTEMPTS } end
         end
         return
     end
@@ -205,17 +205,19 @@ end
 
 function Sensors:RecoverPlates(budget)
     for token, retry in pairs(self.plateRetries) do
-        retry.pollsLeft = retry.pollsLeft - 1
-        if budget > 0 and self.plateCount < MAX_PLATES then
-            budget = budget - 1
-            if not rawequal(self.client:Nameplate(token), retry.frame) then
-                self.plateRetries[token] = nil
+        if budget == 0 or self.plateCount >= MAX_PLATES then break end
+        budget = budget - 1
+        if not rawequal(self.client:Nameplate(token), retry.frame) then
+            self.plateRetries[token] = nil
+        else
+            local obs = self:ReadUnit(token, "nameplate")
+            if obs then
+                self:Record(obs)
             else
-                local obs = self:ReadUnit(token, "nameplate")
-                if obs then self:Record(obs) end
+                retry.attemptsLeft = retry.attemptsLeft - 1
+                if retry.attemptsLeft == 0 then self.plateRetries[token] = nil end
             end
         end
-        if retry.pollsLeft == 0 then self.plateRetries[token] = nil end
     end
     return budget
 end

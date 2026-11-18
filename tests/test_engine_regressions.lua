@@ -30,6 +30,63 @@ local function selectLikeSnapshot(engine, id, identity)
     return selected
 end
 
+H.Test("a returning rival can qualify on a later range sample without a second sighting", function()
+    local engine, observe, clock, alerts, encounters = fixture()
+    engine.profile.range = { enabled = true, unknown = false, yards = 20, policy = "confirmed" }
+    local token = "nameplate1"
+    local function at(distance)
+        observe(token, { guid = "Player-RangeReturn", name = "Rival", class = "ROGUE",
+            rangeMin = distance, rangeMax = distance, rangeEvidence = "exact" })
+    end
+    at(10)
+    clock.Advance(1); engine:Tick()
+    H.Equal(alerts[1].kind, "sighting")
+    engine:Remove(token)
+    clock.Advance(engine.profile.alerts.returnAfter + 1)
+    at(40)
+    clock.Advance(1); engine:Tick()
+    H.Equal(#alerts, 1)
+    at(10)
+    H.Equal(engine.pending[1].event, "returning")
+    at(40)
+    clock.Advance(1); engine:Tick()
+    H.Equal(#alerts, 1)
+    H.Equal(#engine.pending, 0)
+    at(10); at(10)
+    H.Equal(#engine.pending, 1)
+    H.Equal(engine.pending[1].event, "returning")
+    clock.Advance(1); engine:Tick()
+    H.Equal(#alerts, 2); H.Equal(alerts[2].kind, "returning")
+    clock.Advance(engine.profile.alerts.cooldown + 1)
+    at(10)
+    clock.Advance(1); engine:Tick()
+    H.Equal(#alerts, 2)
+    H.Equal(#encounters, 2)
+end)
+
+H.Test("ordinary arrival classification survives eviction during a blocked return", function()
+    local engine, observe, clock, alerts = fixture()
+    engine.profile.retention.maxContacts = 1
+    engine.profile.range = { enabled = true, unknown = false, yards = 20, policy = "confirmed" }
+    local token = "nameplate1"
+    local function at(distance)
+        return observe(token, { guid = "Player-RangeReturn", name = "Rival", class = "ROGUE",
+            rangeMin = distance, rangeMax = distance, rangeEvidence = "exact" })
+    end
+    at(10)
+    clock.Advance(1); engine:Tick(); engine:Remove(token)
+    clock.Advance(engine.profile.alerts.returnAfter + 1)
+    local blocked = at(40)
+    observe("nameplate2", { guid = "Player-Other", name = "Other", class = "ROGUE" })
+    H.Nil(engine.contacts[blocked.id])
+    local reacquired = at(10)
+    H.True(reacquired.id ~= blocked.id)
+    H.Equal(#engine.pending, 1)
+    H.Equal(engine.pending[1].event, "returning")
+    clock.Advance(1); engine:Tick()
+    H.Equal(#alerts, 2); H.Equal(alerts[2].kind, "returning")
+end)
+
 H.Test("only a complete verified name can replace contradictory life state without a GUID", function()
     local engine, observe = fixture()
     local initial = observe("nameplate1", { name = "Enemy", realm = "Realm", class = "ROGUE", dead = true })

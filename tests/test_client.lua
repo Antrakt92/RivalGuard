@@ -203,6 +203,30 @@ H.Test("client does not promote partial regional names or realm-like unknown suf
     H.Equal(obs.name, "Alpha"); H.False(obs.nameComplete); H.Nil(obs.realm)
 end)
 
+H.Test("exact targeting reads a verified regional surname without changing list identity", function()
+    local client, api, _, secret = fixture()
+    H.Equal(client:ExactTargetName("target"), "Alpha-Realm")
+    client.interface = 16001
+    api.RegionalUniqueNamesEnabled = function() return true end
+    api.UnitNameUnmodified = function() return "Альфа", "Фамилия" end
+    H.Nil(client:ExactTargetName("target"))
+    api.NameUtil = { GetUnmodifiedUnitFullName = function() return "Альфа Фамилия" end }
+    H.Equal(client:ExactTargetName("target"), "Альфа Фамилия")
+    local name, realm, complete = client:Names("target")
+    H.Equal(name, "Альфа"); H.Nil(realm); H.False(complete)
+
+    api.NameUtil.GetUnmodifiedUnitFullName = function() return secret end
+    api.Constants = { CharacterNameSeparatorConsts = { CHARACTERNAME_SURNAME_SEPARATOR = " " } }
+    H.Equal(client:ExactTargetName("target"), "Альфа Фамилия")
+    api.UNKNOWNOBJECT = "Неизвестно"
+    api.UnitNameUnmodified = function() return "Альфа", api.UNKNOWNOBJECT end
+    H.Nil(client:ExactTargetName("target"))
+    api.UnitNameUnmodified = function() return "Альфа", secret end
+    H.Nil(client:ExactTargetName("target"))
+    api.UnitNameUnmodified = function() return "Альфа Фамилия", "BackendRealm" end
+    H.Equal(client:ExactTargetName("target"), "Альфа Фамилия")
+end)
+
 H.Test("client retail names require readable realm evidence for durable fallback identity", function()
     local client, api, unit, secret = fixture()
     local obs = client:ReadUnit("target", "poll")

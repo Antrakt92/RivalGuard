@@ -143,6 +143,14 @@ function Client:VisibleEnemyPlate(token, guid)
     return frame
 end
 
+local function surnameSeparator(client)
+    local api = client.api
+    local constants = api.Constants and api.Constants.CharacterNameSeparatorConsts
+    local separator = constants and client:Clean(constants.CHARACTERNAME_SURNAME_SEPARATOR)
+    if type(separator) == "string" and #separator >= 1 and #separator <= 8
+        and not separator:find("[%z\1-\31\127|]") then return separator end
+end
+
 function Client:Names(token)
     local api = self.api
     local regional = self:Boolean(self:Safe(api.RegionalUniqueNamesEnabled))
@@ -155,11 +163,9 @@ function Client:Names(token)
         return first, second
     end
     if regional then
-        -- Camelot NameUtil splits the first UnitName result at the surname
-        -- separator. The second result identifies the server.
-        local constants = api.Constants and api.Constants.CharacterNameSeparatorConsts
-        local separator = constants and self:Clean(constants.CHARACTERNAME_SURNAME_SEPARATOR)
-        if type(separator) ~= "string" or #separator < 1 or #separator > 8 or separator:find("[%z\1-\31\127|]") then separator = " " end
+        -- For existing list identities, only promote a surname already
+        -- contained in the returned name.
+        local separator = surnameSeparator(self) or " "
         local partial
         for _, key in ipairs({ "UnitNameUnmodified", "UnitName" }) do
             local first = parts(api[key])
@@ -199,6 +205,39 @@ function Client:Names(token)
         end
     end
     return partial, nil, false
+end
+
+function Client:ExactTargetName(token)
+    token = self:IsToken(token)
+    if not token then return nil end
+    local name, _, complete = self:Names(token)
+    if complete then return name end
+    local api = self.api
+    if self.interface ~= 16001 or self:Boolean(self:Safe(api.RegionalUniqueNamesEnabled)) ~= true then return nil end
+
+    local separator = surnameSeparator(self)
+    local native = type(api.NameUtil) == "table" and api.NameUtil.GetUnmodifiedUnitFullName
+    local full = self:Text(self:Safe(native, token), 160)
+    local unknown = self:Text(api.UNKNOWNOBJECT, 100)
+    local function known(part)
+        return part and part ~= "Unknown" and part ~= unknown
+    end
+    local delimiter = separator or " "
+    if full then
+        local firstEnd, lastStart = full:find(delimiter, 1, true)
+        if firstEnd and lastStart and known(self:Text(full:sub(1, firstEnd - 1), 160))
+            and known(self:Text(full:sub(lastStart + 1), 96)) then return full end
+    end
+
+    -- Combine two bare fields only if Camelot's own separator is available.
+    if not separator then return nil end
+    for _, key in ipairs({ "UnitNameUnmodified", "UnitName" }) do
+        local first, surname = self:Safe(api[key], token)
+        first, surname = self:Text(first, 160), self:Text(surname, 96)
+        if known(first) and known(surname) then
+            return self:Text(first .. separator .. surname, 160)
+        end
+    end
 end
 
 function Client:Range(token, identity)
@@ -328,14 +367,18 @@ function Client:ReadUnit(token, source, checkRequalifiedAura, auraUpdate, auraOw
         self:Range(token, rangeOwner)
     -- Acquisition, aura events and the first clean return to eligibility may
     -- reveal an aura that will not emit a separate update for this token.
-    if (checkRequalifiedAura and player == true and hostile == true)
-        or (source ~= "poll" and source ~= "unit" and source ~= "cast") then
+    local ownerChanged = auraOwner and
+        ((auraOwner.guid and guid and auraOwner.guid ~= guid)
+            or ((not auraOwner.guid or not guid) and auraOwner.name and nameComplete and auraOwner.name ~= name))
+    local eligible = player == true and hostile == true
+    local readForAcquisition = eligible and (checkRequalifiedAura or ownerChanged)
+    if readForAcquisition or (source ~= "poll" and source ~= "unit" and source ~= "cast") then
         -- An event can arrive while a token changes owners. Only a current
         -- indexed read can establish presence when ownership changed.
         local sameOwner = auraOwner and ((auraOwner.guid and auraOwner.guid == guid)
             or (not auraOwner.guid and auraOwner.name and nameComplete and auraOwner.name == name))
         if not sameOwner then auraUpdate = nil end
-        local acquiring = player == true and hostile == true and (checkRequalifiedAura or source ~= "aura")
+        local acquiring = eligible and (readForAcquisition or source ~= "aura")
         observation.stealth, observation.stealthReadable, observation.deferredAuraLookup =
             self:Stealth(token, auraUpdate, acquiring, auraBudget)
     end

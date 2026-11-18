@@ -69,25 +69,27 @@ end
 
 function Range:Rebuild(now)
     if not self.dirty then return true end
-    if now and self.lastBuild and now >= self.lastBuild and now - self.lastBuild < 1 then return false end
+    if self.waitingForClock and not now then return false end
+    if self.lastBuild and (not now or (now >= self.lastBuild and now - self.lastBuild < 1)) then return false end
     self.dirty, self.lastBuild, self.bands = false, now, {}
+    self.waitingForClock = nil
     self.reader:Count("range_rebuilds")
+    if not self:Available() then return true end
     local api, read = self.api, self.reader
     local book, spells = api.C_SpellBook, api.C_Spell
-    local enum = api.Enum
-    local bank = enum and enum.SpellBookSpellBank and enum.SpellBookSpellBank.Player
-    local spellType = enum and enum.SpellBookItemType and enum.SpellBookItemType.Spell
-    bank, spellType = read:Number(bank), read:Number(spellType)
-    if type(book) ~= "table" or type(spells) ~= "table" or not bank or not spellType
-        or type(book.GetNumSpellBookSkillLines) ~= "function" or type(book.GetSpellBookSkillLineInfo) ~= "function"
-        or type(book.GetSpellBookItemInfo) ~= "function" or type(book.IsSpellKnown) ~= "function"
-        or type(spells.GetSpellInfo) ~= "function" or type(spells.IsSpellHarmful) ~= "function" then return true end
+    local bank, spellType = read:Number(api.Enum.SpellBookSpellBank.Player), read:Number(api.Enum.SpellBookItemType.Spell)
+    if not bank or not spellType then return true end
     self.bank = bank
     local lines = read:Number(read:Safe(book.GetNumSpellBookSkillLines))
-    if not lines or lines < 0 or lines > 128 then return true end
+    if not lines or lines < 0 or lines > 128 or lines % 1 ~= 0 then
+        -- A present API can be temporarily unreadable. Retry when a clean
+        -- clock can bound rescans, without using the invalidated spellbook.
+        self.dirty, self.waitingForClock = true, now == nil
+        return false
+    end
     local visited, candidates, seen = 0, 0, {}
     local catalog, byMaximum = {}, {}
-    for lineIndex = 1, math.floor(lines) do
+    for lineIndex = 1, lines do
         local line = read:Safe(book.GetSpellBookSkillLineInfo, lineIndex)
         local offset = read:Number(self:Field(line, "itemIndexOffset"))
         local count = read:Number(self:Field(line, "numSpellBookItems"))
@@ -126,7 +128,7 @@ function Range:Rebuild(now)
         if visited >= MAX_SLOTS or candidates >= MAX_SPELLS then break end
     end
     self.bands = selectBands(catalog)
-    self.slotCount, self.spellCount = visited, candidates
+    self.slotCount = visited
     return true
 end
 

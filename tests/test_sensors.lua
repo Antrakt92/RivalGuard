@@ -46,6 +46,46 @@ local function player(name, guid)
     return { name = name or "Alpha", guid = guid or "Player-A", class = "ROGUE" }
 end
 
+for _, signal in ipairs({ "poll", "UNIT_AURA" }) do
+    H.Test("a recycled nameplate acquires its new owner's readable stealth on " .. signal, function()
+        local W = assert(loadfile(H.root .. "/tests/support/wow.lua"))()
+        local state = W.New()
+        local secret = H.Secret("restricted indexed aura")
+        local positive, exactReads = false, 0
+        state.api.GetBuildInfo = function() return "Forever", "", "", 16001 end
+        state.api.C_UnitAuras = {
+            GetAuraDataByIndex = function() return secret end,
+            GetUnitAuraBySpellID = function(token, spellID)
+                if token == "nameplate1" then exactReads = exactReads + 1 end
+                if token == "nameplate1" and positive and spellID == 1784 then
+                    return { isHelpful = true, spellId = spellID }
+                end
+            end,
+        }
+        local RG = state:LoadTOC()
+        state:Fire("ADDON_LOADED", "RivalGuard")
+        local app = RG.instance
+        state:Unit("nameplate1", player("Old owner", "Player-Previous"))
+        state:Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+        positive, exactReads = true, 0
+        state:Unit("nameplate1", player("New owner", "Player-Replacement"))
+        if signal == "poll" then
+            app.sensors:Poll()
+        else
+            -- This addition is untrusted after the GUID change. Only exact
+            -- evidence from the current unit may establish its own stealth.
+            state:Fire("UNIT_AURA", "nameplate1", { addedAuras = { { isHelpful = true, spellId = 1856 } } })
+        end
+        local contact = app.engine:Snapshot()[1]
+        H.Equal(contact.identity, "guid:Player-Replacement")
+        H.Equal(contact.stealthEvidence, "aura")
+        H.True(exactReads > 0)
+        local acquiredReads = exactReads
+        app.sensors:Poll()
+        H.Equal(exactReads, acquiredReads)
+    end)
+end
+
 H.Test("event observations sample context once while polls share one snapshot", function()
     local sensors, units, _, _, casts, _, _, api, _, _, engine = fixture()
     local reads = 0
@@ -122,7 +162,18 @@ H.Test("retry capacity cannot increase the current poll plate-read budget", func
     for _ = 1, 3 do sensors:Poll(true) end
     H.Equal(activeReads, 124 * 3)
     H.Equal(recoveredReads, 1)
-    H.Nil(next(sensors.plateRetries))
+    H.True(sensors.plateRetries.nameplate999 ~= nil)
+
+    units.nameplate999 = player("Recovered rival", "Player-Recovered")
+    units.nameplate1 = nil
+    sensors:OnEvent("NAME_PLATE_UNIT_REMOVED", "nameplate1")
+    activeReads = 0
+    sensors:Poll(true)
+    H.Equal(activeReads, 123)
+    H.Equal(recoveredReads, 2)
+    H.Equal(sensors.plateCount, 124)
+    H.True(sensors.active.nameplate999 ~= nil)
+    H.Nil(sensors.plateRetries.nameplate999)
 end)
 
 H.Test("a crowded acquisition limits exact aura reads and promptly revisits current occupants", function()

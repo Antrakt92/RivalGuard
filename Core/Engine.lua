@@ -70,7 +70,7 @@ function E.New(config)
         retailStealth = config.retailStealth == true,
         onEncounter = config.onEncounter, onChange = config.onChange, onAlertsBlocked = config.onAlertsBlocked,
         onIdentityResolved = config.onIdentityResolved,
-        contacts = {}, identities = {}, nameOwners = {}, bindings = {}, tokenSerial = 0, contactCount = 0,
+        contacts = {}, identities = {}, nameOwners = {}, bindings = {}, contactCount = 0,
         pending = {}, history = {}, cooldowns = {}, snoozes = {}, serial = 0, sequence = 0,
         evictedEncounters = {}, evictionSlots = {}, evictionCursor = 0,
         counters = { observations = 0, alerts = 0, suppressed = 0, evicted = 0, queueOverflow = 0, rangeAliasConflicts = 0 },
@@ -310,8 +310,12 @@ local function strongerContactAlert(a, b)
     return difference > 0
 end
 
+local function arrivalEvent(event)
+    return event == "sighting" or event == "returning"
+end
+
 local function ordinaryAlert(decision)
-    return decision.priority < URGENT_PRIORITY and (decision.kind == "sighting" or decision.kind == "returning")
+    return decision.priority < URGENT_PRIORITY and arrivalEvent(decision.kind)
 end
 
 local function pendingDecision(engine, item, contact, now, scheduled)
@@ -357,7 +361,6 @@ function E:Queue(contact, event)
     if self.pendingNameChanges and self.pendingNameChanges[contact.id] then self:RevalidateContactPending(contact, now) end
     if self:SnoozedUntil(contact) then return blockQueue(self, "contact_snoozed") end
     local decision, reason = self:Explain(contact, event, now)
-    contact.lastReason = reason or (decision and decision.reason)
     if not decision then
         self.counters.suppressed = self.counters.suppressed + 1
         return blockQueue(self, reason or "unknown")
@@ -366,7 +369,6 @@ function E:Queue(contact, event)
     local key = contact.id .. ":" .. (decision.dedupKey or decision.kind)
     local cooldown = self.cooldowns[key]
     if cooldown and now - cooldown < decision.cooldown then
-        contact.lastReason = "cooldown"
         return blockQueue(self, "cooldown")
     end
     for _, item in ipairs(self.pending) do
@@ -387,14 +389,14 @@ function E:Queue(contact, event)
         local item = self.pending[index]
         if item.id == contact.id and now - item.at <= self.profile.alerts.waveWindow
             and Rules.CompareAlertPriority(decision, item.decision, true) > 0 then
-            if item.event == "sighting" then contact.arrivalQueued = false end
+            if arrivalEvent(item.event) then contact.arrivalQueued = false end
             coversTargeting = coversTargeting or item.event == "targeting" or item.coversTargeting
             table.remove(self.pending, index)
         end
     end
     self.sequence = self.sequence + 1
     local item = { id = contact.id, event = event, decision = decision, at = now, sequence = self.sequence,
-        revision = self.revision, coversTargeting = coversTargeting }
+        coversTargeting = coversTargeting }
     if event == "stealth" then
         item.stealthEvidence, item.stealthSpell = contact.stealthEvidence, contact.stealthSpell
     end
@@ -413,7 +415,7 @@ function E:Queue(contact, event)
         local dropped = table.remove(self.pending, weakest)
         self.counters.queueOverflow = self.counters.queueOverflow + 1
         local owner = self.contacts[dropped.id]
-        if owner and dropped.event == "sighting" then owner.arrivalQueued = false end
+        if owner and arrivalEvent(dropped.event) then owner.arrivalQueued = false end
         return dropped ~= item
     end
     return true
@@ -614,7 +616,7 @@ function E:CoalesceContactPending(contact)
             if discard[self.pending[index]] then table.remove(self.pending, index) end
         end
         contact.arrivalQueued = false
-        for _, item in ipairs(kept) do if item.event == "sighting" then contact.arrivalQueued = true break end end
+        for _, item in ipairs(kept) do if arrivalEvent(item.event) then contact.arrivalQueued = true break end end
     end
 end
 
@@ -635,6 +637,7 @@ function E:ResetReturningEncounter(contact, now)
     contact.hasReturned = true
     contact.encounterAt = now
     contact.encounterRecorded = false
+    contact.arrivalNotified, contact.notifiedClass = nil, nil
     contact.targetingNotified = nil
     contact.soundOutcome = nil
     contact.stealth, contact.stealthAt, contact.stealthEvidence, contact.stealthSpell = nil, nil, nil, nil
@@ -723,8 +726,7 @@ function E:Observe(raw)
         clearOlderTargeting = obs.targetEvent and obs.targeting == false
     end
     if not binding or binding.id ~= contact.id then
-        self.tokenSerial = self.tokenSerial + 1
-        self.bindings[obs.token] = { id = contact.id, generation = self.tokenSerial, source = obs.source }
+        self.bindings[obs.token] = { id = contact.id, source = obs.source }
     end
     contact.tokens[obs.token] = true
     local currentBinding = self.bindings[obs.token]
@@ -763,9 +765,9 @@ function E:Observe(raw)
     end
     self:RecordEncounter(contact, now)
     if returning then
-        self:Queue(contact, "returning")
-    elseif not contact.hasReturned and not contact.arrivalNotified and not contact.arrivalQueued then
-        contact.arrivalQueued = self:Queue(contact, "sighting")
+        contact.arrivalQueued = self:Queue(contact, "returning")
+    elseif not contact.arrivalNotified and not contact.arrivalQueued then
+        contact.arrivalQueued = self:Queue(contact, contact.hasReturned and "returning" or "sighting")
     end
     if not oldClass and contact.class and contact.arrivalNotified and not contact.notifiedClass then self:Queue(contact, "identified") end
     if contact.stealth and not oldStealth then self:Queue(contact, "stealth") end
@@ -933,7 +935,7 @@ function E:Tick()
         local contact = self.contacts[item.id]
         if age > MAX_PENDING_AGE or Rules.ContactBlock(contact)
             or (refreshRange and not refreshPendingDecision(self, item, contact, now)) then
-            if contact and item.event == "sighting" then contact.arrivalQueued = false end
+            if contact and arrivalEvent(item.event) then contact.arrivalQueued = false end
         else
             if ordinaryAlert(item.decision) then
                 if not firstOrdinaryAt or item.at - firstOrdinaryAt > waveWindow then firstOrdinaryAt = item.at end
@@ -975,7 +977,7 @@ function E:Tick()
                 contact.arrivalNotified, contact.arrivalQueued = true, false
                 if contact.class then contact.notifiedClass = contact.class end
             end
-        elseif contact and item.event == "sighting" then
+        elseif contact and arrivalEvent(item.event) then
             contact.arrivalQueued = false
         end
     end
@@ -1140,7 +1142,7 @@ function E:RevalidatePending()
     self.pendingNameChanges = nil
     for _, contact in pairs(self.contacts) do contact.arrivalQueued = false end
     for _, item in ipairs(kept) do
-        if item.event == "sighting" then self.contacts[item.id].arrivalQueued = true end
+        if arrivalEvent(item.event) then self.contacts[item.id].arrivalQueued = true end
     end
 end
 
@@ -1162,7 +1164,7 @@ function E:RevalidateContactPending(contact, now)
         if item.id == contact.id then
             if not refreshPendingDecision(self, item, contact, now) then
                 table.remove(self.pending, index)
-            elseif item.event == "sighting" then
+            elseif arrivalEvent(item.event) then
                 contact.arrivalQueued = true
             end
         end
