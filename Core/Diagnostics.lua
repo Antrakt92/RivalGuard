@@ -4,7 +4,7 @@ local Diag = RG.Register("Diagnostics", {})
 Diag.__index = Diag
 
 function Diag.New(clock)
-    return setmetatable({ clock = clock or function() return 0 end, counts = {}, errors = {}, lastError = {}, started = 0 }, Diag)
+    return setmetatable({ clock = clock or function() return 0 end, counts = {}, errors = {}, lastError = {} }, Diag)
 end
 
 local function code(value)

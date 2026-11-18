@@ -50,10 +50,10 @@ def main():
     report = {
         "timestampUTC": datetime.now(timezone.utc).isoformat(),
         "scope": "Synthetic Engine Observe/Remove/Tick/Snapshot workload in standalone Lua 5.1",
-        "limitations": "Excludes native WoW API cost, native taint/secret behavior, rendering, game CPU contention and real player detection; no competitor comparison.",
+        "limitations": "The platform's Lua os.clock may measure CPU time or elapsed time. Compare timings on the same platform and runtime. The workload excludes game API cost, native taint and secret behavior, rendering, game CPU contention and real player detection.",
         "sourceSHA256": source_hash, "gitRevision": revision.stdout.strip() if revision.returncode == 0 else None,
         "trackedSourceDirty": bool(dirty.stdout.strip()), "seed": args.seed,
-        "medianCPUSeconds": statistics.median(sample["cpuSeconds"] for sample in samples),
+        "medianLuaClockSeconds": statistics.median(sample["luaClockSeconds"] for sample in samples),
         "samples": samples,
     }
     text = json.dumps(report, indent=2) + "\n"

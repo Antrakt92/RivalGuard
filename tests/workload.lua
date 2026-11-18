@@ -26,6 +26,7 @@ for index = 1, iterations do
     if index % 250 == 0 then peak = math.max(peak, collectgarbage("count")) end
 end
 local elapsed = os.clock() - started
+peak = math.max(peak, collectgarbage("count"))
 collectgarbage("collect")
 local retained = collectgarbage("count") - baseline
 local contacts, identities, pending, history = RG.Util.Count(engine.contacts), RG.Util.Count(engine.identities), #engine.pending, #engine.history
@@ -33,5 +34,5 @@ assert(contacts <= profile.retention.maxContacts and pending <= profile.retentio
 engine:Clear()
 collectgarbage("collect")
 local cleared = collectgarbage("count") - baseline
-io.write(string.format('{"iterations":%d,"cpuSeconds":%.6f,"microsecondsPerIteration":%.3f,"peakSampledKiBAboveBaseline":%.3f,"retainedKiBAboveBaseline":%.3f,"clearedKiBAboveBaseline":%.3f,"contacts":%d,"identities":%d,"pending":%d,"history":%d,"emitted":%d}\n',
+io.write(string.format('{"iterations":%d,"luaClockSeconds":%.6f,"luaClockMicrosecondsPerIteration":%.3f,"peakSampledKiBAboveBaseline":%.3f,"retainedKiBAboveBaseline":%.3f,"clearedKiBAboveBaseline":%.3f,"contacts":%d,"identities":%d,"pending":%d,"history":%d,"emitted":%d}\n',
     iterations, elapsed, elapsed * 1000000 / iterations, peak - baseline, retained, cleared, contacts, identities, pending, history, emitted))
